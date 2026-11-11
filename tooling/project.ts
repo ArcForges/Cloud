@@ -13,10 +13,11 @@ import { pageRoutes, surfaceRoutes } from "../worker/tables/center-tables.genera
 import { assertNotActivatedReply } from "./generated-replies.ts";
 import { sealedToolName } from "./sealed-tool.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
-import { auditProvenance } from "./provenance.ts";
+import { auditProvenance, readOwned } from "./provenance.ts";
 import {
   legalBundle,
   stageImageNotices,
+  verifyBridgeAsset,
   verifyImageProvenance,
   verifyStoredImage,
   verifyReleaseFiles,
@@ -801,6 +802,14 @@ async function main() {
     case "verify":
       await verifyCandidate();
       break;
+    case "verify-bridge-asset": {
+      const platform = process.argv[3];
+      assert(platform === "linux" || platform === "windows", "Unknown bridge platform");
+      const name = `arcforges-ctr06-bridge-8e5-${platform}-amd64.zip`;
+      const bytes = readOwned(root, `artifacts/ctr06-${platform}/${name}`);
+      verifyBridgeAsset(root, platform, bytes);
+      break;
+    }
     case "worker":
       await testWorker(await verifyCandidate());
       break;

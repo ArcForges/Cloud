@@ -28,6 +28,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/store"
+	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
 
 // The fleet admin commands (AF-CTR-04 E1a): the registration and retirement of the center's public signing keys (Q6: registration
@@ -112,6 +113,9 @@ func fleetAdmin(sub string, rest []string, lookup func(string) (string, bool), s
 		options.IsoLevel = pgx.ReadCommitted
 	}
 	err = pgx.BeginTxFunc(ctx, conn, options, func(tx pgx.Tx) error {
+		if err := migrate.RequireOrdinaryDatabase(ctx, tx, cfg.Database); err != nil {
+			return err
+		}
 		var err error
 		result, err = run(ctx, tx, now)
 		return err

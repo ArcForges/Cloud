@@ -742,7 +742,7 @@ const workflow = readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8
 
 function jobsOf(text: string): Map<string, string> {
   const after = text.split(/^jobs:\n/mu)[1] ?? "";
-  const parts = after.split(/^ {2}([a-z][a-z-]*):\n/mu);
+  const parts = after.split(/^ {2}([a-z][a-z0-9-]*):\n/mu);
   const jobs = new Map<string, string>();
   for (let index = 1; index + 1 < parts.length; index += 2)
     jobs.set(parts[index] ?? "", parts[index + 1] ?? "");
@@ -764,14 +764,16 @@ function condition(body: string): string | null {
 }
 
 function needsOf(body: string): string[] {
-  const listed = /^ {4}needs: \[(.*)\]$/mu.exec(body);
-  if (listed?.[1] !== undefined)
-    return listed[1]
-      .split(",")
-      .map((name) => name.trim())
-      .filter(Boolean);
-  const single = /^ {4}needs: ([a-z-]+)$/mu.exec(body);
-  return single?.[1] ? [single[1]] : [];
+  const listed = /^ {4}needs: *(?:\n {6})?\[([^\]\n]*)\]$/mu.exec(body);
+  if (listed?.[1] !== undefined) {
+    const names = listed[1].split(",").map((name) => name.trim());
+    assert.ok(names.length > 0 && names.every((name) => /^[a-z][a-z0-9-]*$/u.test(name)));
+    return names;
+  }
+  const single = /^ {4}needs: ([a-z][a-z0-9-]*)$/mu.exec(body);
+  if (single?.[1]) return [single[1]];
+  assert.doesNotMatch(body, /^ {4}needs:/mu, "unsupported needs syntax");
+  return [];
 }
 
 type Value = string | boolean;
@@ -781,6 +783,9 @@ interface Scenario {
   proof?: string;
   author?: string;
   failing?: string[];
+  skipped?: string[];
+  cancelled?: boolean;
+  assets?: { linux?: string; windows?: string };
 }
 
 /** A small evaluator of the expression subset ci.yml uses: ! && || == != ( ), 'strings', contexts and the status functions. */
@@ -854,12 +859,12 @@ function evaluate(
 }
 
 /** The jobs that run for a scenario (a job that runs succeeds unless the scenario names it as failing). */
-function running(scenario: Scenario): Map<string, string> {
+function running(scenario: Scenario, selectedJobs = jobs): Map<string, string> {
   const results = new Map<string, string>();
   const resolve = (name: string): string => {
     const known = results.get(name);
     if (known !== undefined) return known;
-    const body = jobs.get(name);
+    const body = selectedJobs.get(name);
     assert.ok(body !== undefined, `no job ${name}`);
     const needs = needsOf(body);
     const needed = needs.map(resolve);
@@ -870,13 +875,18 @@ function running(scenario: Scenario): Map<string, string> {
         return scenario.event === "workflow_dispatch" ? (scenario.proof ?? "none") : "";
       if (context === "github.event.pull_request.user.login")
         return scenario.event === "pull_request" ? (scenario.author ?? "") : "";
-      const need = /^needs\.([a-z-]+)\.result$/u.exec(context);
+      const need = /^needs\.([a-z][a-z0-9-]*)\.result$/u.exec(context);
       if (need?.[1] && needs.includes(need[1])) return resolve(need[1]);
+      const output = /^needs\.([a-z][a-z0-9-]*)\.outputs\.(linux|windows)-present$/u.exec(context);
+      if (output?.[1] === "ctr06-bridge-assets-state" && needs.includes(output[1])) {
+        if (resolve(output[1]) !== "success") return "";
+        return scenario.assets?.[output[2] as "linux" | "windows"] ?? "false";
+      }
       assert.fail(`${name}: unknown context ${context}`);
     };
     const status = (fn: string) => {
       if (fn === "always") return true;
-      if (fn === "cancelled") return false;
+      if (fn === "cancelled") return scenario.cancelled ?? false;
       if (fn === "success") return needed.every((result) => result === "success");
       if (fn === "failure") return needed.some((result) => result === "failure");
       assert.fail(`${name}: unknown function ${fn}`);
@@ -888,11 +898,16 @@ function running(scenario: Scenario): Map<string, string> {
       (explicit || needed.every((result) => result === "success")) &&
       (expression === null ||
         evaluate(expression.replace(/^\$\{\{|\}\}$/gu, ""), lookup, status) === true);
-    const result = runs ? (scenario.failing?.includes(name) ? "failure" : "success") : "skipped";
+    const result =
+      runs && !scenario.skipped?.includes(name)
+        ? scenario.failing?.includes(name)
+          ? "failure"
+          : "success"
+        : "skipped";
     results.set(name, result);
     return result;
   };
-  for (const name of jobs.keys()) resolve(name);
+  for (const name of selectedJobs.keys()) resolve(name);
   return new Map([...results].filter(([, result]) => result !== "skipped"));
 }
 
@@ -915,6 +930,20 @@ test("the proof deployment dispatch runs only the gate, the access job and the d
     ran({ event: "workflow_dispatch", ref: main, proof: "deploy", failing: ["proof-access"] }),
     ["proof-access", "proof-gate"],
   );
+  for (const job of ["proof-gate", "proof-access"]) {
+    assert.equal(
+      running({ event: "workflow_dispatch", ref: main, proof: "deploy", skipped: [job] }).has(
+        "deploy-proof",
+      ),
+      false,
+    );
+  }
+  assert.equal(
+    running({ event: "workflow_dispatch", ref: main, proof: "deploy", cancelled: true }).has(
+      "deploy-proof",
+    ),
+    false,
+  );
   const deploy = jobs.get("deploy-proof") ?? "";
   assert.ok(needsOf(deploy).includes("proof-gate"), "deploy-proof needs the gate");
   assert.match(condition(deploy) ?? "", /&& needs\.proof-gate\.result == 'success'/u);
@@ -927,8 +956,19 @@ test("the proof deployment dispatch runs only the gate, the access job and the d
 });
 
 test("every other event keeps its jobs: main push delivery, PR validation, schedule security, other dispatches", () => {
-  assert.deepEqual(ran({ event: "push", ref: main }), ["candidate", "deploy"]);
-  assert.deepEqual(ran({ event: "push", ref: main, failing: ["candidate"] }), ["candidate"]);
+  assert.deepEqual(ran({ event: "push", ref: main }), [
+    "candidate",
+    "ctr06-bridge-assets-state",
+    "ctr06-bridge-linux-asset",
+    "ctr06-bridge-windows-asset",
+    "deploy",
+  ]);
+  assert.deepEqual(ran({ event: "push", ref: main, failing: ["candidate"] }), [
+    "candidate",
+    "ctr06-bridge-assets-state",
+    "ctr06-bridge-linux-asset",
+    "ctr06-bridge-windows-asset",
+  ]);
   assert.deepEqual(
     ran({ event: "pull_request", ref: "refs/pull/1/merge", author: "dependabot[bot]" }),
     [...validation.slice(0, 2), "dependency-review", ...validation.slice(2)],
@@ -945,6 +985,173 @@ test("every other event keeps its jobs: main push delivery, PR validation, sched
       "proof-access",
       ...validation.slice(2),
     ]);
+});
+
+// The main-push gate is checked as a truth table, including the skipped jobs
+// deliberately produced when immutable release assets already exist.
+function assertBridgeDelivery(selectedJobs: Map<string, string>): void {
+  const state = "ctr06-bridge-assets-state";
+  const linux = "ctr06-bridge-linux-asset";
+  const windows = "ctr06-bridge-windows-asset";
+  const deployment = selectedJobs.get("deploy") ?? "";
+  assert.deepEqual(needsOf(deployment), ["candidate", state, linux, windows]);
+  assert.match(
+    condition(deployment) ?? "",
+    /needs\.ctr06-bridge-assets-state\.result == 'success'/u,
+  );
+  const base: Scenario = { event: "push", ref: main };
+  for (const [linuxPresent, windowsPresent] of [
+    ["false", "false"],
+    ["true", "false"],
+    ["false", "true"],
+    ["true", "true"],
+  ] as const) {
+    const result = running(
+      { ...base, assets: { linux: linuxPresent, windows: windowsPresent } },
+      selectedJobs,
+    );
+    assert.equal(result.get("deploy"), "success", `${linuxPresent}/${windowsPresent}`);
+    assert.equal(result.has(linux), linuxPresent === "false");
+    assert.equal(result.has(windows), windowsPresent === "false");
+  }
+  for (const job of ["candidate", state, linux, windows])
+    for (const outcome of ["failing", "skipped"] as const) {
+      const result = running({ ...base, [outcome]: [job] }, selectedJobs);
+      assert.equal(result.has("deploy"), false, `${job} ${outcome} must prevent deployment`);
+      assert.equal(result.get(job), outcome === "failing" ? "failure" : undefined);
+    }
+  for (const bad of ["", "unknown", "TRUE"])
+    for (const platform of ["linux", "windows"] as const) {
+      const result = running({ ...base, assets: { [platform]: bad } }, selectedJobs);
+      assert.equal(
+        result.has("deploy"),
+        false,
+        `${platform} output ${bad} must prevent deployment`,
+      );
+    }
+  const cancelled = running({ ...base, cancelled: true }, selectedJobs);
+  assert.equal(cancelled.has("deploy"), false);
+  assert.equal(cancelled.has(linux), false);
+  assert.equal(cancelled.has(windows), false);
+}
+
+function assertBridgeWorkflow(selectedJobs: Map<string, string>): void {
+  assertBridgeDelivery(selectedJobs);
+  const permissions = (body: string) => {
+    const value = /^ {4}permissions:\n((?: {6}.*\n)+)/mu.exec(body)?.[1];
+    assert.ok(value, "job permissions are explicit");
+    return value
+      .trim()
+      .split("\n")
+      .map((line) => line.trim())
+      .sort();
+  };
+  for (const job of [
+    "ctr06-bridge-assets-state",
+    "ctr06-bridge-linux-asset",
+    "ctr06-bridge-windows-asset",
+  ]) {
+    const body = selectedJobs.get(job) ?? "";
+    assert.deepEqual(permissions(body), ["contents: read"]);
+    assert.doesNotMatch(body, /secrets\.|environment:|id-token:|CLOUDFLARE|NEON/u);
+    assert.doesNotMatch(body, /continue-on-error:/u);
+  }
+  const deploy = selectedJobs.get("deploy") ?? "";
+  const proof = selectedJobs.get("deploy-proof") ?? "";
+  assert.match(deploy, /^ {4}environment: cloudflare$/mu);
+  assert.deepEqual(permissions(deploy), ["contents: write", "id-token: write"]);
+  assert.match(proof, /^ {4}environment: cloudflare$/mu);
+  assert.deepEqual(permissions(proof), ["actions: read", "contents: read", "id-token: write"]);
+  const ordered = (body: string, steps: string[]) => {
+    let before = -1;
+    for (const step of steps) {
+      const index = body.indexOf(step);
+      assert.ok(index > before, `missing or out-of-order ${step}`);
+      before = index;
+    }
+  };
+  ordered(deploy, [
+    "needs.candidate.outputs.artifact-id",
+    "needs.ctr06-bridge-linux-asset.outputs.artifact-id",
+    "python eng/verification/ctr06_bridge_bundle.py verify linux",
+    "node tooling/project.ts verify-bridge-asset linux",
+    "needs.ctr06-bridge-windows-asset.outputs.artifact-id",
+    "python eng/verification/ctr06_bridge_bundle.py verify windows",
+    "node tooling/project.ts verify-bridge-asset windows",
+    "run: node eng/migrations/deploy.ts deploy --target production",
+    "run: node tooling/postgres-deploy.ts migrate --target production",
+    "run: npm run deploy",
+    "gh release create",
+  ]);
+  ordered(proof, [
+    "run: node eng/verification/proof-gate.ts fetch",
+    "run: node eng/migrations/deploy.ts deploy --target proof",
+    "run: node tooling/postgres-deploy.ts migrate --target acceptance",
+    "run: npm run deploy:proof",
+  ]);
+  assert.doesNotMatch(
+    deploy.slice(0, deploy.indexOf("run: node eng/migrations/deploy.ts")),
+    /secrets\.|CLOUDFLARE|NEON/u,
+  );
+  assert.doesNotMatch(deploy, /continue-on-error:/u);
+  assert.doesNotMatch(proof, /continue-on-error:/u);
+  for (const [body, target] of [
+    [deploy, "production"],
+    [proof, "acceptance"],
+  ] as const) {
+    const section = body
+      .split(/^ {6}- /mu)
+      .find((step) => step.includes(`tooling/postgres-deploy.ts migrate --target ${target}`));
+    assert.ok(section);
+    const env = [...section.matchAll(/^ {10}([A-Z_]+):/gmu)].map((match) => match[1]).sort();
+    assert.deepEqual(
+      env,
+      target === "production"
+        ? [
+            "CLOUDFLARE_ACCOUNT_ID",
+            "CLOUDFLARE_API_TOKEN",
+            "GH_TOKEN",
+            "NEON_DATABASE_URL",
+            "NEON_DATABASE_URL_DIRECT",
+          ]
+        : ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "GH_TOKEN", "NEON_DATABASE_URL_DIRECT"],
+    );
+  }
+}
+
+test("main asset jobs and protected deployments honor every candidate, presence and failure gate", () => {
+  assertBridgeWorkflow(jobs);
+  const replacements = [
+    ["deploy", "needs.candidate.result == 'success' && ", ""],
+    ["deploy", "needs.candidate.result", "needs.unknown.result"],
+    ["deploy", "needs.ctr06-bridge-assets-state.result == 'success'", "true"],
+    ["deploy", "needs.ctr06-bridge-linux-asset.result == 'success'", "true"],
+    ["deploy", "needs.ctr06-bridge-windows-asset.result == 'success'", "true"],
+    [
+      "deploy",
+      "python eng/verification/ctr06_bridge_bundle.py verify linux",
+      "echo no verification",
+    ],
+    [
+      "deploy",
+      "python eng/verification/ctr06_bridge_bundle.py verify windows",
+      "echo no verification",
+    ],
+    ["deploy-proof", "id-token: write", "id-token: read"],
+    ["ctr06-bridge-linux-asset", "contents: read", "contents: write\n      id-token: write"],
+    [
+      "ctr06-bridge-windows-asset",
+      "contents: read",
+      `contents: read\n      API: \${{ secrets.API }}`,
+    ],
+  ] as const;
+  for (const [job, before, after] of replacements) {
+    const altered = new Map(jobs);
+    const body = altered.get(job) ?? "";
+    assert.ok(body.includes(before), `${job}: mutation target absent`);
+    altered.set(job, body.replace(before, after));
+    assert.throws(() => assertBridgeWorkflow(altered), `${job}: unsafe mutation must be rejected`);
+  }
 });
 
 test("the gate job holds no secret and reads only: contents, statuses, actions and pull requests", () => {
@@ -1003,9 +1210,9 @@ test("the deployment job fetches the gated candidate before it migrates or deplo
 });
 
 test("the main-push path and the reviewed proof deployment steps remain pinned", () => {
-  // Candidate and production deployment retain the pre-gate pins (Cloud main 9085b12). E3 adds only the public
-  // proof-key-registration.json evidence artifact to the proof steps, which receive their own reviewed pin below.
-  // Any future change here is a reviewed delivery-path change, never an incidental effect of the gate.
+  // The candidate remains the pre-gate pin. CTR06 adds the asset dependency and verification gates,
+  // OIDC permissions and provider inputs for gated PG migration, and publishes sealed bridge assets.
+  // The preceding matrix and negative controls cover these changes; every future pin change needs review.
   const digest = (value: string) => createHash("sha256").update(value).digest("hex");
   const deploy = jobs.get("deploy-proof") ?? "";
   const candidate = jobs.get("candidate") ?? "";
@@ -1019,7 +1226,7 @@ test("the main-push path and the reviewed proof deployment steps remain pinned",
   assert.match(deploy, /artifacts\/proof-key-registration\.json/u);
   assert.deepEqual(pins, {
     candidate: "e9304d0b4ed9b27272acf3bf654ee7271e924a214e243212930321b6699a8b00",
-    deploy: "63df864296382e2a0e9c44211af75ee4f7396dad874d53f418f2b61e718c7fe3",
-    proofSteps: "809f00adb5ec26e565dd3a1273a1fd61e43faf0f19dfe3166337a678910dda1a",
+    deploy: "5139ce33dabcc90b5f92efcd01aaaa610edc075f6e22ff4d601d5a51f1e0efae",
+    proofSteps: "20efb69cf61403398f2b612ee7bfe925a3d2bf3b6b876e8e323c37e1f2cb298c",
   });
 });

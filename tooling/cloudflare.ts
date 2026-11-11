@@ -93,7 +93,12 @@ async function deploy() {
   // (a failing or missing step stops promotion; the workflow step before this one writes the record).
   requireGatePassed("production", candidate.revision);
   // AF-CTR-02: and the PostgreSQL step migrated the production database for this very candidate.
-  requirePostgresGate(await readGate("production"), "production", candidate.revision);
+  const postgresGate = await readGate("production");
+  requirePostgresGate(postgresGate, "production", candidate.revision);
+  assert(
+    typeof postgresGate?.runtimeRole === "string",
+    "The PostgreSQL runtime generation floor is missing.",
+  );
   await loadCandidateImage(candidate);
   const imageId = candidate.imageId;
   await run(process.execPath, [wrangler, "containers", "push", candidate.image]);
@@ -148,6 +153,7 @@ async function deploy() {
       });
     },
     {
+      runtimeRole: postgresGate.runtimeRole,
       liveSlots: () =>
         readLiveSlots((args) => run(process.execPath, [wrangler, ...args], true), configArguments),
     },

@@ -246,7 +246,7 @@ func TestARotationCorrectsANonInheritingMembership(t *testing.T) {
 	}
 	login := group + "_a"
 	for _, statement := range []string{
-		"CREATE ROLE " + login + " LOGIN",
+		"ALTER ROLE " + login + " LOGIN",
 		"GRANT " + group + " TO " + login + " WITH INHERIT FALSE",
 	} {
 		if _, err := conn.Exec(ctx, statement); err != nil {
@@ -280,5 +280,32 @@ func TestARestoredRecordWithoutTheLiveSlot(t *testing.T) {
 		ProbeTimeout: 10 * time.Second, LiveSlot: "b"})
 	if err != nil || rotation.Slot != "a" || rotation.SlotSource != "live-version" {
 		t.Fatalf("rotation %+v %v", rotation, err)
+	}
+}
+
+func TestEnsureDatabaseRefusesClosedOrRestoreQuarantinedExistingTarget(t *testing.T) {
+	url, name := pgtest.Database(t)
+	target := name + "_quarantine"
+	t.Cleanup(func() { pgtest.Drop(t, target) })
+	conn := pgtest.Connect(t, url)
+	ctx := context.Background()
+	if created, err := EnsureDatabase(ctx, conn, target); err != nil || !created {
+		t.Fatalf("create target: %v %v", created, err)
+	}
+	quoted := pgx.Identifier{target}.Sanitize()
+	if _, err := conn.Exec(ctx, "COMMENT ON DATABASE "+quoted+" IS 'arcforges-ctr06-restore-quarantine-v1'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureDatabase(ctx, conn, target); !errors.Is(err, migrate.ErrCTR06RetirementUnproven) {
+		t.Fatalf("restore target was accepted by name: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "COMMENT ON DATABASE "+quoted+" IS NULL"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "ALTER DATABASE "+quoted+" ALLOW_CONNECTIONS false"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureDatabase(ctx, conn, target); !errors.Is(err, migrate.ErrCTR06RetirementUnproven) {
+		t.Fatalf("closed target was accepted by name: %v", err)
 	}
 }

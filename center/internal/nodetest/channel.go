@@ -143,8 +143,13 @@ func (c *Channel) Hello(ctx context.Context, node *Node, installationID platform
 
 // SendHello sends a NodeHello as given (a hostile node names what it likes and signs with what it holds).
 func (c *Channel) SendHello(ctx context.Context, nodeID, installationID platform.ID, signature []byte) error {
+	return c.SendHelloCapabilities(ctx, nodeID, installationID, signature, []string{"routed.v1"})
+}
+
+// SendHelloCapabilities supplies an explicit declaration for connection negotiation tests.
+func (c *Channel) SendHelloCapabilities(ctx context.Context, nodeID, installationID platform.ID, signature []byte, capabilities []string) error {
 	return c.Send(ctx, &relayv1.RelayFrame{Frame: &relayv1.RelayFrame_NodeHello{NodeHello: &relayv1.NodeHello{NodeId: id(nodeID), InstallationId: id(installationID),
-		HelloSignature: signature, Version: proto.String("0.1.0"), ContractVersion: proto.String("1.0.0"), Capabilities: []string{"routed.v1"}}}})
+		HelloSignature: signature, Version: proto.String("0.1.0"), ContractVersion: proto.String("1.0.0"), Capabilities: capabilities}}})
 }
 
 // Heartbeat answers a heartbeat with its seq.

@@ -64,6 +64,7 @@ type hello struct {
 	InstallationID platform.ID
 	Signature      []byte
 	Version        string
+	Capabilities   []string // bounded NodeHello declarations on this connection, not part of the signed hello proof
 	// Malformed is a hello that fails the shape checks the generated validators would make (C2 review N-4; Go has none): a node or
 	// installation ID that is absent, not 16 bytes or the zero ID, or a signature that is not 64 bytes. The hub refuses it (4403)
 	// before it builds any fixed-length signing input.

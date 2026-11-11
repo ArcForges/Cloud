@@ -119,6 +119,7 @@ func TestEveryFleetForeignKeyHasAnIndex(t *testing.T) {
 	}
 	var missing []string
 	var count int
+	seen := map[string]bool{}
 	rows, err := pgtest.Connect(t, url).Query(context.Background(), `SELECT c.conname,
     EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.conrelid AND i.indkey[0] = c.conkey[1])
 FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
@@ -133,13 +134,19 @@ WHERE c.contype = 'f' AND n.nspname = 'fleet' ORDER BY 1`)
 			t.Fatal(err)
 		}
 		count++
+		seen[constraint] = true
 		if !indexed {
 			missing = append(missing, constraint)
 		}
 	}
+	for _, constraint := range []string{"routed_file_call_account", "routed_file_call_node", "routed_file_call_refusal", "routed_command_id_account", "routed_file_target_account_id_fkey", "routed_file_target_node_enrollment_id_fkey"} {
+		if !seen[constraint] {
+			t.Errorf("missing reviewed AF-CTR-06 foreign key %s", constraint)
+		}
+	}
 	// node: device and installation; each flow table: viewer, approver, approver session, session and enrollment; routed_call (0010):
-	// account, node and refusal code.
-	if err = rows.Err(); err != nil || len(missing) > 0 || count != 15 {
+	// account, node and refusal code; routed_file_call (0011) adds the same three, its shared registry adds account, and caller-bound target associations add account and enrollment.
+	if err = rows.Err(); err != nil || len(missing) > 0 || count != 21 {
 		t.Fatalf("fleet foreign keys %d, without a leading index: %v %v", count, missing, err)
 	}
 }

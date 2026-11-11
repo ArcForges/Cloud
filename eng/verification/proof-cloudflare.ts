@@ -971,6 +971,12 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   );
 
   await checkProofDomainFree(api);
+  const postgresGate = await readGate("acceptance");
+  requirePostgresGate(postgresGate, "acceptance", candidate.revision);
+  assert(
+    typeof postgresGate?.runtimeRole === "string",
+    "The acceptance runtime generation floor is missing.",
+  );
   const candidateConfig = await readJson<CandidateConfig>(path.join(candidateDir, "wrangler.json"));
   const configOptions = {
     account: api.account,
@@ -1057,6 +1063,7 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
         },
         {
           liveSlots: proofSlots,
+          runtimeRole: postgresGate.runtimeRole,
           runner: protectedProofRuntimeRunner,
         },
       );

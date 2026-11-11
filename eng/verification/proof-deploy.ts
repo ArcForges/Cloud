@@ -181,7 +181,7 @@ export function buildProofConfig(
   // Only a sealed candidate bundle is published: the deploy uploads it with --no-bundle, so nothing is bundled or rebuilt.
   assert.match(
     options.main,
-    /^\.\/candidate\/[a-z-]+\.js$/u,
+    /^\.\/(?:candidate\/[a-z-]+\.js|ctr06-bridge\/proof-worker\.js)$/u,
     "Only a sealed candidate bundle can be deployed.",
   );
   assert.equal(

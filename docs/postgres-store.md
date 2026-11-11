@@ -697,8 +697,14 @@ The protected main-push deployment (`.github/workflows/ci.yml`, job `deploy`, Gi
    - The Container passes `ARCFORGES_CENTER_DATABASE_URL` to the Go center, which then reads the Hello greeting through the runtime
      role (`helloBackend` `postgresql-runtime`). The Hello's own Neon credential reaches only the C# host.
 
-A deployment that fails before step 3 changes nothing that the running revision uses. A migration is additive (expand) while the
-previous revision may still run.
+For an existing schema-10 database, the protected PostgreSQL step first verifies the published 615.1 bridge carrier and promotes
+that bridge with a fresh runtime generation. The provider's uploaded version, complete 100% rollout and sealed image must agree;
+an OIDC proof binds that protected workflow and the database/role identities. The migration owner then drains receipt and lease
+writes, removes every older writer's relevant privileges, expires the old lease and applies 0011 in one transaction. A published
+bridge, a slot record or a password rotation alone is not retirement evidence. This bridge promotion changes the running revision
+before step 3; if a later operation fails, inspect the provider and database floor before retrying. Only the 615.1 bridge server or a
+newer server may be used for rollback, with the current protected admin and promotion tools and the recorded runtime generation;
+an old privileged CLI must not rotate or regrant the retired roles.
 
 **Required secret.** `NEON_DATABASE_URL_DIRECT` is the direct (not `-pooler`) URL of the Neon owner role (the migration role),
 with `sslmode=require` or `verify-full` and `channel_binding=require`, in the GitHub `cloudflare` environment. Without it the
@@ -782,6 +788,36 @@ ARCFORGES_CENTER_RUNTIME_SECRET_FILE=/run/center/runtime.json arcforges-center a
 A plaintext connection (`sslmode=disable`) is accepted only for a loopback host in self-hosted mode. Every other connection
 needs `sslmode=require` or `verify-full` (upgraded to `verify-full`) and `channel_binding=require`.
 
+### Upgrading an existing schema-10 database
+
+The ordinary commands above bootstrap a fresh database. An existing schema-10 database also needs the exact native bridge
+executable. The first Cloud release containing these assets provides
+`arcforges-ctr06-bridge-8e5-linux-amd64.zip` and `arcforges-ctr06-bridge-8e5-windows-amd64.zip`. Each archive has its sealed
+manifest, corresponding 8e5 source, dependency inventory and licences. The Linux executable is the released 615.1 OCI member,
+SHA-256 `028223a3dcbcbd6d7724558de02409e1e8874d876049f03fed38f47998773ba4`. The Windows executable is a separate native build
+from reviewed source 8e5, SHA-256 `646338cd9bcfe0fcd0411abbf4fb036fc739b4a586d739c8a9fe58d9ff654f46`; it is not an OCI
+release member. Both use Contracts 437.1. No local Go, Git or Docker installation is needed. Other OS/architecture pairs refuse
+this existing-database upgrade until an independently verified native bridge is available.
+
+Point `ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE` at the absolute path to the extracted executable for the `migrate apply`
+invocation. The current migrator checks the executable and controls the bridge child itself; the path is not a proof or bypass.
+It issues a temporary role and credential only for that child, verifies a real database-backed ready response, stops the child and
+checks its actual PostgreSQL login OID has no surviving backend. Under the 0011 locks it retires the old and temporary writers,
+expires the old lease, archives the old credential records and creates a separate final runtime group and its reserved slots.
+The database owner and superusers, and the OS account running the migrator, are trusted. An unexplained writer, role path,
+remaining backend or changed executable refuses the transaction. A pooler that retains the temporary backend also causes refusal.
+
+The successful `migrate apply` JSON names the new `runtimeRole`. Set the existing
+`ARCFORGES_CENTER_RUNTIME_ROLE` to that value for subsequent current `migrate` and `admin` calls, then use the normal
+`admin rotate-runtime-credential` and `admin confirm-runtime-credential` sequence to give the current server its new URL.
+Remove `ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE` after the one migration call. The bridge child has stopped when the
+migration returns; it is not a running replacement service.
+
+A hard interruption can leave an unconfirmed temporary role or child. A later run refuses an unexplained writer instead of
+adopting a public role comment or changing an unknown account. Preserve the evidence and investigate the failed process and
+database role graph before retrying. For application rollback, run the bridge server with a credential from the final runtime
+group and retain the current admin tools; do not run the older bridge's privileged CLI to regrant or rotate the retired group.
+
 ## Connection budgets
 
 | Connection            | Bound                                                                                            | Where                                                    |
@@ -863,23 +899,90 @@ Alert conditions for AF-OPS-01:
       verifier when it starts, so the newest password may be pushed back. Neon documents neither outcome. So rotate and
       redeploy right after any restore.
   - **Beyond the window**, snapshot schedules (paid plans, up to 35 days) keep restore points.
-- **Logical backup restore drill.** It runs on every Linux verification leg (`python eng/center.py check`, step
-  `restore-drill`):
-  1. Migrate a database with the native executable and rotate its runtime credential.
-  2. Seed it through the runtime role: a receipt, an outbox message, a job and audit events.
-  3. Dump it with `pg_dump --format=custom`.
-  4. Restore it into a second, isolated PostgreSQL server (`pg_restore --no-owner --no-acl --role=<migration role>`).
-  5. Run `migrate status`, which must report `current` with nothing pending.
-  6. Run `migrate`, which applies nothing and reconciles the grants and the runtime role.
-  7. Rotate the runtime credential there.
-  8. Run the verify phase against the restored database, through the new runtime credential:
-     - the receipt answers its replay without running the command;
-     - the outbox message is published;
-     - the job is claimed and completed;
-     - the audit chain verifies and keeps growing.
+- **Logical backup and recovery.** Backups and their metadata are privileged administrator inputs, never client uploads. Keep the
+  archive and sidecar in an administrator-controlled directory; preserve both originals and their SHA-256 digests. The machine
+  needs its native PostgreSQL 18 `pg_dump` and `pg_restore` available on the command's process PATH. The Windows tools must be
+  Windows executables; another host's client is not a Windows validation. Current commands never install them. Linux capture
+  rejects symlink ancestors or untrusted writable non-sticky output directories and synchronizes the held parent after writing
+  each file. Windows uses a protected file DACL and held non-reparse ancestors and flushes each file; equivalent directory-entry
+  survival through a sudden power loss has not been established on Windows. The administrator remains responsible for custody
+  of the chosen output directory after the command exits.
 
-  The same procedure restores production from a dump into a new Neon database. Grants and roles come from `migrate`, not from
-  the dump.
+  A supported schema-11 source is captured by the current `admin backup-logical --archive <absolute-new-path> --metadata
+<absolute-new-path>` command, connected directly as the migration owner. It takes a checked complete custom dump and a
+  versioned sidecar from a shared exported snapshot, with table writes drained while snapshot assertions are made. Sequence
+  values are not MVCC snapshots: the command compares their observed state around the dump to the actual archive and refuses
+  an inconsistent capture. The sidecar binds exact archive size and digest, supported migration history, schema inventory,
+  table checks, sequences and large objects. This is a trusted administrator's backup process, not a claim that a digest alone
+  proves source completeness. Capture may take locks and affects the source's write availability during the capture.
+
+  To recover a supported schema-11 archive, set the direct maintenance URL and new destination database name, then run the
+  current `admin restore-logical-backup --archive <path> --sha256 <archive-sha256> --metadata <path> --metadata-sha256
+<sidecar-sha256>`. The target database and its runtime role names must not already exist. Before admitting a restore or bridge
+  connection, the manager creates the target with connections disabled, removes and checks PUBLIC/inherited access, and records
+  a refusal-only isolation marker. The marker is not authorization to resume or complete recovery. The 0011 schema, target's
+  own runtime floor and migration-owner-only PENDING admission are committed together. The actual `pg_restore` uses
+  `--single-transaction --exit-on-error --no-owner --no-acl` and a complete exact selection that preserves the target floor and
+  admission; it does not broadly drop schemas. The original archive retains source promotion history, while the target has its
+  own independently checked identity. A checked READY admission, receipt and removal of the isolation marker commit together
+  only after the same manager invocation observes child completion and completes its checks.
+
+  If a command is interrupted, retain the target, its isolation state, original archive and sidecar for trusted investigation.
+  An in-flight or delayed restore child may commit after management control is lost. An error can therefore leave restored data
+  in a quarantined target; it does not establish that the target was unchanged. Do not retry by adopting a database or role by
+  name, remove the isolation marker, or treat the marker as recovery authority. A lost response after READY is resolved by the
+  checked `migrate status` receipt rather than replaying the restore. Any pre-existing target or conflicting role is refused.
+
+  A delivered schema-10 backup made by the older unfiltered `pg_dump --format=custom` procedure need not have the new sidecar.
+  Recover it with `admin restore-legacy-logical-backup --archive <path> --sha256 <archive-sha256> --provenance <path>
+--provenance-sha256 <provenance-sha256>` and the verified platform-specific compatible bridge executable configured for the
+  manager. The versioned provenance is a trusted creation/custody record or authenticated administrator attestation; it binds
+  archive length/digest, the known full-dump procedure and PostgreSQL tool major, the source runtime role and an explicitly
+  supported delivered source revision (the CTR05 baseline `ffc03636ca0c7049fddf5fad733d0f98c53c3a6d` or bridge
+  `8e5f6e26aa97b123d9f60b91f780364a094e74cd`). The manager independently checks archive format, exact 0001–0010 history,
+  complete supported object/data inventory and restored content. A digest or operator assertion alone is not target role or
+  promotion proof. An original snapshot ID or source row count that was not recorded remains unknown; archive-observed rows are
+  not relabelled as source observations. The 0011-only command refuses a schema-10 backup before creating a target.
+
+  The legacy manager restores an isolated schema-10 target, runs the exact verified bridge with a temporary credential, stops
+  and reaps it, and performs target-local retirement and atomic 0011/PENDING admission. Source credential history is retained
+  as history, not target authorization. The versioned legacy provenance JSON has these fields (substitute actual evidence, never
+  a fabricated source observation):
+
+  ```json
+  {
+    "version": "arcforges-legacy-full-dump-provenance-v1",
+    "archiveLength": 123456,
+    "archiveSha256": "<64 lowercase hexadecimal digits>",
+    "sourceSchema": 10,
+    "sourceRevision": "ffc03636ca0c7049fddf5fad733d0f98c53c3a6d",
+    "sourceRuntimeRole": "<original runtime group name>",
+    "dumpProcedure": "pg_dump --format=custom, unfiltered full database",
+    "dumpMajor": 18,
+    "attestedBy": "<current authenticated OS account>",
+    "custodyEvidence": "<documented creation and custody evidence for this exact archive>"
+  }
+  ```
+
+  The original runtime role must match the configured legacy group; the manager creates a distinct final generation. The
+  attested OS account must be the one running the command, and the documented custody evidence must support the actual archive.
+  After either route is READY, run the current `migrate status`, a zero-new-step `migrate`
+  and the current rotate/confirm operations. The checked target generation selects the other slot only when its actual current
+  history applies; an unpromoted fresh generation uses the existing first-slot default. Never use the old privileged bridge CLI
+  after 0011; server rollback uses the verified compatible bridge server with current administration and the new runtime floor.
+
+  Recovery does not prove the old source stopped, uniquely identify a physical clone/Neon branch, authorize a deployment cutover,
+  or activate the target. The actual PostgreSQL cluster lineage, database/owner/role identities, writer/connection and lease
+  barriers are all checked; missing lineage refuses, and lineage is not a substitute for provider identity. Neon access to the
+  required lineage function and the complete hosted recovery/cutover path remain unverified until tested in the real venue.
+  Keep live surfaces disabled and preserve pending outbox messages, jobs and external effects until an independently authorized
+  activation. Do not run a publisher or active recovery drill against operational or mixed data.
+
+  The Linux verification leg runs a separate synthetic-only full drill: source migration, rotation, real runtime seed, checked
+  capture, isolated restore, status and zero-step migrate, actual target rotation/confirmation, receipt replay, outbox/job
+  processing and audit verification. Its external recorder is MOCKED; this does not prove provider delivery. The drill never
+  consumes a production archive. Current hosted-provider readiness and native Windows PostgreSQL restore must be reported
+  according to their own actual evidence rather than inferred from the Linux drill.
 
 - **Rollback: expand and contract.** A schema change the running revision must survive is split into migrations that are each
   compatible with both the previous and the next application revision. `TestTheExpandAndContractRollbackProcedure` exercises it

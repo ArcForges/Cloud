@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "goVersion": "go1.27.3",
   "inputs": {
-    "go.mod": "f2ea622643a6382de7a44548405a7c1fe3075b2645b146a16b228c8b573716e2",
-    "go.sum": "db19a0bd5ee26ab77ab41bb9296bf2ad3955aeff15332f978635cd80f8e73b07",
+    "go.mod": "8330db700dbfd2335edc9796021841c28cd724bd2690fc8ccff24e896722c25d",
+    "go.sum": "1118c70b11799baeec2dcaae3bb8af9450d9bcaae988f527ca40ec463767992d",
     "toolchain.json": "ad46e23c3a42ecc48b5f2383e6039aeffb11d9723bafac038fc6c648b7bd5a51",
     "tools/go.mod": "1abc5df8e2b367cff0d4de646d089c62eb89ade03538ae799450a096a86d600b",
     "tools/go.sum": "6394a2049a55c360f2fc72d96588570ece75a3b1350fad580da4070d53b0ae2f"
@@ -22,11 +22,11 @@
     },
     {
       "path": "github.com/ArcForges/Contracts/go",
-      "version": "v1.0.0-ci.437.1",
-      "sum": "h1:n2mEcBy1tjGGn1ZVidI89vh116t9bUZ1MvIhIVsAEh4=",
+      "version": "v1.0.0-ci.450.1",
+      "sum": "h1:5kE1VYgKrZIn3urHOBWFP8NK/FzVIvho22Ag+NQMkfY=",
       "goModSum": "h1:9MwtkvawAZ6+s9I5pbTsJit1/7htfvowqEREcJlIXME=",
       "repository": "https://github.com/ArcForges/Contracts",
-      "commit": "e67a6b089a7270ab771a97c27aeba92c5d3b0469",
+      "commit": "de3dba76266e89654be9b4d29d097d525a281c6a",
       "spdx": "Apache-2.0",
       "licenceFile": "third-party/ContractsGo.LICENSE.txt",
       "licenceSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",

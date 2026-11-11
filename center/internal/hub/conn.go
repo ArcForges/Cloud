@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Cloud/center/internal/access"
+	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/feature"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -59,9 +60,10 @@ type conn struct {
 	helloDeadline time.Time // the nonce is void from this instant on
 	proved        bool      // the hello's proof held in time: the hello deadline no longer applies
 	accepted      bool
-	recorded      bool     // the accept's presence write succeeded: the close records the node offline
-	tokenDigest   [32]byte // the SHA-256 of the access token the connection is bound to
-	refreshes     int      // the TokenRefresh frames the connection sent
+	capabilities  map[string]bool // only claims from this connection's proved NodeHello
+	recorded      bool            // the accept's presence write succeeded: the close records the node offline
+	tokenDigest   [32]byte        // the SHA-256 of the access token the connection is bound to
+	refreshes     int             // the TokenRefresh frames the connection sent
 	lastRefresh   time.Time
 	accessExpires time.Time
 	lastInbound   time.Time
@@ -79,14 +81,17 @@ type conn struct {
 
 	queue chan outbound
 	// stall holds the writer after it took a frame until it is closed (tests only: a stalled writer; nil in a running center).
-	stall       chan struct{}
-	queuedBytes atomic.Int64
-	closing     atomic.Bool
-	lapsing     atomic.Bool // the lapse close is claimed: it is audited once
-	closeOnce   sync.Once
-	closeCode   uint32
-	closeReason string
-	finished    chan struct{}
+	stall              chan struct{}
+	queuedCall         chan struct{}  // test-only notification that a call entered the write queue
+	afterDeliverGate   chan struct{}  // test-only stall before beginning a delivered call write
+	afterDeliverNotice chan time.Time // test-only signed expiry at the delivered transition
+	queuedBytes        atomic.Int64
+	closing            atomic.Bool
+	lapsing            atomic.Bool // the lapse close is claimed: it is audited once
+	closeOnce          sync.Once
+	closeCode          uint32
+	closeReason        string
+	finished           chan struct{}
 
 	windowStart time.Time
 	windowCount int
@@ -272,6 +277,10 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 	}
 	c.mu.Lock()
 	c.proved = true
+	c.capabilities = make(map[string]bool, len(claimed.Capabilities))
+	for _, capability := range claimed.Capabilities {
+		c.capabilities[capability] = true
+	}
 	c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(c.ctx, presenceTimeout)
 	defer cancel()
@@ -591,7 +600,19 @@ func (c *conn) sendCall(p *pending, encode func(seq uint64) ([]byte, error)) err
 	if err != nil {
 		return err
 	}
-	return c.enqueue(outbound{data: data, call: p})
+	err = c.enqueue(outbound{data: data, call: p})
+	if err == nil {
+		c.mu.Lock()
+		queued := c.queuedCall
+		c.mu.Unlock()
+		if queued != nil {
+			select {
+			case queued <- struct{}{}:
+			default:
+			}
+		}
+	}
+	return err
 }
 
 // enqueue puts a frame in the bounded send queue (CTR5-HUB-10): at most SendQueueFrames frames and SendQueueBytes bytes.
@@ -655,7 +676,42 @@ func (c *conn) write(item outbound) bool {
 		// DID_NOT_HAPPEN, so its frame is never written. From a successful deliver on, its loss is UNKNOWN for a mutation.
 		return true
 	}
-	write, cancel := context.WithTimeout(c.writes, c.hub.settings.WriteTimeout)
+	if item.call != nil {
+		c.mu.Lock()
+		gate, notice := c.afterDeliverGate, c.afterDeliverNotice
+		c.mu.Unlock()
+		if gate != nil {
+			select {
+			case notice <- item.call.expires:
+			default:
+			}
+			select {
+			case <-gate:
+			case <-c.writes.Done():
+				return false
+			}
+		}
+	}
+	deadline := time.Now().Add(c.hub.settings.WriteTimeout)
+	replay := item.call != nil && fileCall(item.call.method) && !item.call.replayUntil.IsZero()
+	if replay {
+		// This observation is before invoking the WebSocket write. A write that has
+		// started can partially send, so its failure remains UNKNOWN. A Go context
+		// bounds blocking; it is not an atomic physical-send wall-clock guarantee.
+		bounded, ok := c.beginReplayWrite(item.call)
+		if !ok {
+			return true
+		}
+		if bounded.Before(deadline) {
+			deadline = bounded
+		}
+	}
+	write, cancel := context.WithDeadline(c.writes, deadline)
+	if replay && !time.Now().Before(deadline) {
+		cancel()
+		c.abandonUnwrittenReplay(item.call)
+		return true
+	}
 	err := c.ws.Write(write, websocket.MessageBinary, item.data)
 	cancel()
 	if err != nil {
@@ -666,6 +722,44 @@ func (c *conn) write(item outbound) bool {
 		return false
 	}
 	return true
+}
+
+// beginReplayWrite performs the last observable fence before the socket write.
+// A caller that already stopped waiting is not sent a new frame; if no write was
+// attempted and the receipt fence passed, this attempt is provably undelivered.
+func (c *conn) beginReplayWrite(p *pending) (time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.callsClosed || c.closing.Load() || c.calls[p.callID] != p {
+		return time.Time{}, false
+	}
+	// Capture monotonic time first; any pause before the wall-clock sample can
+	// only shorten, never extend, the fixed write deadline.
+	start := time.Now()
+	now := c.hub.clock()
+	if !now.Before(p.replayUntil) || !now.Before(p.expires) {
+		if p.state.CompareAndSwap(callDelivered, callAbandoned) {
+			delete(c.calls, p.callID)
+			p.finish(outcome{refusal: arc.InvalidState("routed_call", "replay_window_passed")})
+		}
+		return time.Time{}, false
+	}
+	return start.Add(min(p.replayUntil.Sub(now), p.expires.Sub(now))), true
+}
+
+// abandonUnwrittenReplay is used only before ws.Write has been invoked.
+func (c *conn) abandonUnwrittenReplay(p *pending) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.calls[p.callID] != p || !p.state.CompareAndSwap(callDelivered, callAbandoned) {
+		return
+	}
+	delete(c.calls, p.callID)
+	refusal := arc.NodeUnreachable(c.nodeID[:], arc.UnreachableDeadline, false)
+	if !c.hub.clock().Before(p.replayUntil) {
+		refusal = arc.InvalidState("routed_call", "replay_window_passed")
+	}
+	p.finish(outcome{refusal: refusal})
 }
 
 // closeFlush bounds how long a close writes what was queued before it and its own RelayClose frame; the close handshake then waits at

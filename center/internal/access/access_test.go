@@ -141,6 +141,19 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.waitNodeTask":       "R1 allowed none - no-receipt active relayed:node",
 		"fleet.readNodeTaskOutput": "R1 allowed none - no-receipt active relayed:node",
 		"fleet.cancelNodeTask":     "R2 upgrade evidence node no-receipt active relayed:node",
+		// AF-CTR-06: six mutations use routed receipts; five require method/target step-up; planning and queries are low risk.
+		"fleet.readNodeFile":            "R1 allowed none - no-receipt active relayed:node",
+		"fleet.writeNodeFile":           "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.editNodeFile":            "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.searchNodeFiles":         "R1 allowed none - no-receipt active relayed:node",
+		"fleet.listNodeDirectory":       "R1 allowed none - no-receipt active relayed:node",
+		"fleet.planNodeRemoval":         "R1 allowed none - no-receipt active relayed:node",
+		"fleet.executeNodeRemoval":      "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.getNodeFileOperation":    "R1 allowed none - no-receipt active relayed:node",
+		"fleet.registerNodeWorkspace":   "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.unregisterNodeWorkspace": "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.listNodeWorkspaces":      "R1 allowed none - no-receipt active relayed:node",
+		"fleet.getNodeWorkspace":        "R1 allowed none - no-receipt active relayed:node",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
 	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own", EvidenceOnApprove: "evidence-on-approve"}
@@ -183,7 +196,7 @@ func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	want := map[string]string{"identity.beginPasskeyRegistration": TargetAccount, "identity.removeAuthIdentity": TargetCredential,
 		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession,
 		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode, "fleet.revokeNode": TargetNode,
-		"fleet.submitNodeTask": TargetNode, "fleet.cancelNodeTask": TargetNode}
+		"fleet.submitNodeTask": TargetNode, "fleet.cancelNodeTask": TargetNode, "fleet.writeNodeFile": TargetNode, "fleet.editNodeFile": TargetNode, "fleet.executeNodeRemoval": TargetNode, "fleet.registerNodeWorkspace": TargetNode, "fleet.unregisterNodeWorkspace": TargetNode}
 	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {
 		t.Fatalf("the operator grant class: %q %v", target, ok)
 	}
@@ -229,7 +242,7 @@ func TestTheMobileLimitedRules(t *testing.T) {
 func TestFleetRowsCarryNoFeature(t *testing.T) {
 	rows := 0
 	for _, operation := range Operations() {
-		if !strings.HasPrefix(operation.ID, "fleet.") || operation.ID == "fleet.nodeChannel" || routedTask(operation.ID) {
+		if !strings.HasPrefix(operation.ID, "fleet.") || operation.ID == "fleet.nodeChannel" || routedOperation(operation.ID) {
 			// The node channel is the first gated row (AF-CTR-05 E1a): TestOperationRowsAreCheckedForConsistency pins it; the routed
 			// task rows (E2b) are gated by their groups' keys, pinned by TestTheRoutedRowsAreGatedByTheirGroups.
 			continue
@@ -305,10 +318,10 @@ func TestTheRelayedRowsFollowTheirRules(t *testing.T) {
 	}
 }
 
-// routedTask reports a routed task method's row (AF-CTR-05 E2b).
-func routedTask(id string) bool {
+// routedOperation reports only the explicitly declared routed task/file/workspace rows.
+func routedOperation(id string) bool {
 	return slices.Contains([]string{"fleet.submitNodeTask", "fleet.getNodeTask", "fleet.listNodeTasks", "fleet.waitNodeTask", "fleet.readNodeTaskOutput",
-		"fleet.cancelNodeTask"}, id)
+		"fleet.cancelNodeTask", "fleet.readNodeFile", "fleet.writeNodeFile", "fleet.editNodeFile", "fleet.searchNodeFiles", "fleet.listNodeDirectory", "fleet.planNodeRemoval", "fleet.executeNodeRemoval", "fleet.getNodeFileOperation", "fleet.registerNodeWorkspace", "fleet.unregisterNodeWorkspace", "fleet.listNodeWorkspaces", "fleet.getNodeWorkspace"}, id)
 }
 
 // TestTheRoutedRowsAreGatedByTheirGroups (AF-CTR-05 E2b, E2-3; CTR5-GATE-06): each routed task row carries its group's key of the routed
@@ -317,7 +330,7 @@ func routedTask(id string) bool {
 func TestTheRoutedRowsAreGatedByTheirGroups(t *testing.T) {
 	want := map[string]feature.Group{"fleet.submitNodeTask": feature.GroupSubmission, "fleet.getNodeTask": feature.GroupStatusAndOutput,
 		"fleet.listNodeTasks": feature.GroupStatusAndOutput, "fleet.waitNodeTask": feature.GroupStatusAndOutput, "fleet.readNodeTaskOutput": feature.GroupStatusAndOutput,
-		"fleet.cancelNodeTask": feature.GroupControl}
+		"fleet.cancelNodeTask": feature.GroupControl, "fleet.readNodeFile": feature.GroupSubmission, "fleet.writeNodeFile": feature.GroupSubmission, "fleet.editNodeFile": feature.GroupSubmission, "fleet.searchNodeFiles": feature.GroupSubmission, "fleet.listNodeDirectory": feature.GroupSubmission, "fleet.planNodeRemoval": feature.GroupSubmission, "fleet.executeNodeRemoval": feature.GroupSubmission, "fleet.getNodeFileOperation": feature.GroupSubmission, "fleet.registerNodeWorkspace": feature.GroupSubmission, "fleet.unregisterNodeWorkspace": feature.GroupSubmission, "fleet.listNodeWorkspaces": feature.GroupSubmission, "fleet.getNodeWorkspace": feature.GroupSubmission}
 	seen := 0
 	for _, operation := range Operations() {
 		group, ok := want[operation.ID]

@@ -121,7 +121,7 @@ func ChannelOutcomes() map[string][]string {
 		// the reasons of node_unreachable), relay nonces and relay assertions (verified, or the closed reason of the refusal); AF-CTR-05 E2a: a
 		// result for a call whose late entry was already forgotten, verified and dropped (forgotten).
 		"call": {"sent", "executed", "refused_by_policy", "refused_verification", "expired", "late", "forgotten", "offline", "no_key", "center_bound",
-			"node_bound", "queue_full", "channel_closed", "deadline_passed", "result_unverifiable"},
+			"node_bound", "queue_full", "channel_closed", "deadline_passed", "result_unverifiable", "replay_window_passed", "capability_unavailable"},
 		"relay_nonce": {"issued", "spent", "unknown"},
 		"assertion":   {"verified", "missing", "signature_invalid", "credential_mismatch", "expired", "nonce_reused", "request_mismatch"},
 		"token":       {"rebound", "unchanged", "rate"},

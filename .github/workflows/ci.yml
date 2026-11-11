@@ -293,12 +293,145 @@ jobs:
           test "$CANDIDATE" = success
           if [ "$EVENT" = pull_request ]; then test "$REVIEW" = success; else test "$REVIEW" = skipped; fi
 
+  ctr06-bridge-assets-state:
+    name: Check immutable self-hosted bridge assets
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      linux-present: ${{ steps.state.outputs.linux_present }}
+      windows-present: ${{ steps.state.outputs.windows_present }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - id: state
+        name: Check only release metadata
+        run: python eng/verification/ctr06_bridge_asset_state.py >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  ctr06-bridge-linux-asset:
+    name: Seal the released Linux bridge for self-hosting
+    needs: [ctr06-bridge-assets-state]
+    if: >-
+      !cancelled() && needs.ctr06-bridge-assets-state.result == 'success'
+      && needs.ctr06-bridge-assets-state.outputs.linux-present == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 8e5f6e26aa97b123d9f60b91f780364a094e74cd
+          path: bridge-source
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.3"
+          cache: false
+      - name: Verify the original carrier and seal the native asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOTELEMETRY: "off"
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/ctr06-release" "$RUNNER_TEMP/ctr06-content" "$RUNNER_TEMP/ctr06-linux"
+          gh release download cloud-0.1.0-ci.615.1 --repo ArcForges/Cloud --pattern cloud-0.1.0-ci.615.1.tar.gz --dir "$RUNNER_TEMP/ctr06-release"
+          python tooling/ctr06_bridge_carrier.py "$RUNNER_TEMP/ctr06-release/cloud-0.1.0-ci.615.1.tar.gz" "$RUNNER_TEMP/ctr06-content" "$RUNNER_TEMP/ctr06-linux/arcforges-center"
+          python eng/verification/ctr06_bridge_bundle.py build linux "$GITHUB_WORKSPACE/bridge-source" "$RUNNER_TEMP/ctr06-linux/arcforges-center" "$RUNNER_TEMP/ctr06-linux/arcforges-ctr06-bridge-8e5-linux-amd64.zip"
+          cp "$RUNNER_TEMP/ctr06-release/cloud-0.1.0-ci.615.1.tar.gz" "$RUNNER_TEMP/ctr06-linux/cloud-0.1.0-ci.615.1.tar.gz"
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ctr06-bridge-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ctr06-linux/arcforges-ctr06-bridge-8e5-linux-amd64.zip
+            ${{ runner.temp }}/ctr06-linux/cloud-0.1.0-ci.615.1.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 1
+
+  ctr06-bridge-windows-asset:
+    name: Build and seal the native Windows bridge
+    needs: [ctr06-bridge-assets-state]
+    if: >-
+      !cancelled() && needs.ctr06-bridge-assets-state.result == 'success'
+      && needs.ctr06-bridge-assets-state.outputs.windows-present == 'false'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 8e5f6e26aa97b123d9f60b91f780364a094e74cd
+          path: bridge-source
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: bridge-source/center/go.sum
+      - name: Build and seal from the exact reviewed source
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOFLAGS: -mod=readonly
+          GOTELEMETRY: "off"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:GITHUB_WORKSPACE 'bridge-source'
+          $output = Join-Path $env:RUNNER_TEMP 'ctr06-windows'
+          New-Item -ItemType Directory -Path $output | Out-Null
+          Push-Location (Join-Path $source 'center')
+          try {
+            go mod download
+            if ($LASTEXITCODE -ne 0) { throw 'Bridge module download failed' }
+            go mod verify
+            if ($LASTEXITCODE -ne 0) { throw 'Bridge module verification failed' }
+            $binary = Join-Path $output 'arcforges-center.exe'
+            $link = '-buildid= -X=github.com/ArcForges/Cloud/center/internal/buildinfo.sourceCommit=8e5f6e26aa97b123d9f60b91f780364a094e74cd -X=github.com/ArcForges/Cloud/center/internal/buildinfo.sourceDirty=false'
+            go build -trimpath -buildvcs=false -ldflags $link -o $binary ./cmd/arcforges-center
+            if ($LASTEXITCODE -ne 0) { throw 'Native bridge build failed' }
+            $identity = & $binary version | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $identity.build.sourceCommit -ne '8e5f6e26aa97b123d9f60b91f780364a094e74cd' -or $identity.build.dirty) { throw 'Native bridge identity differs' }
+            python (Join-Path $env:GITHUB_WORKSPACE 'eng/verification/ctr06_bridge_bundle.py') build windows $source $binary (Join-Path $output 'arcforges-ctr06-bridge-8e5-windows-amd64.zip')
+            if ($LASTEXITCODE -ne 0) { throw 'Native bridge seal failed' }
+          } finally { Pop-Location }
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ctr06-bridge-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ctr06-windows/arcforges-ctr06-bridge-8e5-windows-amd64.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 1
+
   deploy:
     name: Deploy Cloudflare
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      && needs.candidate.result == 'success'
-    needs: [candidate]
+      && needs.candidate.result == 'success' && needs.ctr06-bridge-assets-state.result == 'success'
+      && (needs.ctr06-bridge-assets-state.outputs.linux-present == 'true' || needs.ctr06-bridge-linux-asset.result == 'success')
+      && (needs.ctr06-bridge-assets-state.outputs.windows-present == 'true' || needs.ctr06-bridge-windows-asset.result == 'success')
+    needs:
+      [candidate, ctr06-bridge-assets-state, ctr06-bridge-linux-asset, ctr06-bridge-windows-asset]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: cloudflare
@@ -307,6 +440,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -322,6 +456,28 @@ jobs:
           artifact-ids: ${{ needs.candidate.outputs.artifact-id }}
           path: artifacts/candidate
           merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: needs.ctr06-bridge-assets-state.outputs.linux-present == 'false'
+        with:
+          artifact-ids: ${{ needs.ctr06-bridge-linux-asset.outputs.artifact-id }}
+          path: artifacts/ctr06-linux
+          merge-multiple: true
+      - name: Verify the sealed Linux bridge asset
+        if: needs.ctr06-bridge-assets-state.outputs.linux-present == 'false'
+        run: |
+          python eng/verification/ctr06_bridge_bundle.py verify linux "$GITHUB_WORKSPACE/artifacts/ctr06-linux/arcforges-ctr06-bridge-8e5-linux-amd64.zip"
+          node tooling/project.ts verify-bridge-asset linux
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: needs.ctr06-bridge-assets-state.outputs.windows-present == 'false'
+        with:
+          artifact-ids: ${{ needs.ctr06-bridge-windows-asset.outputs.artifact-id }}
+          path: artifacts/ctr06-windows
+          merge-multiple: true
+      - name: Verify the sealed Windows bridge asset
+        if: needs.ctr06-bridge-assets-state.outputs.windows-present == 'false'
+        run: |
+          python eng/verification/ctr06_bridge_bundle.py verify windows "$GITHUB_WORKSPACE/artifacts/ctr06-windows/arcforges-ctr06-bridge-8e5-windows-amd64.zip"
+          node tooling/project.ts verify-bridge-asset windows
       # CLOUD.70: the one gated D1 migration step, before anything is pushed or promoted. It holds the migrator
       # lease and fence, applies only what the release manifest names, prints receipts and the compatibility
       # record (never a secret) and refuses a build the schema horizons exclude. A failure fails this job here,
@@ -339,6 +495,9 @@ jobs:
       - name: Migrate the PostgreSQL database (gated)
         run: node tooling/postgres-deploy.ts migrate --target production
         env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           NEON_DATABASE_URL_DIRECT: ${{ secrets.NEON_DATABASE_URL_DIRECT }}
       # The runtime credential is rotated inside this step and uploaded with the Worker version; it is never printed or stored.
@@ -355,7 +514,10 @@ jobs:
         run: |
           VERSION=$(node --input-type=module -e 'import fs from "node:fs"; console.log(JSON.parse(fs.readFileSync("artifacts/candidate/manifest.json")).version)')
           tar -czf "artifacts/cloud-${VERSION}.tar.gz" -C artifacts/candidate .
-          gh release create "cloud-${VERSION}" "artifacts/cloud-${VERSION}.tar.gz" artifacts/deployment.json --target "$GITHUB_SHA" --title "Cloud ${VERSION}" --prerelease --generate-notes
+          assets=("artifacts/cloud-${VERSION}.tar.gz" artifacts/deployment.json)
+          if [ -f artifacts/ctr06-linux/arcforges-ctr06-bridge-8e5-linux-amd64.zip ]; then assets+=(artifacts/ctr06-linux/arcforges-ctr06-bridge-8e5-linux-amd64.zip); fi
+          if [ -f artifacts/ctr06-windows/arcforges-ctr06-bridge-8e5-windows-amd64.zip ]; then assets+=(artifacts/ctr06-windows/arcforges-ctr06-bridge-8e5-windows-amd64.zip); fi
+          gh release create "cloud-${VERSION}" "${assets[@]}" --target "$GITHUB_SHA" --title "Cloud ${VERSION}" --prerelease --generate-notes
       - name: Preserve deployment evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -458,6 +620,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      id-token: write
     # The producer of the candidate is the main-push run the gate found; tooling/build-identity.ts accepts it on a dispatch only.
     env:
       ARCFORGES_CANDIDATE_RUN_ID: ${{ needs.proof-gate.outputs.run-id }}
@@ -495,6 +658,9 @@ jobs:
       - name: Migrate the acceptance PostgreSQL database (gated)
         run: node tooling/postgres-deploy.ts migrate --target acceptance
         env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           NEON_DATABASE_URL_DIRECT: ${{ secrets.NEON_DATABASE_URL_DIRECT }}
       # The sealed candidate is promoted unchanged as the Go center in official-hosted mode. The acceptance runtime credential is
       # rotated inside this step, uploaded with the Worker version and never printed or stored; the production Worker, its route

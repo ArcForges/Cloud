@@ -30,6 +30,24 @@ interface ReleaseProfile {
     packages: Record<string, { version: string; integrity: string }>;
     legalFiles: string[];
   };
+  bridgeAssets: {
+    sourceCommit: string;
+    sourceTree: string;
+    sourceArchiveSha256: string;
+    contractsGo: string;
+    carrierSha256: string;
+    ociManifestDigest: string;
+    inputs: Record<string, string>;
+    assets: Record<
+      "linux" | "windows",
+      {
+        name: string;
+        sha256: string;
+        executableSha256: string;
+        origin: string;
+      }
+    >;
+  };
   image: {
     baseImage: string;
     buildImage: string;
@@ -81,7 +99,10 @@ export function releaseProfile(owner: string) {
   }
   assert.deepEqual(kinds.sort(), ["native-image-notices", "worker-bundle"]);
   assert.equal(hash(readOwned(owner, profilePath), "lf"), profileHash, "Changed release profile");
-  const p = object(read(owner, profilePath), "schemaVersion id ownerCommit worker image");
+  const p = object(
+    read(owner, profilePath),
+    "schemaVersion id ownerCommit worker image bridgeAssets",
+  );
   assert.equal(p.schemaVersion, 1);
   assert.match(text(p.id), /^cloud-release-r[1-9][0-9]*$/u);
   digest(p.ownerCommit, 40);
@@ -106,6 +127,48 @@ export function releaseProfile(owner: string) {
         digest(expected),
         `Changed build input: ${name}`,
       );
+  }
+  const bridge = object(
+    p.bridgeAssets,
+    "sourceCommit sourceTree sourceArchiveSha256 contractsGo carrierSha256 ociManifestDigest inputs assets",
+  );
+  assert.equal(bridge.sourceCommit, "8e5f6e26aa97b123d9f60b91f780364a094e74cd");
+  assert.equal(bridge.sourceTree, "4a315ea6b47d96c3262e8111fcc26ad1957097f2");
+  digest(bridge.sourceArchiveSha256);
+  assert.equal(bridge.contractsGo, "v1.0.0-ci.437.1");
+  digest(bridge.carrierSha256);
+  assert.match(text(bridge.ociManifestDigest), /^sha256:[a-f0-9]{64}$/u);
+  const bridgeInputs = object(bridge.inputs);
+  assert.deepEqual(
+    Object.keys(bridgeInputs).sort(),
+    [
+      ".github/workflows/ci.yml",
+      "eng/verification/ctr06_bridge_asset_state.py",
+      "eng/verification/ctr06_bridge_bundle.py",
+      "eng/verification/ctr06_native_bridge_check.py",
+      "eng/verify_steps.py",
+      "tooling/ctr06_bridge_carrier.py",
+      "tooling/project.ts",
+      "tooling/release-provenance.ts",
+    ].sort(),
+    "Unclassified bridge asset producer input",
+  );
+  for (const [name, expected] of Object.entries(bridgeInputs))
+    assert.equal(
+      hash(readOwned(owner, relative(name)), "lf"),
+      digest(expected),
+      `Changed bridge asset input: ${name}`,
+    );
+  const assets = object(bridge.assets, "linux windows");
+  for (const platform of ["linux", "windows"] as const) {
+    const asset = object(assets[platform], "name sha256 executableSha256 origin");
+    assert.equal(asset.name, `arcforges-ctr06-bridge-8e5-${platform}-amd64.zip`);
+    digest(asset.sha256);
+    digest(asset.executableSha256);
+    assert.equal(
+      asset.origin,
+      platform === "linux" ? "released-615.1-oci" : "native-8e5-source-build",
+    );
   }
   for (const field of [worker.outputInputs, worker.legalFiles, image.legalFiles])
     list(field).forEach(relative);
@@ -138,6 +201,14 @@ export function releaseProfile(owner: string) {
   }
   const profile = p as unknown as ReleaseProfile;
   return { profile, profilePath, profileHash, artifacts: artifacts.sort() };
+}
+
+/** Compare a real release asset with the same active profile as the image and Worker. */
+export function verifyBridgeAsset(owner: string, platform: "linux" | "windows", bundle: Buffer) {
+  const { profile, profileHash } = releaseProfile(owner);
+  const asset = profile.bridgeAssets.assets[platform];
+  assert.equal(hash(bundle), asset.sha256, "Bridge asset differs from the active release profile");
+  return { platform, name: asset.name, sha256: asset.sha256, profileHash };
 }
 
 export function legalBundle(owner: string, revision: string) {

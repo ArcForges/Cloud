@@ -16,6 +16,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/routes"
 )
 
 // Signed calls and results (AF-CTR-05 part E1b; Plan CTR5-SIG-01..04, CTR5-HUB-08 and -10, PN-6; Contracts relay.proto CallHeader,
@@ -27,6 +28,11 @@ import (
 
 // MaxCallDeadline is the longest a call may wait for its result: its deadline never passes its expiry, at most 300 s after issue.
 const MaxCallDeadline = CallWindowSeconds * time.Second
+
+// FilesCapability is announced only by nodes implementing the AF-CTR-06 methods
+// and their receipt schema. NodeHello's proof authenticates the connection, not
+// the capability field itself; the protected channel carries the declaration.
+const FilesCapability = "files.v1"
 
 // callExpiryMargin is how long a call stays valid at the node after the center stops waiting (CTR5-RTE-06: the call header's
 // expires_at is now + min(deadline + 30 s, 300 s)).
@@ -71,6 +77,10 @@ type Call struct {
 	Payload []byte
 	// Deadline is how long the center waits for the result (CTR5-RTE-06): more than zero, at most MaxCallDeadline.
 	Deadline time.Duration
+	// ReceiptCreatedAt is the original persisted receipt time, required for file mutations.
+	ReceiptCreatedAt time.Time
+	// ReplayUntil is the exclusive receipt replay deadline, carried from the admission decision.
+	ReplayUntil time.Time
 }
 
 // callerOf is the call's verified caller; ok is false without exactly one of Session and a verified Relay.
@@ -114,7 +124,8 @@ type pending struct {
 	commandID     *platform.ID
 	requestSHA256 []byte
 	// expires is the call header's expires_at: the node may act on a delivered call until then, plus its 120 s skew.
-	expires time.Time
+	expires     time.Time
+	replayUntil time.Time // zero for a first/definitely undelivered attempt
 	// state is queued, delivered or abandoned, moved only by compare-and-swap under the connection's lock: the writer moves a queued
 	// call to delivered just before it writes the frame, and a deadline, a caller that went away or a close moves a queued call to
 	// abandoned, whose frame the writer then skips. So a call failed DID_NOT_HAPPEN is never written afterwards.
@@ -185,9 +196,29 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 	case c.userID != call.AccountID:
 		return Result{}, arc.NotFound("node", call.TargetNodeID[:])
 	}
+	if call.Method >= relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE {
+		c.mu.Lock()
+		supported := c.accepted && c.capabilities[FilesCapability]
+		c.mu.Unlock()
+		if !supported {
+			h.metrics.ObserveChannel("call", "capability_unavailable")
+			return Result{}, arc.InvalidState("node", "capability_unavailable")
+		}
+	}
 	if ctx.Err() != nil {
 		// The caller went away before anything was signed (review A N-4).
 		return Result{}, arc.NodeUnreachable(call.TargetNodeID[:], arc.UnreachableDeadline, false)
+	}
+	// Sample immediately before building the signed header; never re-sign with a later
+	// time after waiting for the writer. The stored receipt binds even the first attempt.
+	now = h.clock()
+	if fileCall(call.Method) && Mutation(call.Method) {
+		if call.ReceiptCreatedAt.IsZero() || now.Before(call.ReceiptCreatedAt) {
+			return Result{}, arc.Unavailable()
+		}
+		if !call.ReplayUntil.IsZero() && !now.Before(call.ReplayUntil) {
+			return Result{}, arc.InvalidState("routed_call", "replay_window_passed")
+		}
 	}
 	kid, key, ok := h.signingKey(now)
 	if !ok {
@@ -220,7 +251,7 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 		return Result{}, arc.Unavailable()
 	}
 	p := &pending{callID: callID, method: call.Method, commandID: call.CommandID, requestSHA256: digest[:], expires: timeOf(header.ExpiresAt),
-		done: make(chan outcome, 1)}
+		replayUntil: call.ReplayUntil, done: make(chan outcome, 1)}
 	switch c.addCall(p, now) {
 	case registerClosed:
 		h.metrics.ObserveChannel("call", "offline")
@@ -307,7 +338,8 @@ func (h *Hub) InFlight() int {
 // bytes exactly for a node relay (a verified one), and the deadline within the call's window.
 func validCall(call Call) bool {
 	zero := platform.ID{}
-	if call.AccountID == zero || call.TargetNodeID == zero || call.Method < MethodSubmitNodeTask || call.Method > maxCallMethod ||
+	if call.AccountID == zero || call.TargetNodeID == zero || !callMethod(call.Method) ||
+		(fileCall(call.Method) && call.Deadline > routes.RoutedFileDeadline) ||
 		(call.CommandID != nil) != Mutation(call.Method) || (call.CommandID != nil && *call.CommandID == zero) || len(call.Payload) < 1 ||
 		len(call.Payload) > MaxCallPayload || call.Deadline <= 0 || call.Deadline > MaxCallDeadline {
 		return false
@@ -316,11 +348,24 @@ func validCall(call Call) bool {
 	return ok
 }
 
+func fileCall(method relayv1.RoutedMethod) bool {
+	return method >= relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE && method <= maxCallMethod
+}
+
 // callHeader is a call's CallHeader (CTR5-SIG-01): issued now, its deadline now + Deadline, its expiry now + min(Deadline + 30 s,
 // 300 s), the caller as verified, center_url_sha256 the center's canonical public base URL.
 func callHeader(call Call, verified caller, callID platform.ID, kid, centerURL string, requestSHA256 []byte, now time.Time) *relayv1.CallHeader {
 	audience := sha256.Sum256([]byte(centerURL))
 	expires := min(call.Deadline+callExpiryMargin, MaxCallDeadline)
+	expiresAt := now.Add(expires)
+	if fileCall(call.Method) && !call.ReplayUntil.IsZero() {
+		// The immutable signed expiry remains anchored to the admission fence.
+		// It is not recalculated if the queued writer resumes after a pause.
+		latest := call.ReplayUntil.Add(routes.RoutedFileDeadline + callExpiryMargin)
+		if latest.Before(expiresAt) {
+			expiresAt = latest
+		}
+	}
 	signed := &nodev1.CenterCaller{Kind: verified.kind.Enum(), AccountId: idValue(call.AccountID)}
 	switch verified.kind {
 	case nodev1.CenterCallerKind_CENTER_CALLER_KIND_ACCOUNT_SESSION:
@@ -331,7 +376,7 @@ func callHeader(call Call, verified caller, callID platform.ID, kid, centerURL s
 	}
 	header := &relayv1.CallHeader{CallId: idValue(callID), Kid: proto.String(kid), CenterUrlSha256: audience[:], AccountId: idValue(call.AccountID),
 		TargetNodeId: idValue(call.TargetNodeID), Caller: signed, Method: call.Method.Enum(), RequestSha256: requestSHA256,
-		RequestSize: proto.Uint32(uint32(len(call.Payload))), IssuedAt: instant(now), ExpiresAt: instant(now.Add(expires)),
+		RequestSize: proto.Uint32(uint32(len(call.Payload))), IssuedAt: instant(now), ExpiresAt: instant(expiresAt),
 		Deadline: instant(now.Add(call.Deadline))}
 	if call.CommandID != nil {
 		header.CommandId = idValue(*call.CommandID)
@@ -400,7 +445,17 @@ func (c *conn) forgetLocked(callID platform.ID) {
 func (c *conn) deliver(p *pending) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return !c.callsClosed && !c.closing.Load() && c.calls[p.callID] == p && p.state.CompareAndSwap(callQueued, callDelivered)
+	if c.callsClosed || c.closing.Load() || c.calls[p.callID] != p {
+		return false
+	}
+	if !p.replayUntil.IsZero() && !c.hub.clock().Before(p.replayUntil) {
+		if p.state.CompareAndSwap(callQueued, callAbandoned) {
+			delete(c.calls, p.callID)
+			p.finish(outcome{refusal: arc.InvalidState("routed_call", "replay_window_passed")})
+		}
+		return false
+	}
+	return p.state.CompareAndSwap(callQueued, callDelivered)
 }
 
 // dropCall removes a pending call. A queued call is abandoned (its frame is never written); a delivered one is kept as late when asked,

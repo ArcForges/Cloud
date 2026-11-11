@@ -4,6 +4,7 @@ package hub
 
 import (
 	"errors"
+	"regexp"
 	"time"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
@@ -28,6 +29,23 @@ const maxTokenBytes = 4096
 // errFrame is a node frame the hub cannot read.
 var errFrame = errors.New("not a node channel frame")
 
+// The NodeHello wire contract bounds each connection's capability claims.
+var capabilityPattern = regexp.MustCompile(`^[a-z][a-z0-9.-]{0,31}$`)
+
+func validCapabilities(capabilities []string) bool {
+	if len(capabilities) > 16 {
+		return false
+	}
+	seen := make(map[string]bool, len(capabilities))
+	for _, capability := range capabilities {
+		if !capabilityPattern.MatchString(capability) || seen[capability] {
+			return false
+		}
+		seen[capability] = true
+	}
+	return true
+}
+
 // Decode reads one node frame: a frame of another version, without a member, or that does not decode is refused.
 func (RelayCodec) Decode(data []byte) (inbound, error) {
 	var frame relayv1.RelayFrame
@@ -42,8 +60,9 @@ func (RelayCodec) Decode(data []byte) (inbound, error) {
 		signature := value.GetHelloSignature()
 		// The shape checks come before anything is built from the fields (C2 review N-4): an absent or wrong-length ID or signature is a
 		// malformed hello, closed 4403 without a signing input.
-		malformed := !okNode || !okInstallation || len(signature) != 64
-		return inbound{kind: inboundHello, hello: hello{NodeID: nodeID, InstallationID: installationID, Signature: signature, Malformed: malformed}}, nil
+		malformed := !okNode || !okInstallation || len(signature) != 64 || !validCapabilities(value.GetCapabilities())
+		return inbound{kind: inboundHello, hello: hello{NodeID: nodeID, InstallationID: installationID, Signature: signature,
+			Capabilities: append([]string(nil), value.GetCapabilities()...), Malformed: malformed}}, nil
 	case *relayv1.RelayFrame_Heartbeat:
 		return inbound{kind: inboundHeartbeat}, nil
 	case *relayv1.RelayFrame_TokenRefresh:

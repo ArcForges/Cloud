@@ -158,19 +158,33 @@ func sign(t *testing.T, node *enrolled, channel *nodetest.Channel, request proto
 	set(encoded)
 }
 
-// TestTheRegistryRowsAreTheServedMethods (E2-1, E2-22; Plan CTR5-API-01): the nodes surface serves exactly ListNodes, GetNode,
-// RenameNode, RevokeNode and the six routed task methods (E2b), each with its operation row; every other FleetService method answers
-// UNIMPLEMENTED; with the surface off the ten answer STATE/not_activated with state.reason nodes, before any credential is read.
+// TestTheRegistryRowsAreTheServedMethods (E2-1, E2-22; Plan CTR5-API-01 and AF-CTR-06): the nodes surface serves the four
+// registry methods, six routed task methods and twelve routed file/workspace methods, each with its operation row. Every other
+// FleetService method remains UNIMPLEMENTED; with the surface off all served methods refuse before reading a credential.
 func TestTheRegistryRowsAreTheServedMethods(t *testing.T) {
+	expected := []string{
+		"ListNodes", "GetNode", "RenameNode", "RevokeNode",
+		"SubmitNodeTask", "GetNodeTask", "ListNodeTasks", "WaitNodeTask", "ReadNodeTaskOutput", "CancelNodeTask",
+		"ReadNodeFile", "WriteNodeFile", "EditNodeFile", "SearchNodeFiles", "ListNodeDirectory", "PlanNodeRemoval",
+		"ExecuteNodeRemoval", "GetNodeFileOperation", "RegisterNodeWorkspace", "UnregisterNodeWorkspace", "ListNodeWorkspaces", "GetNodeWorkspace",
+	}
 	served := map[string]bool{}
 	for _, method := range routes.NodesMethods() {
+		if served[method.Path] {
+			t.Errorf("duplicate served method %s", method.Path)
+		}
 		served[method.Path] = true
 		if _, ok := access.Lookup(method.Path); !ok {
 			t.Errorf("%s has no row", method.Path)
 		}
 	}
-	if len(served) != 10 {
-		t.Fatalf("%d served (the registry's four and the six routed task methods, E2b)", len(served))
+	if len(served) != len(expected) {
+		t.Fatalf("%d served, want exactly %d registry/task/file/workspace methods", len(served), len(expected))
+	}
+	for _, name := range expected {
+		if !served[fleetService+name] {
+			t.Errorf("missing served method %s", name)
+		}
 	}
 	h := registryHarness(t)
 	user := h.db.Account(1)

@@ -44,7 +44,8 @@ func setup(t *testing.T) fixture {
 		"CREATE TABLE testbiz.counter (key text PRIMARY KEY, value bigint NOT NULL)",
 		"GRANT USAGE ON SCHEMA testbiz TO " + group,
 		"GRANT SELECT, INSERT, UPDATE ON testbiz.counter TO " + group,
-		"CREATE ROLE " + login + " LOGIN PASSWORD '" + password + "' IN ROLE " + group,
+		"ALTER ROLE " + login + " LOGIN PASSWORD '" + password + "'",
+		"GRANT " + group + " TO " + login,
 	}
 	for _, statement := range statements {
 		if _, err = conn.Exec(ctx, statement); err != nil {

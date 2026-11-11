@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "contracts-error-catalogue-r1",
+  "kind": "source",
+  "sourceRepository": "https://github.com/ArcForges/Contracts",
+  "sourceCommit": "de3dba76266e89654be9b4d29d097d525a281c6a",
+  "sourcePaths": [
+    "fixtures/public/af-con-01-error-catalogue.json",
+    "fixtures/public/LICENSE"
+  ],
+  "licence": {
+    "spdx": "Apache-2.0",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "fixtures/public/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "finding": "Fetched exact producer public-fixture licence through GitHub; its complete bytes equal the already retained Apache-2.0 text."
+      }
+    ],
+    "scope": "Copyright 2026 ArcForges contributors. Exact public Contracts450.1 error-catalogue fixture from de3dba76266e89654be9b4d29d097d525a281c6a is Apache-2.0. Its complete licence is retained verbatim in third-party/ContractsGo.LICENSE.txt. This admits test data, not sibling implementation or hand-edited generated bindings.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright 2026 ArcForges contributors. Exact public Contracts450.1 error-catalogue fixture from de3dba76266e89654be9b4d29d097d525a281c6a is Apache-2.0. Its complete licence is retained verbatim in third-party/ContractsGo.LICENSE.txt. This admits test data, not sibling implementation or hand-edited generated bindings."
+  ],
+  "targets": [
+    {
+      "path": "center/internal/hub/testdata/af-ctr-06-error-catalogue-450.json",
+      "sha256": "7069a1a94eb99c6fb40fea16c17e1f2942510cdc8762ec2cc83622c1e543d412",
+      "normalization": "raw"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Fetch exact producer fixture through GitHub at de3dba76266e89654be9b4d29d097d525a281c6a; compare Git blob638b129da4fc7d638bc232fe8cfa21a87baf5b1c and SHA2567069a1a94eb99c6fb40fea16c17e1f2942510cdc8762ec2cc83622c1e543d412. Retain and hash-check the old437 fixture separately. Run the actual hub catalogue/append-only refusal tests.",
+    "expected": "Exact70-code new fixture; historical67-code fixture unchanged; prior67 integer assignments unchanged.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Copyright 2026 ArcForges contributors. Exact public Contracts450.1 error-catalogue fixture from de3dba76266e89654be9b4d29d097d525a281c6a is Apache-2.0. Its complete licence is retained verbatim in third-party/ContractsGo.LICENSE.txt. This admits test data, not sibling implementation or hand-edited generated bindings.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/ContractsGo.LICENSE.txt"
+    ],
+    "distribution": "source",
+    "reason": "Copyright 2026 ArcForges contributors. Exact public Contracts450.1 error-catalogue fixture from de3dba76266e89654be9b4d29d097d525a281c6a is Apache-2.0. Its complete licence is retained verbatim in third-party/ContractsGo.LICENSE.txt. This admits test data, not sibling implementation or hand-edited generated bindings."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "OpenAI Codex coordinator author assessment; independent PR review pending",
+    "reviewedOn": "2026-11-09",
+    "decision": "approved",
+    "baselineCommit": "a04b44b7ec52fb12c5884f1ccf6f5985b20e34e8",
+    "reconciliation": false,
+    "rationale": "Exact licensed public test fixture fetched through GitHub. Actual bytes match the producer commit; the old fixture and its hash remain unchanged. This source/licence assessment does not replace independent source review or full native verification."
+  },
+  "supersedes": null
+}

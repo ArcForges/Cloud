@@ -107,7 +107,8 @@ variable and never repeats its value.
 
 The `migrate` and `admin` commands read their own variables (`ARCFORGES_CENTER_MIGRATION_DATABASE_URL`, the migration role's
 direct URL; `ARCFORGES_CENTER_DATABASE_NAME`; `ARCFORGES_CENTER_RUNTIME_ROLE`; `ARCFORGES_CENTER_RUNTIME_SECRET_FILE`;
-`ARCFORGES_CENTER_RUNTIME_POOLED_HOST`; `ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT`); `serve` never reads them
+`ARCFORGES_CENTER_RUNTIME_POOLED_HOST`; `ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT`; and, for an existing self-hosted
+schema-10 upgrade, `ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE`); `serve` never reads them
 ([PostgreSQL store](postgres-store.md)); `admin register-signing-key`, `retire-signing-key` and `revoke-device` are the fleet's
 ([center fleet](center-fleet.md#the-centers-signing-keys)). No URL of the official deployment is compiled
 into a code path: `TestNoOfficialEndpointIsCompiledIn` fails if one appears, and health and every URL the center issues derive
@@ -563,3 +564,42 @@ image: `npm run test:container` runs `/app/arcforges-center` as the Container do
 `wrangler.json`, a read-only filesystem, no capabilities, `no-new-privileges`, 256 MiB) and checks its build identity, the health
 identity and `center` block, the published C# gRPC-Web probe, the published native gRPC Consumer and a clean stop on `SIGTERM`;
 `npm run test:worker` runs the same executable behind the real Worker bundle.
+
+### Routed files and registered workspaces (AF-CTR-06)
+
+The nodes surface forwards twelve additive Fleet methods: ReadNodeFile, WriteNodeFile,
+EditNodeFile, SearchNodeFiles, ListNodeDirectory, PlanNodeRemoval, ExecuteNodeRemoval,
+GetNodeFileOperation, RegisterNodeWorkspace, UnregisterNodeWorkspace, ListNodeWorkspaces,
+and GetNodeWorkspace. Their inner node request is forwarded byte for byte after portable
+shape checks; the target decides native root/path resolution, permissions and effects.
+The local-only file-operation acknowledgment has no Fleet route.
+
+Every new route requires ownership, the verified account session or own-node signed relay,
+and the center.execute gate, using the existing routed-call controls. Account-session
+write/edit/removal and workspace register/unregister deliveries consume fresh method- and
+target-bound high-risk evidence; mobile.limited upgrades first. Queries and creation of a
+removal plan are low risk. Register/unregister additionally reject a signed relay unless it
+is HUMAN from the target itself. The target still applies its fixed HUMAN and per-origin
+rules. Account authentication never supplies local-HUMAN approval.
+
+Only the six mutations carry a command ID and use fleet.routed_file_call. A migration-owned
+private trigger reserves (account, command) across old task and new file receipts, including
+old SQL writers; a new center also checks this namespace before presence. New file records
+bind a relayed agent's specific local session. The old task replay digest remains unchanged.
+Admissions, joins, replay-window fencing, conservative lost-settlement handling and fenced
+epoch sweeps cover both receipt tables. No request/response body is stored in a receipt.
+
+Each new request admits at most 245,760 inner bytes. The outer ingress remains bounded at
+262,144 bytes, replies at 1 MiB including framing, and the Fleet operation deadline at fifteen seconds.
+The routed node gets up to fourteen seconds including transport and settlement reserve; its file operation retains its published ten-second deadline.
+The official center generator produces the Worker table from these route declarations;
+unrelated methods retain their existing bounds.
+
+The center audits target metadata and bounded signed node observations, including digest
+scope, actual byte count and digest-input count. It validates actual read bytes against their
+returned digest and requires the success observation prescribed by Design06a. Search digests
+remain explicitly node-supplied observations; the center does not claim to read those files.
+A missing/invalid signed result records observations as unavailable. File bodies, patterns,
+replacement text and search matches remain transient and are excluded from receipts, audits
+and logs. Native-node filesystem acceptance and strict cleanup remain separate required
+AF-CTR-06 evidence; center routing tests with software node handlers do not establish them.

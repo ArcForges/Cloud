@@ -84,6 +84,19 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.fleet.v1.FleetService/WaitNodeTask session 8192",
 		"/arcforges.fleet.v1.FleetService/ReadNodeTaskOutput session 8192",
 		"/arcforges.fleet.v1.FleetService/CancelNodeTask session 8192",
+		// AF-CTR-06 explicit routes; older rows/bounds remain unchanged.
+		"/arcforges.fleet.v1.FleetService/ReadNodeFile session 262144",
+		"/arcforges.fleet.v1.FleetService/WriteNodeFile session 262144",
+		"/arcforges.fleet.v1.FleetService/EditNodeFile session 262144",
+		"/arcforges.fleet.v1.FleetService/SearchNodeFiles session 262144",
+		"/arcforges.fleet.v1.FleetService/ListNodeDirectory session 262144",
+		"/arcforges.fleet.v1.FleetService/PlanNodeRemoval session 262144",
+		"/arcforges.fleet.v1.FleetService/ExecuteNodeRemoval session 262144",
+		"/arcforges.fleet.v1.FleetService/GetNodeFileOperation session 262144",
+		"/arcforges.fleet.v1.FleetService/RegisterNodeWorkspace session 262144",
+		"/arcforges.fleet.v1.FleetService/UnregisterNodeWorkspace session 262144",
+		"/arcforges.fleet.v1.FleetService/ListNodeWorkspaces session 262144",
+		"/arcforges.fleet.v1.FleetService/GetNodeWorkspace session 262144",
 	}
 	if len(table.Surfaces) != 7 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
 		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || table.Surfaces[6] != SurfaceNodes ||
@@ -107,6 +120,8 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 				"/arcforges.fleet.v1.FleetService/CancelNodeTask":
 				// The routed task methods (E2b): 10 s, Wait 55 s, ReadOutput 30 s; a node response of up to 1 MiB plus its frame.
 				deadline, reply = 10_000, RoutedReplyBytes
+			case "/arcforges.fleet.v1.FleetService/ReadNodeFile", "/arcforges.fleet.v1.FleetService/WriteNodeFile", "/arcforges.fleet.v1.FleetService/EditNodeFile", "/arcforges.fleet.v1.FleetService/SearchNodeFiles", "/arcforges.fleet.v1.FleetService/ListNodeDirectory", "/arcforges.fleet.v1.FleetService/PlanNodeRemoval", "/arcforges.fleet.v1.FleetService/ExecuteNodeRemoval", "/arcforges.fleet.v1.FleetService/GetNodeFileOperation", "/arcforges.fleet.v1.FleetService/RegisterNodeWorkspace", "/arcforges.fleet.v1.FleetService/UnregisterNodeWorkspace", "/arcforges.fleet.v1.FleetService/ListNodeWorkspaces", "/arcforges.fleet.v1.FleetService/GetNodeWorkspace":
+				deadline, reply = 15_000, RoutedReplyBytes
 			case "/arcforges.fleet.v1.FleetService/WaitNodeTask":
 				deadline, reply = 55_000, RoutedReplyBytes
 			case "/arcforges.fleet.v1.FleetService/ReadNodeTaskOutput":

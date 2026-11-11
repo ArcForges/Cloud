@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/ArcForges/Cloud/center/internal/bridgeproof"
 	"github.com/ArcForges/Cloud/center/internal/schema"
 )
 
@@ -194,16 +196,18 @@ type Result struct {
 	TestedMajor              int  `json:"testedMajor"`
 	ServerMajorMatchesTested bool `json:"serverMajorMatchesTested"`
 	// Logging is recorded with every run (the deployment's evidence).
-	Logging      Logging   `json:"logging"`
-	RuntimeRole  string    `json:"runtimeRole,omitempty"`
-	State        string    `json:"state"`
-	Version      int       `json:"version"`
-	BuildVersion int       `json:"buildVersion"`
-	Applied      []Applied `json:"applied"`
-	Pending      []string  `json:"pending"`
-	Ran          []Step    `json:"ran,omitempty"`
-	Problems     []string  `json:"problems,omitempty"`
-	Grants       string    `json:"grants,omitempty"`
+	Logging           Logging   `json:"logging"`
+	RuntimeRole       string    `json:"runtimeRole,omitempty"`
+	RuntimeRoleExists *bool     `json:"runtimeRoleExists,omitempty"`
+	RestoreReceipt    string    `json:"restoreReceipt,omitempty"`
+	State             string    `json:"state"`
+	Version           int       `json:"version"`
+	BuildVersion      int       `json:"buildVersion"`
+	Applied           []Applied `json:"applied"`
+	Pending           []string  `json:"pending"`
+	Ran               []Step    `json:"ran,omitempty"`
+	Problems          []string  `json:"problems,omitempty"`
+	Grants            string    `json:"grants,omitempty"`
 }
 
 // Logging is what the server records of statements, as the migration role's session sees it. Unset modules read as
@@ -298,6 +302,11 @@ func Inspect(ctx context.Context, conn *pgx.Conn, build []Migration) (Result, er
 		return result, Sanitize("identify the database", err)
 	}
 	result.recordServer()
+	if err := RequireOrdinaryDatabase(ctx, conn, result.Database); err != nil {
+		result.State = StateRefused
+		result.Problems = append(result.Problems, "database restore isolation is unresolved")
+		return result, err
+	}
 	logging, loggingErr := ReadLogging(ctx, conn)
 	if loggingErr != nil {
 		return result, loggingErr
@@ -308,6 +317,13 @@ func Inspect(ctx context.Context, conn *pgx.Conn, build []Migration) (Result, er
 		return result, Sanitize("read platform.schema_migration", err)
 	}
 	result.describe(build, applied, exists)
+	if result.Version >= 11 {
+		if result.RuntimeRole, result.RestoreReceipt, err = readyCTR06Admission(ctx, conn, ""); err != nil {
+			result.State = StateRefused
+			result.Problems = append(result.Problems, "runtime floor or restore admission is unavailable or untrusted")
+			return result, err
+		}
+	}
 	return result, nil
 }
 
@@ -338,7 +354,14 @@ type Options struct {
 	// Runner names the build that applies the migrations (its revision); it is recorded with every applied migration.
 	Runner string
 	// RuntimeRole is the runtime group role whose grants are reconciled after the migrations; empty skips the reconciliation.
-	RuntimeRole      string
+	RuntimeRole string
+	// BridgeProof is obtained only by verifying the protected publisher's OIDC token.
+	BridgeProof *bridgeproof.Verified
+	// localBridge is created only inside the self-hosted manager after it has
+	// issued fresh roles and run and stopped the exact verified bridge.
+	localBridge      *localBridgeAdmission
+	localRestore     *restoreCapability
+	localLegacyGrant *ctr06RestoreBridgeGrant
 	LockTimeout      time.Duration
 	StatementTimeout time.Duration
 	LockWait         time.Duration
@@ -420,6 +443,22 @@ func Apply(ctx context.Context, conn *pgx.Conn, build []Migration, options Optio
 		return result, err
 	}
 	defer unlock(conn)
+	if grant, ok := ctx.Value(ctr06RestoreBridgeGrantKey{}).(*ctr06RestoreBridgeGrant); ok {
+		supported, err := Load(schema.Migrations())
+		if err == nil && len(supported) >= 10 && slices.Equal(build, supported[:10]) && grant.valid(ctx, conn, conn, options) {
+			options.localLegacyGrant = grant
+		}
+	}
+	if options.localRestore == nil && options.localLegacyGrant == nil {
+		if err := RequireOrdinaryDatabase(ctx, conn, result.Database); err != nil {
+			result.State = StateRefused
+			result.Problems = append(result.Problems, "database restore isolation is unresolved")
+			return result, err
+		}
+	} else if options.localRestore != nil && (!options.localRestore.active || options.localRestore.conn != conn || requireCTR06RestoreIsolation(ctx, conn) != nil) {
+		result.State = StateRefused
+		return result, ErrCTR06RetirementUnproven
+	}
 	if err := bootstrap(ctx, conn); err != nil {
 		return result, Sanitize("create platform.schema_migration", err)
 	}
@@ -428,6 +467,17 @@ func Apply(ctx context.Context, conn *pgx.Conn, build []Migration, options Optio
 		return result, Sanitize("read platform.schema_migration", err)
 	}
 	comparison := result.describe(build, applied, exists)
+	// Even a schema-only invocation must not report a quarantined or
+	// identity-mismatched canonical 0011 database as current. Only the
+	// unexported capability held by the active restore manager can pass the
+	// PENDING boundary.
+	if len(applied) >= 11 && len(build) >= 11 && build[10].Name == "0011_fleet_routed_files.sql" && options.localRestore == nil {
+		if _, _, err := readyCTR06Admission(ctx, conn, options.RuntimeRole); err != nil {
+			result.State = StateRefused
+			result.Problems = append(result.Problems, "runtime floor or restore admission is unavailable or untrusted")
+			return result, err
+		}
+	}
 	if len(comparison.Problems) > 0 {
 		for _, problem := range comparison.Problems {
 			options.Logger.Error("migration refused", "problem", problem)
@@ -447,7 +497,7 @@ func Apply(ctx context.Context, conn *pgx.Conn, build []Migration, options Optio
 		return result, Sanitize("read platform.schema_migration", err)
 	}
 	result.describe(build, applied, true)
-	if options.RuntimeRole != "" {
+	if options.RuntimeRole != "" && options.localRestore == nil {
 		if err = reconcile(ctx, conn, options); err != nil {
 			return result, err
 		}
@@ -525,14 +575,27 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 		if _, err := tx.Exec(ctx, settings); err != nil {
 			return err
 		}
+		if migration.Version == 11 && migration.Name == "0011_fleet_routed_files.sql" {
+			if err := guardCTR06Schema(ctx, tx, conn, options.RuntimeRole, options.Runner, options.BridgeProof, options.localBridge); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, migration.SQL); err != nil {
 			return err
+		}
+		if migration.Version == 11 && migration.Name == "0011_fleet_routed_files.sql" {
+			if err := recordCTR06Floor(ctx, tx, conn, options.RuntimeRole, options.BridgeProof, options.localBridge, options.localRestore); err != nil {
+				return err
+			}
 		}
 		_, err := tx.Exec(ctx, "INSERT INTO platform.schema_migration (version, name, sha256, duration_ms, runner) VALUES ($1, $2, $3, $4, $5)",
 			migration.Version, migration.Name, migration.SHA256, time.Since(started).Milliseconds(), runnerName(options.Runner))
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, ErrCTR06RetirementUnproven) {
+			return Step{}, err
+		}
 		failure := &Failure{Version: migration.Version, Name: migration.Name, SQLState: "unknown", Message: "the migration did not complete"}
 		var pgError *pgconn.PgError
 		if errors.As(err, &pgError) {
@@ -655,6 +718,10 @@ var ErrIncompatible = errors.New("the database schema does not match this build"
 // build must be applied exactly. Migrations beyond the build are allowed, because expand-and-contract keeps the previous
 // revision working while the next one is migrated and deployed. It returns the database's version.
 func CheckCompatible(ctx context.Context, q Querier, build []Migration) (int, error) {
+	var database string
+	if err := q.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil || RequireOrdinaryDatabase(ctx, q, database) != nil {
+		return 0, fmt.Errorf("%w: database restore isolation is unresolved", ErrIncompatible)
+	}
 	applied, exists, err := ReadApplied(ctx, q)
 	if err != nil {
 		return 0, Sanitize("read platform.schema_migration", err)
