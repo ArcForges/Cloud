@@ -41,7 +41,8 @@ verify the actual observation and enforcement against its authenticated authorit
 a page digest or a receipt-shaped string alone does not prove complete coverage or active enforcement.
 
 A fresh issue/use response retains its authenticated not-before and expiry through all asynchronous checks and durable intent.
-The broker rechecks both that window and the lease before requesting an effect. The separately controlled issuer and publisher must
+The broker rechecks that window, the lease and each source collection time after asynchronous controls and durable intent. Each source
+must be at most 120 seconds old at the gate output and at each issuer or publisher effect. The separately controlled issuer and publisher must
 independently validate the same signed target, source set, lease, fence and window at their own atomic acceptance boundary. The helper
 for a reviewed adapter checks those fields immediately before its synchronous fenced acceptance; the production enforcement point,
 issuer and publisher are not configured or proven by the isolated software-key test. An expired or uncertain authorization cannot

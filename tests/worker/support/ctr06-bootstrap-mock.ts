@@ -166,7 +166,8 @@ export const sourceProfiles = domains.map((domain) => ({
   observationType: "mock-authenticated-v1",
   enforcementType: "mock-enforcement-v1",
 }));
-function evidence(holder: string, now: number) {
+function evidence(holder: string, now: number, sourceAge = 0) {
+  const collectedAt = now - sourceAge;
   const refs = sourceProfiles.map((profile, index) => ({
     domain: profile.domain,
     namespace: profile.namespace,
@@ -177,7 +178,7 @@ function evidence(holder: string, now: number) {
     id: "lease1",
     holder,
     fence: "fence1",
-    start: now - 1,
+    start: collectedAt - 1,
     end: now + 120,
     sources: refs,
   };
@@ -188,7 +189,7 @@ function evidence(holder: string, now: number) {
     const digest = createHash("sha256").update(JSON.stringify(pages)).digest("hex");
     return {
       ...ref,
-      collectedAt: now,
+      collectedAt,
       pages,
       observation: {
         type: "mock-authenticated-v1",
@@ -197,7 +198,7 @@ function evidence(holder: string, now: number) {
         digest,
         attestation: sign(
           "RSA-SHA256",
-          sourceObservationMessage(ref, now, digest),
+          sourceObservationMessage(ref, collectedAt, digest),
           sourcePair.privateKey,
         ).toString("base64url"),
       },
@@ -250,8 +251,10 @@ function gatePayload(
     "producer" | "run" | "runNumber" | "attempt" | "eventDigest" | "gateChallenge"
   >,
   failure = "",
+  epoch = gateEpoch,
+  sourceAge = 0,
 ) {
-  const observations = evidence(`${value.run}:${value.attempt}`, gateEpoch);
+  const observations = evidence(`${value.run}:${value.attempt}`, epoch, sourceAge);
   mutateEvidence(observations, failure);
   return Buffer.from(
     JSON.stringify({
@@ -386,8 +389,10 @@ export function prepareSyntheticGate(
     "producer" | "run" | "runNumber" | "attempt" | "eventDigest" | "gateChallenge"
   >,
   failure = "",
+  options: { epoch?: number; sourceAge?: number } = {},
 ) {
-  const payload = gatePayload(context, failure);
+  const epoch = options.epoch ?? gateEpoch;
+  const payload = gatePayload(context, failure, epoch, options.sourceAge ?? 0);
   const claims = {
     iss: "https://token.actions.githubusercontent.com",
     aud: `arcforges:ctr06:bootstrap-authority:v1:${createHash("sha256").update(payload).digest("hex")}`,
@@ -405,9 +410,9 @@ export function prepareSyntheticGate(
     run_attempt: collector.runAttempt,
     runner_environment: "github-hosted",
     jti: "synthetic-gate",
-    iat: gateEpoch - 1,
-    nbf: gateEpoch - 1,
-    exp: gateEpoch + 60,
+    iat: epoch - 1,
+    nbf: epoch - 1,
+    exp: epoch + 60,
   };
   const prefix = `${encode({ alg: "RS256", kid: "fixture", typ: "JWT" })}.${encode(claims)}`;
   const signature = sign("RSA-SHA256", Buffer.from(prefix), pair.privateKey).toString("base64url");
@@ -423,6 +428,9 @@ export class SyntheticAuthority implements BrokerPorts {
   failurePhase = "";
   phase = "";
   tokenLifetimeSeconds = 60;
+  sourceAgeSeconds = 0;
+  sourceAgePhase = "";
+  lastTiming: Record<string, { collectedAt: number; expiresAt: number; leaseEnd: number }> = {};
   blockRevocation = false;
   historyUnavailable = false;
   publicUnknown = false;
@@ -457,7 +465,13 @@ export class SyntheticAuthority implements BrokerPorts {
     this.calls.push(`observe:${phase}`);
     const now = Math.floor(Date.now() / 1000);
     this.phase = phase;
-    const observations = evidence(`${request.run}:${request.attempt}`, now);
+    const sourceAge = this.sourceAgePhase === phase ? this.sourceAgeSeconds : 0;
+    const observations = evidence(`${request.run}:${request.attempt}`, now, sourceAge);
+    this.lastTiming[phase] = {
+      collectedAt: now - sourceAge,
+      expiresAt: now + this.tokenLifetimeSeconds,
+      leaseEnd: observations.lease.end,
+    };
     if (!this.failurePhase || this.failurePhase === phase) {
       mutateEvidence(observations, this.failure);
       if (this.failure === "expired") observations.lease.end = now - 1;

@@ -189,7 +189,9 @@ async function validateObservation(
 ): Promise<{ lease: Lease; digest: string; window: AuthenticatedWindow }> {
   assert(observation.payload.length > 0 && observation.payload.length <= 1024 * 1024);
   const now = Math.floor(Date.now() / 1000);
+  const authenticatedDigest = sha(observation.payload);
   const window = await verifyCollector(profile, observation, target, now);
+  assert.equal(sha(observation.payload), authenticatedDigest, "Authenticated observation changed");
   const data = object(
     parseDocument(observation.payload),
     "schema phase challenge targetDigest producer eventDigest originalRun lease sources authority",
@@ -209,12 +211,23 @@ async function validateObservation(
     profile.requiredSources,
   );
   evaluateObservedAuthority(data.authority);
-  await boundary.verifyCoverage(observation.payload, lease, target);
+  await boundary.verifyCoverage(Buffer.from(observation.payload), lease, target);
   await boundary.verifyLease(lease, target);
+  assert.equal(sha(observation.payload), authenticatedDigest, "Authenticated observation changed");
   const current = Math.floor(Date.now() / 1000);
   requireFreshWindow(window, current);
-  assert(lease.start <= current && current < lease.end, "Lease expired during verification");
-  return { lease, digest: sha(observation.payload), window };
+  assert.deepEqual(
+    inspectSourceEvidence(
+      data.lease,
+      data.sources,
+      current,
+      `${target.run}:${target.attempt}`,
+      profile.requiredSources,
+    ),
+    lease,
+    "Authenticated source lease changed",
+  );
+  return { lease, digest: authenticatedDigest, window };
 }
 
 async function checkedObservation(
@@ -239,11 +252,32 @@ async function checkedObservation(
   return { ...verified, phase, challenge, proof };
 }
 
-function requireCurrentEffect(proof: EffectAuthorization): void {
+function requireCurrentEffect(
+  proof: EffectAuthorization,
+  profile: BrokerTrustProfile,
+  target: AttemptTarget,
+): void {
   const now = Math.floor(Date.now() / 1000);
   requireFreshWindow(proof.window, now);
-  assert(proof.lease.start <= now && now < proof.lease.end, "Effect lease is not current");
   assert.equal(sha(proof.proof.payload), proof.digest, "Authenticated effect payload changed");
+  const data = object(
+    parseDocument(proof.proof.payload),
+    "schema phase challenge targetDigest producer eventDigest originalRun lease sources authority",
+  );
+  assert.equal(data.phase, proof.phase);
+  assert.equal(data.challenge, proof.challenge);
+  assert.equal(data.targetDigest, brokerTargetDigest(target));
+  assert.deepEqual(
+    inspectSourceEvidence(
+      data.lease,
+      data.sources,
+      now,
+      `${target.run}:${target.attempt}`,
+      profile.requiredSources,
+    ),
+    proof.lease,
+    "Effect source lease differs",
+  );
 }
 
 /** Independently controlled issuer/publisher adapters must use equivalent real signature, source and
@@ -270,7 +304,7 @@ export async function acceptFencedEffect<T>(
   assert.deepEqual(verified.lease, authorization.lease, "Effect lease or source fence differs");
   assert.deepEqual(verified.window, authorization.window, "Authenticated effect window differs");
   assert.equal(verified.digest, authorization.digest, "Authenticated effect digest differs");
-  requireCurrentEffect(authorization);
+  requireCurrentEffect(authorization, profile, target);
   const accepted = effect();
   assert(!(accepted instanceof Promise), "Effect acceptance must be synchronous under the fence");
   return accepted;
@@ -425,7 +459,7 @@ async function runBrokerEngine(
   let capability: Capability | undefined;
   try {
     assert.equal(issueProof.phase, "issue");
-    requireCurrentEffect(issueProof as EffectAuthorization);
+    requireCurrentEffect(issueProof as EffectAuthorization, profile, target);
     capability = await boundary.issue(target, issueId, issueProof as EffectAuthorization);
     assert(
       identifier.test(capability.id) &&
@@ -461,7 +495,7 @@ async function runBrokerEngine(
     registry.publicationIntent(target, issueId); // durable before any publisher request
     try {
       assert.equal(useProof.phase, "use");
-      requireCurrentEffect(useProof as EffectAuthorization);
+      requireCurrentEffect(useProof as EffectAuthorization, profile, target);
       await boundary.publish(
         target,
         issueId,

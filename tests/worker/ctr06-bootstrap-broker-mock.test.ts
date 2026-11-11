@@ -27,7 +27,7 @@ if (process.platform === "linux") {
         "--test",
         "tests/worker/support/ctr06-bootstrap-production-driver.ts",
       ],
-      { encoding: "utf8", timeout: 30000, env: {} },
+      { encoding: "utf8", timeout: 60000, env: {} },
     );
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stderr + result.stdout);
@@ -363,6 +363,130 @@ if (process.platform === "linux") {
         else for (const entry of mock.entries.values()) assert.notEqual(entry.credential, "active");
         journal.close();
       }
+  });
+
+  test("source age is rechecked after real keys, coverage, lease, intent and atomic-effect waits for issue/use", async (t) => {
+    const sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 2100));
+    for (const phase of ["issue", "use"] as const)
+      for (const stage of ["keys", "coverage", "lease", "journal", "boundary"] as const) {
+        const root = scratchDirectory("ctr06-source-age-", t);
+        const journal = new BootstrapJournal(root);
+        const mock = new SyntheticAuthority();
+        mock.sourceAgeSeconds = 119;
+        mock.sourceAgePhase = phase;
+        let delayed = false;
+        const delay = async () => {
+          if (!delayed && mock.phase === phase) {
+            delayed = true;
+            await sleep();
+          }
+        };
+        const profile = { ...testProfile, beforeKeys: stage === "keys" ? delay : undefined };
+        if (stage === "coverage") {
+          const original = mock.verifyCoverage.bind(mock);
+          mock.verifyCoverage = async (...args) => {
+            await delay();
+            await original(...args);
+          };
+        }
+        if (stage === "lease") {
+          const original = mock.verifyLease.bind(mock);
+          mock.verifyLease = async (...args) => {
+            await delay();
+            await original(...args);
+          };
+        }
+        if (stage === "journal") {
+          const original = journal.append.bind(journal);
+          journal.append = (event) => {
+            const result = original(event);
+            if (
+              !delayed &&
+              event.kind === (phase === "issue" ? "issue_intent" : "publish_intent")
+            ) {
+              delayed = true;
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2100);
+            }
+            return result;
+          };
+        }
+        if (stage === "boundary" && phase === "issue") {
+          const original = mock.issue.bind(mock);
+          mock.issue = async (...args) => {
+            await delay();
+            return original(...args);
+          };
+        }
+        if (stage === "boundary" && phase === "use") {
+          const original = mock.publish.bind(mock);
+          mock.publish = async (...args) => {
+            await delay();
+            return original(...args);
+          };
+        }
+        await assert.rejects(
+          runIsolatedBroker(journal, target(), profile, mock),
+          `${phase}:${stage}`,
+        );
+        const timing = mock.lastTiming[phase];
+        assert(timing && delayed);
+        const now = Math.floor(Date.now() / 1000);
+        assert(now - timing.collectedAt > 120, `${phase}:${stage}`);
+        assert(
+          now < timing.expiresAt && now < timing.leaseEnd,
+          "JWT and lease must still be valid",
+        );
+        assert.equal(mock.actual, undefined, `${phase}:${stage}`);
+        if (phase === "issue") assert.equal(mock.entries.size, 0);
+        else for (const entry of mock.entries.values()) assert.notEqual(entry.credential, "active");
+        console.log(
+          JSON.stringify({
+            phase,
+            stage,
+            sourceAgeAtRefusal: now - timing.collectedAt,
+            jwtRemaining: timing.expiresAt - now,
+            leaseRemaining: timing.leaseEnd - now,
+          }),
+        );
+        journal.close();
+      }
+  });
+
+  test("source age exactly 120 seconds remains valid at independently verified issue/use effect boundaries", async (t) => {
+    for (const phase of ["issue", "use"] as const) {
+      const root = scratchDirectory("ctr06-source-boundary-", t);
+      const journal = new BootstrapJournal(root);
+      const mock = new SyntheticAuthority();
+      mock.sourceAgeSeconds = 119;
+      mock.sourceAgePhase = phase;
+      let observedAge = -1;
+      const waitUntilBoundary = async () => {
+        const timing = mock.lastTiming[phase];
+        assert(timing);
+        const delay = Math.max(0, (timing.collectedAt + 120) * 1000 + 50 - Date.now());
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        observedAge = Math.floor(Date.now() / 1000) - timing.collectedAt;
+        assert.equal(observedAge, 120);
+      };
+      if (phase === "issue") {
+        const original = mock.issue.bind(mock);
+        mock.issue = async (...args) => {
+          await waitUntilBoundary();
+          return original(...args);
+        };
+      } else {
+        const original = mock.publish.bind(mock);
+        mock.publish = async (...args) => {
+          await waitUntilBoundary();
+          return original(...args);
+        };
+      }
+      const result = await runIsolatedBroker(journal, target(), testProfile, mock);
+      assert.equal(result.tag, target().release);
+      assert.equal(observedAge, 120);
+      console.log(JSON.stringify({ phase, sourceAgeAtBoundary: observedAge, effect: "accepted" }));
+      journal.close();
+    }
   });
 
   test("issuer and publisher independently reject altered authenticated windows, source fences and stale workers", async (t) => {

@@ -3,7 +3,22 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { runProductionBroker } from "../../tooling/ctr06-bootstrap-broker.ts";
 import { BootstrapJournal } from "../../tooling/ctr06-bootstrap-journal.ts";
-import { target } from "./support/ctr06-bootstrap-mock.ts";
+import {
+  target,
+  approval,
+  prepareSyntheticGate,
+  sourceProfiles,
+  testProfile,
+  SyntheticAuthority,
+} from "./support/ctr06-bootstrap-mock.ts";
+import {
+  inspectCurrentGateProof,
+  inspectGateProof,
+  requireCurrentGateProof,
+  type GateObservation,
+} from "../../tooling/ctr06-bootstrap-gate.ts";
+import { inspectSourceEvidence } from "../../tooling/ctr06-bootstrap-policy.ts";
+import { verifyCollectorIdentityWithKeys } from "../../tooling/ctr06-bootstrap-oidc.ts";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -94,6 +109,130 @@ test("local sealed receipt checks producer, original source, version, same bytes
   writeFileSync(receiptPath, JSON.stringify(receipt));
   writeFileSync(carrierPath, Buffer.from("tampered"));
   await assert.rejects(inspectLocalSealedCarrier(root, producer));
+});
+
+test("current gate rechecks signed source age after keys, controls and at output; historical checks use job time", async () => {
+  const request = target();
+  const context = {
+    producer: request.producer,
+    run: request.run,
+    runNumber: request.runNumber,
+    attempt: request.attempt,
+    originalRun: approval.originalRun,
+    eventDigest: request.eventDigest,
+    challenge: request.gateChallenge,
+  };
+  const epoch = Math.floor(Date.now() / 1000);
+  const boundary = prepareSyntheticGate(request, "", { epoch, sourceAge: 120 });
+  const identity = async (proof: GateObservation, at: number) =>
+    verifyCollectorIdentityWithKeys(
+      proof.payload,
+      proof.token,
+      testProfile.collector,
+      at,
+      testProfile.softwareJwks,
+    );
+  const checked = await inspectGateProof(context, boundary, epoch, sourceProfiles, identity);
+  assert.equal(checked.lease.holder, `${request.run}:${request.attempt}`);
+  const data = JSON.parse(boundary.payload.toString("utf8")) as {
+    lease: unknown;
+    sources: unknown;
+  };
+  assert.doesNotThrow(() =>
+    inspectSourceEvidence(data.lease, data.sources, epoch, checked.lease.holder, sourceProfiles),
+  );
+  assert.throws(
+    () =>
+      inspectSourceEvidence(
+        data.lease,
+        data.sources,
+        epoch + 1,
+        checked.lease.holder,
+        sourceProfiles,
+      ),
+    /stale/,
+  );
+
+  const sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 2100));
+  for (const stage of ["keys", "coverage", "output"] as const) {
+    const at = Math.floor(Date.now() / 1000);
+    const proof = prepareSyntheticGate(request, "", { epoch: at, sourceAge: 119 });
+    const source = new SyntheticAuthority();
+    let delayed = false;
+    const verifyIdentity = async (item: GateObservation, when: number) => {
+      if (stage === "keys") {
+        delayed = true;
+        await sleep();
+      }
+      return verifyCollectorIdentityWithKeys(
+        item.payload,
+        item.token,
+        testProfile.collector,
+        when,
+        testProfile.softwareJwks,
+      );
+    };
+    const controls = async (lease: typeof checked.lease) => {
+      await source.verifyCoverage(proof.payload, lease);
+      if (stage === "coverage") {
+        delayed = true;
+        await sleep();
+      }
+    };
+    if (stage === "output") {
+      const verified = await inspectCurrentGateProof(
+        context,
+        proof,
+        sourceProfiles,
+        verifyIdentity,
+        controls,
+      );
+      delayed = true;
+      await sleep();
+      assert.throws(
+        () => requireCurrentGateProof(context, proof, sourceProfiles, verified),
+        /stale/,
+      );
+    } else {
+      await assert.rejects(
+        inspectCurrentGateProof(context, proof, sourceProfiles, verifyIdentity, controls),
+        /stale/,
+      );
+    }
+    const current = Math.floor(Date.now() / 1000);
+    assert(delayed && current - (at - 119) > 120, stage);
+    assert(current < at + 60 && current < at + 120, "JWT and lease must still be valid");
+  }
+});
+
+test("gate rejects mutation of signed payload while identity verification is awaited", async () => {
+  const request = target();
+  const context = {
+    producer: request.producer,
+    run: request.run,
+    runNumber: request.runNumber,
+    attempt: request.attempt,
+    originalRun: approval.originalRun,
+    eventDigest: request.eventDigest,
+    challenge: request.gateChallenge,
+  };
+  const at = Math.floor(Date.now() / 1000);
+  const proof = prepareSyntheticGate(request, "", { epoch: at, sourceAge: 0 });
+  const verifyThenMutate = async (item: GateObservation, when: number) => {
+    const window = await verifyCollectorIdentityWithKeys(
+      item.payload,
+      item.token,
+      testProfile.collector,
+      when,
+      testProfile.softwareJwks,
+    );
+    item.payload[0] = 0;
+    return window;
+  };
+  await assert.rejects(
+    inspectGateProof(context, proof, at, sourceProfiles, verifyThenMutate),
+    /Authenticated gate payload changed/,
+  );
 });
 
 if (process.platform === "linux") {

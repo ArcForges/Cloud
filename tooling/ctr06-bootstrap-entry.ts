@@ -23,8 +23,8 @@ import {
 import { object, parseDocument } from "./provenance.ts";
 import { root } from "./process.ts";
 import { requireReviewedAuthorityProfile } from "./ctr06-bootstrap-profile.ts";
-import { inspectGateProof } from "./ctr06-bootstrap-gate.ts";
-import { requireFreshWindow, verifyCollectorIdentity } from "./ctr06-bootstrap-oidc.ts";
+import { inspectCurrentGateProof, requireCurrentGateProof } from "./ctr06-bootstrap-gate.ts";
+import { verifyCollectorIdentity } from "./ctr06-bootstrap-oidc.ts";
 
 type Producer = ReturnType<typeof validateBridgeProducer>;
 const hexDigest = /^[a-f0-9]{64}$/u;
@@ -197,7 +197,6 @@ export async function runBootstrapEntry(mode: string, directory?: string): Promi
     assert.equal(approval.eventDigest, eventDigest);
     const challenge = randomBytes(32).toString("hex");
     const proof = await profile.collectGate(producer, approval, challenge);
-    const at = Math.floor(Date.now() / 1000);
     const context = {
       producer: producer.producer.commit,
       run: producer.producer.runId,
@@ -207,23 +206,20 @@ export async function runBootstrapEntry(mode: string, directory?: string): Promi
       eventDigest,
       challenge,
     };
-    const checked = await inspectGateProof(
+    const checked = await inspectCurrentGateProof(
       context,
       proof,
-      at,
       profile.requiredSources,
       async (item, when) => {
         const identity = await profile.collectorRun(item, context);
         assert.equal(identity.sourceSha, profile.collectorSourceSha);
         return verifyCollectorIdentity(item.payload, item.token, identity, when);
       },
+      async () => profile.verifyGateControls(proof, producer, approval),
     );
-    await profile.verifyGateControls(proof, producer, approval);
-    const current = Math.floor(Date.now() / 1000);
-    requireFreshWindow(checked.window, current);
-    assert(checked.lease.start <= current && current < checked.lease.end);
     const output = process.env.GITHUB_OUTPUT;
     assert(output && path.isAbsolute(output), "Missing GitHub output file");
+    requireCurrentGateProof(context, proof, profile.requiredSources, checked);
     appendFileSync(output, `gate-digest=${checked.digest}\ngate-challenge=${challenge}\n`, {
       encoding: "utf8",
     });
