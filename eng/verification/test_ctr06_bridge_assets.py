@@ -23,6 +23,7 @@ import ctr06_native_bridge_check as native
 import ctr06_security_bridge_compiler as security_compiler
 import ctr06_security_bridge_driver as security_driver
 import ctr06_security_bridge_native_check as security_native
+import ctr06_security_bridge_oci as security_oci
 
 
 def asset(platform, digest=None):
@@ -122,6 +123,119 @@ class SecurityBridgeCarrierTest(unittest.TestCase):
                     make(change)
                     with self.assertRaises(ValueError):
                         security_driver.verify_carrier(archive, expected)
+
+
+class SecurityBridgeOciIndexTest(unittest.TestCase):
+    def test_only_the_expected_tag_and_config_annotations_are_accepted(self):
+        tag = "arcforges-ctr06-security-bridge:ci.123.1"
+        config = "sha256:" + "a" * 64
+        good = {"annotations": {"config.digest": config,
+                                "io.containerd.image.name": "docker.io/library/" + tag,
+                                "org.opencontainers.image.ref.name": "ci.123.1"}}
+        security_oci.verify_index_annotations(good, tag, config)
+        for key in good["annotations"]:
+            altered = {"annotations": dict(good["annotations"])}
+            altered["annotations"][key] += "-wrong"
+            with self.subTest(changed=key), self.assertRaises(ValueError):
+                security_oci.verify_index_annotations(altered, tag, config)
+        for altered in ({}, {"annotations": {}}, {"annotations": {**good["annotations"], "other": "value"}}):
+            with self.subTest(altered=altered), self.assertRaises(ValueError):
+                security_oci.verify_index_annotations(altered, tag, config)
+
+
+class SecurityBridgeOciAppTreeTest(unittest.TestCase):
+    executable = hashlib.sha256(b"native executable").hexdigest()
+    notice = hashlib.sha256(b"licence").hexdigest()
+
+    @classmethod
+    def tree(cls):
+        return security_oci.AppTree({"arcforges-center": cls.executable, "notices/LICENSE": cls.notice})
+
+    @staticmethod
+    def entry(name, kind=tarfile.DIRTYPE, mode=0o755, uid=0, gid=0, mtime=0):
+        item = tarfile.TarInfo(name)
+        item.type, item.mode, item.uid, item.gid, item.mtime = kind, mode, uid, gid, mtime
+        item.size = 0 if kind == tarfile.DIRTYPE else 7
+        return item
+
+    def populated(self):
+        tree = self.tree()
+        tree.apply("app", self.entry("app", uid=1654, gid=1654), None)
+        tree.apply("app/notices", self.entry("app/notices"), None)
+        tree.apply("app/arcforges-center", self.entry("app/arcforges-center", tarfile.REGTYPE), self.executable)
+        tree.apply("app/notices/LICENSE", self.entry("app/notices/LICENSE", tarfile.REGTYPE, mode=0o644), self.notice)
+        return tree
+
+    def test_effective_tree_allows_repeated_directories_with_expected_security_metadata(self):
+        tree = self.populated()
+        tree.apply("app", self.entry("app", uid=1654, gid=1654, mtime=17), None)
+        tree.apply("app/notices", self.entry("app/notices", mtime=18), None)
+        files, effective = tree.finish()
+        self.assertEqual(files, {"arcforges-center": self.executable, "notices/LICENSE": self.notice})
+        self.assertEqual(set(effective), {"app", "app/notices", "app/arcforges-center", "app/notices/LICENSE"})
+        self.assertEqual(effective["app"], {"type": "directory", "mode": 0o755, "uid": 1654, "gid": 1654, "mtime": 17})
+        self.assertEqual(effective["app/notices"]["mtime"], 18)
+        self.assertEqual(effective["app/arcforges-center"]["type"], "file")
+
+    def test_file_directory_conflicts_unexpected_paths_and_missing_parents_fail(self):
+        for name, item, content in [
+            ("app/arcforges-center", self.entry("app/arcforges-center", uid=1654, gid=1654), None),
+            ("app/notices", self.entry("app/notices", tarfile.REGTYPE, mode=0o644), self.notice),
+            ("app/extra", self.entry("app/extra"), None),
+            ("app/extra", self.entry("app/extra", tarfile.REGTYPE, mode=0o644), self.notice),
+            ("app/arcforges-center", self.entry("app/arcforges-center", tarfile.REGTYPE), self.executable),
+            ("app/.wh.arcforges-center", self.entry("app/.wh.arcforges-center", tarfile.REGTYPE), self.executable),
+        ]:
+            with self.subTest(name=name, kind=item.type), self.assertRaises(ValueError):
+                self.populated().apply(name, item, content)
+        with self.assertRaises(ValueError):
+            self.tree().apply("app/notices", self.entry("app/notices"), None)
+        tree = self.tree()
+        tree.apply("app", self.entry("app", uid=1654, gid=1654), None)
+        with self.assertRaises(ValueError):
+            tree.apply("app/notices/LICENSE", self.entry("app/notices/LICENSE", tarfile.REGTYPE, mode=0o644), self.notice)
+        with self.assertRaises(ValueError):
+            tree.finish()
+        with self.assertRaises(ValueError):
+            security_oci.AppTree({"same": self.notice, "same/child": self.notice})
+
+    def test_owner_mode_and_extended_metadata_fail_closed(self):
+        for uid, gid, mode in [(0, 1654, 0o755), (1654, 0, 0o755), (1654, 1654, 0o775), (1654, 1654, 0o4755)]:
+            with self.subTest(root=(uid, gid, mode)), self.assertRaises(ValueError):
+                self.tree().apply("app", self.entry("app", uid=uid, gid=gid, mode=mode), None)
+        for uid, gid, mode in [(1, 0, 0o755), (0, 1, 0o755), (0, 0, 0o700)]:
+            with self.subTest(directory=(uid, gid, mode)), self.assertRaises(ValueError):
+                self.populated().apply("app/notices", self.entry("app/notices", uid=uid, gid=gid, mode=mode), None)
+        for uid, gid, mode, value in [(1, 0, 0o644, self.notice), (0, 1, 0o644, self.notice),
+                                      (0, 0, 0o755, self.notice), (0, 0, 0o644, "0" * 64)]:
+            with self.subTest(file=(uid, gid, mode, value)), self.assertRaises(ValueError):
+                tree = self.tree()
+                tree.apply("app", self.entry("app", uid=1654, gid=1654), None)
+                tree.apply("app/notices", self.entry("app/notices"), None)
+                tree.apply("app/notices/LICENSE", self.entry("app/notices/LICENSE", tarfile.REGTYPE, mode, uid, gid), value)
+        for mutation in ("pax", "uname", "gname", "devmajor", "mtime"):
+            item = self.entry("app", uid=1654, gid=1654)
+            if mutation == "pax": item.pax_headers = {"SCHILY.xattr.security.capability": "unapproved"}
+            if mutation == "uname": item.uname = "other"
+            if mutation == "gname": item.gname = "other"
+            if mutation == "devmajor": item.devmajor = 1
+            if mutation == "mtime": item.mtime = -1
+            with self.subTest(metadata=mutation), self.assertRaises(ValueError):
+                self.tree().apply("app", item, None)
+
+    def test_links_special_entries_and_invalid_expectations_are_rejected(self):
+        for kind in (tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE, tarfile.CHRTYPE, tarfile.BLKTYPE):
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                self.populated().apply("app/arcforges-center", self.entry("app/arcforges-center", kind), None)
+        many_paths = {f"group{i}/a/b/c/file": self.notice for i in range(security_oci.MAX_APP_FILES)}
+        with self.assertRaises(ValueError):
+            security_oci.AppTree(many_paths)
+        for expected in ({}, {"../outside": self.notice}, {"/absolute": self.notice},
+                         {"a//b": self.notice}, {"a/": self.notice}, {".wh.hidden": self.notice},
+                         {"safe": "invalid-digest"}, {"x" * security_oci.MAX_PATH_LENGTH: self.notice},
+                         {str(i): self.notice for i in range(security_oci.MAX_APP_FILES + 1)}):
+            with self.subTest(expectation=len(expected)), self.assertRaises(ValueError):
+                security_oci.AppTree(expected)
 
 
 class SecurityBridgeNativeSelectionTest(unittest.TestCase):

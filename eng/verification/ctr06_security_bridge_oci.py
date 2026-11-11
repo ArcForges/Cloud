@@ -22,6 +22,13 @@ BASE_DIFFS = [
     "sha256:0d12f8f57c5ec11597499635ebe332f1b8560719b275320a2d2105c18ec3bcec",
 ]
 MAX_ARCHIVE = 256 * 1024 * 1024
+MAX_LAYERS = 64
+MAX_LAYER_ENTRIES = 20_000
+MAX_TOTAL_LAYER_ENTRIES = 50_000
+MAX_TOTAL_LAYER_BYTES = 512 * 1024 * 1024
+MAX_APP_FILES = 4096
+MAX_APP_PATHS = 16_384
+MAX_PATH_LENGTH = 4096
 
 
 def digest(data):
@@ -49,12 +56,93 @@ def bounded(stream):
 
 
 def safe_path(name):
-    if not name or name.startswith("/") or "\\" in name:
+    if not isinstance(name, str) or not name or len(name) > MAX_PATH_LENGTH or name.startswith("/") or "\\" in name:
         raise ValueError("unsafe OCI path")
     parts = name.removeprefix("./").rstrip("/").split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise ValueError("unsafe OCI path component")
     return "/".join(parts)
+
+
+def verify_index_annotations(descriptor, tag, config_digest):
+    expected = {"config.digest": config_digest,
+                "io.containerd.image.name": "docker.io/library/" + tag,
+                "org.opencontainers.image.ref.name": tag.partition(":")[2]}
+    if descriptor.get("annotations") != expected:
+        raise ValueError("OCI image index annotations differ")
+
+
+class AppTree:
+    """Apply the closed /app portion of the verified layer stream without extracting it."""
+
+    def __init__(self, expected_files):
+        if not isinstance(expected_files, dict) or not 0 < len(expected_files) <= MAX_APP_FILES:
+            raise ValueError("invalid expected app member set")
+        self.files = {}
+        self.directories = {"app"}
+        for relative, value in expected_files.items():
+            if (not isinstance(relative, str) or safe_path(relative) != relative or
+                    not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) or
+                    any(part.startswith(".wh.") for part in relative.split("/"))):
+                raise ValueError("invalid expected app member")
+            name = "app/" + relative
+            if len(name) > MAX_PATH_LENGTH:
+                raise ValueError("expected app path too long")
+            self.files[name] = value
+            parent = PurePosixPath(name).parent
+            while str(parent) != ".":
+                self.directories.add(str(parent))
+                if len(self.directories) + len(self.files) > MAX_APP_PATHS:
+                    raise ValueError("too many expected app paths")
+                parent = parent.parent
+        if self.directories.intersection(self.files):
+            raise ValueError("expected app file is also a directory")
+        self.entries = {}
+
+    def apply(self, name, item, content_hash):
+        if name != "app" and not name.startswith("app/"):
+            raise ValueError("security bridge adds material outside /app")
+        if any(part.startswith(".wh.") for part in name.split("/")):
+            raise ValueError("OCI whiteouts are unsupported in /app")
+        if (item.pax_headers or item.linkname or item.uname or item.gname or
+                item.devmajor != 0 or item.devminor != 0 or type(item.mtime) is not int or
+                item.mtime < 0 or item.mtime > (1 << 63) - 1):
+            raise ValueError("unexpected security bridge metadata")
+        if name != "app":
+            parent = name.rpartition("/")[0]
+            if parent not in self.entries or self.entries[parent]["type"] != "directory":
+                raise ValueError("missing or non-directory app parent")
+        previous = self.entries.get(name)
+        if item.isdir():
+            owner = 1654 if name == "app" else 0
+            if (name not in self.directories or item.size != 0 or item.mode != 0o755 or
+                    item.uid != owner or item.gid != owner or content_hash is not None):
+                raise ValueError("unexpected security bridge directory")
+            if previous is not None and previous["type"] != "directory":
+                raise ValueError("security bridge path changes type")
+            self.entries[name] = {"type": "directory", "mode": item.mode, "uid": item.uid,
+                                  "gid": item.gid, "mtime": item.mtime}
+        elif item.isfile():
+            expected = self.files.get(name)
+            executable = name in ("app/ArcForges.Cloud", "app/arcforges-center")
+            mode = 0o755 if executable else 0o644
+            if (expected is None or previous is not None or item.mode != mode or
+                    item.uid != 0 or item.gid != 0 or content_hash != expected):
+                raise ValueError("unclassified, repeated or changed security bridge file")
+            self.entries[name] = {"type": "file", "mode": item.mode, "uid": item.uid,
+                                  "gid": item.gid, "mtime": item.mtime, "size": item.size,
+                                  "sha256": content_hash}
+        else:
+            raise ValueError("linked or special security bridge layer entry")
+
+    def finish(self):
+        if set(self.entries) != self.directories.union(self.files):
+            raise ValueError("effective security bridge path set differs")
+        actual = {name.removeprefix("app/"): self.entries[name]["sha256"] for name in self.files}
+        expected = {name.removeprefix("app/"): value for name, value in self.files.items()}
+        if actual != expected:
+            raise ValueError("OCI app members differ from independently verified image")
+        return actual, {name: self.entries[name] for name in sorted(self.entries)}
 
 
 def verify_oci(archive, expected_image_id, expected_tag, expected_app_members):
@@ -72,7 +160,7 @@ def verify_oci(archive, expected_image_id, expected_tag, expected_app_members):
         entries = {}
         for entry in carrier:
             name = safe_path(entry.name)
-            if name in entries or (not entry.isfile() and not entry.isdir()):
+            if len(entries) >= MAX_TOTAL_LAYER_ENTRIES or name in entries or (not entry.isfile() and not entry.isdir()):
                 raise ValueError("duplicate or non-regular OCI archive member")
             entries[name] = entry
         directories = {name for name, entry in entries.items() if entry.isdir()}
@@ -111,7 +199,9 @@ def verify_oci(archive, expected_image_id, expected_tag, expected_app_members):
         manifest = document(blob(image_descriptor))
         if manifest.get("schemaVersion") != 2 or not isinstance(manifest.get("layers"), list):
             raise ValueError("invalid OCI manifest")
-        config = document(blob(manifest.get("config", {})))
+        config_descriptor = manifest.get("config", {})
+        config = document(blob(config_descriptor))
+        verify_index_annotations(image_descriptor, expected_tag, config_descriptor["digest"])
         image_config = config.get("config", {})
         labels = {"org.opencontainers.image.source": "https://github.com/ArcForges/Cloud",
                   "org.opencontainers.image.licenses": "AGPL-3.0-only", "org.opencontainers.image.revision": SOURCE}
@@ -129,14 +219,15 @@ def verify_oci(archive, expected_image_id, expected_tag, expected_app_members):
         rootfs = config.get("rootfs", {})
         diffs = rootfs.get("diff_ids", [])
         layers = manifest["layers"]
-        if rootfs.get("type") != "layers" or len(diffs) != len(layers) or diffs[:len(BASE_DIFFS)] != BASE_DIFFS:
+        if (rootfs.get("type") != "layers" or not isinstance(diffs, list) or len(diffs) != len(layers) or
+                len(layers) > MAX_LAYERS or diffs[:len(BASE_DIFFS)] != BASE_DIFFS):
             raise ValueError("OCI base or layer count differs")
         docker_manifest = document(read("manifest.json"))
         if docker_manifest != [{"Config": "blobs/sha256/" + manifest["config"]["digest"][7:],
                                 "RepoTags": [expected_tag],
                                 "Layers": ["blobs/sha256/" + layer["digest"][7:] for layer in layers]}]:
             raise ValueError("Docker manifest differs from OCI descriptors")
-        image_files, layer_inventory = {}, []
+        app_tree, layer_inventory, total_entries, total_layer_bytes = AppTree(expected_app_members), [], 0, 0
         for index, (descriptor, diff_id) in enumerate(zip(layers, diffs, strict=True)):
             raw = blob(descriptor)
             media = descriptor.get("mediaType")
@@ -147,48 +238,42 @@ def verify_oci(archive, expected_image_id, expected_tag, expected_app_members):
                 layer_data = raw
             else:
                 raise ValueError("unsupported OCI layer format")
+            total_layer_bytes += len(layer_data)
+            if total_layer_bytes > MAX_TOTAL_LAYER_BYTES:
+                raise ValueError("OCI layers exceed total size limit")
             if digest(layer_data) != diff_id:
                 raise ValueError("OCI uncompressed layer digest differs")
             members, names = [], set()
             with tarfile.open(fileobj=io.BytesIO(layer_data), mode="r:") as layer:
                 for item in layer:
                     name = safe_path(item.name)
-                    if name in names:
-                        raise ValueError("duplicate OCI layer path")
+                    total_entries += 1
+                    if (name in names or len(names) >= MAX_LAYER_ENTRIES or
+                            total_entries > MAX_TOTAL_LAYER_ENTRIES):
+                        raise ValueError("duplicate or excessive OCI layer paths")
                     names.add(name)
                     row = {"path": name, "mode": stat.S_IMODE(item.mode), "uid": item.uid, "gid": item.gid,
                            "type": item.type.decode("latin1"), "link": item.linkname, "size": item.size,
                            "pax": dict(item.pax_headers)}
                     if item.isfile():
-                        data = bounded(layer.extractfile(item))
+                        source = layer.extractfile(item)
+                        if source is None:
+                            raise ValueError("unreadable OCI layer file")
+                        data = bounded(source)
                         if len(data) != item.size:
                             raise ValueError("truncated OCI layer file")
                         row["sha256"] = hashlib.sha256(data).hexdigest()
                     if index >= len(BASE_DIFFS):
-                        if name != "app" and not name.startswith("app/"):
-                            raise ValueError("security bridge adds material outside /app")
-                        relative = name.removeprefix("app/")
-                        if item.isdir():
-                            if stat.S_IMODE(item.mode) != 0o755:
-                                raise ValueError("untraversable security bridge directory")
-                        elif item.isfile():
-                            if name == "app" or relative not in expected_app_members or relative in image_files:
-                                raise ValueError("unclassified or repeated security bridge file")
-                            expected_mode = 0o755 if relative in ("ArcForges.Cloud", "arcforges-center") else 0o644
-                            if stat.S_IMODE(item.mode) != expected_mode or item.uid != 0 or item.gid != 0:
-                                raise ValueError("unreadable or unexpected security bridge file mode")
-                            image_files[relative] = row["sha256"]
-                        else:
-                            raise ValueError("linked or special security bridge layer entry")
+                        app_tree.apply(name, item, row.get("sha256"))
                     elif name == "app" or name.startswith("app/"):
                         raise ValueError("base image unexpectedly contains /app")
                     members.append(row)
             layer_inventory.append({"digest": descriptor["digest"], "diffId": diff_id, "members": members})
-        if image_files != expected_app_members:
-            raise ValueError("OCI app members differ from independently verified image")
+        image_files, effective_tree = app_tree.finish()
         regular = {name for name, entry in entries.items() if entry.isfile()}
         if regular != {"oci-layout", "index.json", "manifest.json", *descriptors}:
             raise ValueError("unclassified OCI blob")
     return {"archiveSha256": hashlib.sha256(contents).hexdigest(), "size": len(contents),
             "manifestDigest": image_descriptor["digest"], "configDigest": manifest["config"]["digest"],
-            "baseDiffIds": BASE_DIFFS, "layers": layer_inventory, "appMembers": image_files}
+            "baseDiffIds": BASE_DIFFS, "layers": layer_inventory, "appMembers": image_files,
+            "effectiveAppTree": effective_tree}
