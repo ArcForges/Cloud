@@ -490,6 +490,73 @@ func validMutation(r *nodev1.FileMutationResult, command *foundationv1.Id, edit 
 	return r.Replacements == nil
 }
 
+// validFileResourceLimit checks the actual bound, its units and whether it
+// applies to this method. Request sizes are known to the center; existing file
+// sizes and removal trees are observed only by the node and are not inferred.
+func validFileResourceLimit(request proto.Message, limit *foundationv1.LimitFailure) bool {
+	if limit == nil || limit.Maximum == nil {
+		return false
+	}
+	maximum := func(n string) bool {
+		parts := strings.SplitN(limit.Maximum.GetValue(), ".", 2)
+		return parts[0] == n && (len(parts) == 1 || strings.Trim(parts[1], "0") == "")
+	}
+	switch limit.GetLimitName() {
+	case "path_bytes":
+		if !maximum("4096") {
+			return false
+		}
+		switch q := request.(type) {
+		case *nodev1.FileServiceReadFileRequest:
+			return len(q.GetPath().GetPath()) > 4096
+		case *nodev1.FileServiceWriteFileRequest:
+			return len(q.GetPath().GetPath()) > 4096
+		case *nodev1.FileServiceEditFileRequest:
+			return len(q.GetPath().GetPath()) > 4096
+		case *nodev1.FileServiceSearchFilesRequest:
+			return len(q.GetPath().GetPath()) > 4096
+		case *nodev1.FileServiceListDirectoryRequest:
+			return len(q.GetPath().GetPath()) > 4096
+		case *nodev1.FileServicePlanRemovalRequest:
+			return len(q.GetWorkspacePath().GetPath()) > 4096
+		}
+	case "workspace_root_path_bytes":
+		q, ok := request.(*nodev1.WorkspaceServiceRegisterWorkspaceRequest)
+		return ok && maximum("4096") && len(q.GetPath()) > 4096
+	case "file_write_bytes":
+		q, ok := request.(*nodev1.FileServiceWriteFileRequest)
+		return ok && maximum("196608") && len(q.GetData()) > 196608
+	case "file_edit_text_bytes":
+		q, ok := request.(*nodev1.FileServiceEditFileRequest)
+		return ok && maximum("65536") && (len(q.GetOldText()) > 65536 || len(q.GetNewText()) > 65536)
+	case "file_existing_bytes":
+		if !maximum("4194304") {
+			return false
+		}
+		switch q := request.(type) {
+		case *nodev1.FileServiceWriteFileRequest:
+			_, ok := q.Precondition.(*nodev1.FileServiceWriteFileRequest_ExpectedSha256)
+			return ok
+		case *nodev1.FileServiceEditFileRequest:
+			return true
+		}
+	case "file_edit_result_bytes":
+		_, ok := request.(*nodev1.FileServiceEditFileRequest)
+		return ok && maximum("4194304")
+	case "removal_descendants":
+		switch request.(type) {
+		case *nodev1.FileServicePlanRemovalRequest, *nodev1.FileServiceExecuteRemovalRequest:
+			return maximum("1000")
+		}
+	case "removal_total_bytes":
+		switch request.(type) {
+		case *nodev1.FileServicePlanRemovalRequest, *nodev1.FileServiceExecuteRemovalRequest:
+			return maximum("67108864")
+		}
+	}
+	return false
+}
+
 // validateFileResult binds a signed handler response to its original request.
 // It does not claim that the center itself opened the filesystem object.
 func validateFileResult(method relayv1.RoutedMethod, request []byte, response nodeFileResponse) error {
@@ -503,6 +570,10 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 	}
 	if failure := response.GetError(); failure != nil {
 		if !validFileError(failure) || !validFileErrorForMethod(method, failure) {
+			return bad()
+		}
+		if failure.GetCategory() == foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE &&
+			failure.GetCode() == "too_large" && !validFileResourceLimit(v, failure.GetDetails().GetLimit()) {
 			return bad()
 		}
 		if method == relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE && failure.GetCode() == "file_changed" {
@@ -565,10 +636,33 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 			(x.GetTruncated() && (x.TruncationReason == nil || !safeErrorToken.MatchString(x.GetTruncationReason()))) || (!x.GetTruncated() && x.TruncationReason != nil) {
 			return bad()
 		}
+		// A reported file is scanned from its beginning. Across distinct paths,
+		// each largest match end is a necessary lower bound on bytes actually read.
+		// The center cannot verify content or UTF-8 boundaries it did not read.
+		ends := make(map[string]uint64)
+		var required uint64
 		for _, match := range x.Matches {
 			if match == nil || match.Path == nil || len(match.GetPath()) > 4096 || !utf8.ValidString(match.GetPath()) || strings.ContainsRune(match.GetPath(), 0) || match.ByteOffset == nil || match.ByteLength == nil {
 				return bad()
 			}
+			start, length := match.GetByteOffset(), uint64(match.GetByteLength())
+			if start > x.GetScannedBytes() || length > x.GetScannedBytes()-start ||
+				start > 1048576 || length > 1048576-start ||
+				(q.GetMode() == nodev1.FileSearchMode_FILE_SEARCH_MODE_LITERAL && length != uint64(len(q.GetPattern()))) {
+				return bad()
+			}
+			end := start + length // the preceding subtraction checks prevent overflow
+			if end > ends[match.GetPath()] {
+				increase := end - ends[match.GetPath()]
+				if increase > x.GetScannedBytes()-required {
+					return bad()
+				}
+				required += increase
+				ends[match.GetPath()] = end
+			}
+		}
+		if uint32(len(ends)) > x.GetScanFileCount() {
+			return bad()
 		}
 		for _, problem := range x.Problems {
 			if problem == nil || problem.Path == nil || len(problem.GetPath()) > 4096 || problem.Reason == nil || !safeErrorToken.MatchString(problem.GetReason()) {

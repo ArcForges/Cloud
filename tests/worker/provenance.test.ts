@@ -551,7 +551,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       `const key = "${sampleNonce}";`,
     ),
   );
-  // AF-CTR-03: one block per file (the policy, the receipts af-ctr-03-r1 to af-ctr-03-r21, af-ctr-04-r1 to af-ctr-04-r13, af-ctr-05-r1 to af-ctr-05-r4, af-ctr-05-r6, af-ctr-05-r7, af-ctr-05-r8, af-ctr-05-r9, af-ctr-05-r10, af-ctr-05-r11, af-ctr-05-r12, af-ctr-05-r13, af-ctr-05-r14, af-ctr-05-r15, af-ctr-05-r16, af-ctr-05-r17, af-ctr-05-r18 af-ctr-06-r1 to af-ctr-06-r11, and af-ctr-06-bridge-r1), each row one exact
+  // AF-CTR-03: one block per file (the policy, the receipts af-ctr-03-r1 to af-ctr-03-r21, af-ctr-04-r1 to af-ctr-04-r13, af-ctr-05-r1 to af-ctr-05-r4, af-ctr-05-r6, af-ctr-05-r7, af-ctr-05-r8, af-ctr-05-r9, af-ctr-05-r10, af-ctr-05-r11, af-ctr-05-r12, af-ctr-05-r13, af-ctr-05-r14, af-ctr-05-r15, af-ctr-05-r16, af-ctr-05-r17, af-ctr-05-r18 af-ctr-06-r1 to af-ctr-06-r12, and af-ctr-06-bridge-r1), each row one exact
   // key-and-digest line of an immutable record named in the inputs maps.
   // The digests are computed here from the records, so this file holds no digest literal.
   const records = [
@@ -623,6 +623,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/af-ctr-06-r9.json",
     "eng/policy/dependency-reviews/af-ctr-06-r10.json",
     "eng/policy/dependency-reviews/af-ctr-06-r11.json",
+    "eng/policy/dependency-reviews/af-ctr-06-r12.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -653,7 +654,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       "eng/policy/dependency-reviews/af-ctr-04-r14.json",
       "eng/policy/dependency-reviews/af-ctr-05-r5.json",
       "eng/policy/dependency-reviews/af-ctr-05-r19.json",
-      "eng/policy/dependency-reviews/af-ctr-06-r12.json",
+      "eng/policy/dependency-reviews/af-ctr-06-r13.json",
       "eng/policy/dependency-reviews/af-ctr-06-bridge-r2.json",
     ])
       assert.ok(!exempt.test(other), other);
