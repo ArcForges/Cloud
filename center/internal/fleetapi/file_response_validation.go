@@ -30,7 +30,8 @@ func validRevision(v *foundationv1.Revision) bool {
 }
 
 func validDecimal(v *foundationv1.Decimal) bool {
-	if v == nil || v.Value == nil || !decimalToken.MatchString(v.GetValue()) {
+	if v == nil || v.Value == nil || !decimalToken.MatchString(v.GetValue()) ||
+		(strings.Contains(v.GetValue(), ".") && strings.HasSuffix(v.GetValue(), "0")) {
 		return false
 	}
 	n := strings.TrimLeft(strings.ReplaceAll(strings.TrimPrefix(v.GetValue(), "-"), ".", ""), "0")
@@ -79,7 +80,7 @@ func validFileError(e *foundationv1.ArcError) bool {
 	if (retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_AFTER_TIME) != (retry.RetryAt != nil) ||
 		(retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_RECONCILE) != (retry.ReconciliationOperation != nil) ||
 		(retry.RetryAt != nil && !validFileInstant(retry.RetryAt)) ||
-		(retry.ReconciliationOperation != nil && !safeErrorToken.MatchString(retry.GetReconciliationOperation())) ||
+		(retry.ReconciliationOperation != nil && !contractToken.MatchString(retry.GetReconciliationOperation())) ||
 		(e.GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN && retry.GetMode() == foundationv1.RetryMode_RETRY_MODE_AFTER_TIME) {
 		return false
 	}
@@ -490,67 +491,159 @@ func validMutation(r *nodev1.FileMutationResult, command *foundationv1.Id, edit 
 	return r.Replacements == nil
 }
 
-// validFileResourceLimit checks the actual bound, its units and whether it
-// applies to this method. Request sizes are known to the center; existing file
-// sizes and removal trees are observed only by the node and are not inferred.
-func validFileResourceLimit(request proto.Message, limit *foundationv1.LimitFailure) bool {
-	if limit == nil || limit.Maximum == nil {
-		return false
-	}
-	maximum := func(n string) bool {
-		parts := strings.SplitN(limit.Maximum.GetValue(), ".", 2)
-		return parts[0] == n && (len(parts) == 1 || strings.Trim(parts[1], "0") == "")
-	}
-	switch limit.GetLimitName() {
+// These canonical producer names retain their own meanings even where two
+// bounds have the same maximum. Other 450.1-valid names remain open strings.
+var fileResourceMaximums = map[string]string{
+	"path_bytes":                "4096",
+	"workspace_root_path_bytes": "4096",
+	"file_write_bytes":          "196608",
+	"file_edit_text_bytes":      "65536",
+	"file_existing_bytes":       "4194304",
+	"file_edit_result_bytes":    "4194304",
+	"removal_descendants":       "1000",
+	"removal_total_bytes":       "67108864",
+}
+
+// possibleFileResourceBound checks only what this method and the original
+// request make observable. A nil request means the original bytes were not
+// retained, as for a caller-bound operation status; it never means empty input.
+func possibleFileResourceBound(method relayv1.RoutedMethod, request proto.Message, knownTarget *nodev1.FilePath, name string) bool {
+	switch name {
 	case "path_bytes":
-		if !maximum("4096") {
-			return false
+		// A status may retain the caller-bound original workspace target even
+		// though its request body is gone. That path is a known fact, not the
+		// status request's own size. Authorization checks the binding later.
+		if request == nil && knownTarget != nil {
+			switch method {
+			case relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE:
+				return len(knownTarget.GetPath()) > 4096
+			}
 		}
-		switch q := request.(type) {
-		case *nodev1.FileServiceReadFileRequest:
-			return len(q.GetPath().GetPath()) > 4096
-		case *nodev1.FileServiceWriteFileRequest:
-			return len(q.GetPath().GetPath()) > 4096
-		case *nodev1.FileServiceEditFileRequest:
-			return len(q.GetPath().GetPath()) > 4096
-		case *nodev1.FileServiceSearchFilesRequest:
-			return len(q.GetPath().GetPath()) > 4096
-		case *nodev1.FileServiceListDirectoryRequest:
-			return len(q.GetPath().GetPath()) > 4096
-		case *nodev1.FileServicePlanRemovalRequest:
-			return len(q.GetWorkspacePath().GetPath()) > 4096
+		switch method {
+		case relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE:
+			if request == nil {
+				return true
+			}
+			q, ok := request.(*nodev1.FileServiceReadFileRequest)
+			return ok && len(q.GetPath().GetPath()) > 4096
+		case relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE:
+			if request == nil {
+				return true
+			}
+			q, ok := request.(*nodev1.FileServiceWriteFileRequest)
+			return ok && len(q.GetPath().GetPath()) > 4096
+		case relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE:
+			if request == nil {
+				return true
+			}
+			q, ok := request.(*nodev1.FileServiceEditFileRequest)
+			return ok && len(q.GetPath().GetPath()) > 4096
+		case relayv1.RoutedMethod_ROUTED_METHOD_SEARCH_NODE_FILES:
+			if request == nil {
+				return true
+			}
+			q, ok := request.(*nodev1.FileServiceSearchFilesRequest)
+			return ok && len(q.GetPath().GetPath()) > 4096
+		case relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_DIRECTORY:
+			if request == nil {
+				return true
+			}
+			q, ok := request.(*nodev1.FileServiceListDirectoryRequest)
+			return ok && len(q.GetPath().GetPath()) > 4096
+		case relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL:
+			if request == nil {
+				return true
+			}
+			q, ok := request.(*nodev1.FileServicePlanRemovalRequest)
+			return ok && len(q.GetWorkspacePath().GetPath()) > 4096
 		}
 	case "workspace_root_path_bytes":
-		q, ok := request.(*nodev1.WorkspaceServiceRegisterWorkspaceRequest)
-		return ok && maximum("4096") && len(q.GetPath()) > 4096
-	case "file_write_bytes":
-		q, ok := request.(*nodev1.FileServiceWriteFileRequest)
-		return ok && maximum("196608") && len(q.GetData()) > 196608
-	case "file_edit_text_bytes":
-		q, ok := request.(*nodev1.FileServiceEditFileRequest)
-		return ok && maximum("65536") && (len(q.GetOldText()) > 65536 || len(q.GetNewText()) > 65536)
-	case "file_existing_bytes":
-		if !maximum("4194304") {
+		if method != relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE {
 			return false
 		}
-		switch request.(type) {
-		case *nodev1.FileServiceWriteFileRequest, *nodev1.FileServiceEditFileRequest:
+		if request == nil {
 			return true
 		}
-	case "file_edit_result_bytes":
-		q, ok := request.(*nodev1.FileServiceEditFileRequest)
-		// A non-growing exact replacement cannot exceed the already bounded
-		// original file, irrespective of its unknown content or size.
-		return ok && maximum("4194304") && len(q.GetNewText()) > len(q.GetOldText())
-	case "removal_descendants":
-		switch request.(type) {
-		case *nodev1.FileServicePlanRemovalRequest, *nodev1.FileServiceExecuteRemovalRequest:
-			return maximum("1000")
+		q, ok := request.(*nodev1.WorkspaceServiceRegisterWorkspaceRequest)
+		return ok && len(q.GetPath()) > 4096
+	case "file_write_bytes":
+		if method != relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE {
+			return false
 		}
-	case "removal_total_bytes":
-		switch request.(type) {
-		case *nodev1.FileServicePlanRemovalRequest, *nodev1.FileServiceExecuteRemovalRequest:
-			return maximum("67108864")
+		if request == nil {
+			return true
+		}
+		q, ok := request.(*nodev1.FileServiceWriteFileRequest)
+		return ok && len(q.GetData()) > 196608
+	case "file_edit_text_bytes":
+		if method != relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE {
+			return false
+		}
+		if request == nil {
+			return true
+		}
+		q, ok := request.(*nodev1.FileServiceEditFileRequest)
+		return ok && (len(q.GetOldText()) > 65536 || len(q.GetNewText()) > 65536)
+	case "file_existing_bytes":
+		switch method {
+		case relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE:
+			if request == nil {
+				return true
+			}
+			_, ok := request.(*nodev1.FileServiceWriteFileRequest)
+			return ok
+		case relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE:
+			if request == nil {
+				return true
+			}
+			_, ok := request.(*nodev1.FileServiceEditFileRequest)
+			return ok
+		}
+	case "file_edit_result_bytes":
+		if method != relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE {
+			return false
+		}
+		if request == nil {
+			return true
+		}
+		q, ok := request.(*nodev1.FileServiceEditFileRequest)
+		// Exact non-growing replacement cannot exceed the bounded original.
+		return ok && q.OldText != nil && q.NewText != nil && len(q.GetNewText()) > len(q.GetOldText())
+	case "removal_descendants", "removal_total_bytes":
+		switch method {
+		case relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL:
+			if request == nil {
+				return true
+			}
+			_, ok := request.(*nodev1.FileServicePlanRemovalRequest)
+			return ok
+		case relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL:
+			if request == nil {
+				return true
+			}
+			_, ok := request.(*nodev1.FileServiceExecuteRemovalRequest)
+			return ok
+		}
+	}
+	return false
+}
+
+// validFileResourceLimit preserves the open published name vocabulary. A
+// canonical name is never reinterpreted. For another valid name, retain every
+// method/value candidate until actual known request facts rule it out; this
+// does not assert what the node observed or what the label itself means.
+func validFileResourceLimit(method relayv1.RoutedMethod, request proto.Message, knownTarget *nodev1.FilePath, limit *foundationv1.LimitFailure) bool {
+	if limit == nil || limit.LimitName == nil || !contractToken.MatchString(limit.GetLimitName()) ||
+		!validDecimal(limit.Maximum) {
+		return false
+	}
+	name, maximum := limit.GetLimitName(), limit.Maximum.GetValue()
+	if expected, canonical := fileResourceMaximums[name]; canonical {
+		return maximum == expected && possibleFileResourceBound(method, request, knownTarget, name)
+	}
+	for candidate, expected := range fileResourceMaximums {
+		if maximum == expected && possibleFileResourceBound(method, request, knownTarget, candidate) {
+			return true
 		}
 	}
 	return false
@@ -572,7 +665,7 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 			return bad()
 		}
 		if failure.GetCategory() == foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE &&
-			failure.GetCode() == "too_large" && !validFileResourceLimit(v, failure.GetDetails().GetLimit()) {
+			failure.GetCode() == "too_large" && !validFileResourceLimit(method, v, nil, failure.GetDetails().GetLimit()) {
 			return bad()
 		}
 		if method == relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE && failure.GetCode() == "file_changed" {
@@ -773,11 +866,16 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 				return bad()
 			}
 		case nodev1.FileOperationState_FILE_OPERATION_STATE_COMPLETED:
-			if x.GetHeld() {
+			if x.GetHeld() || x.GetAcknowledged() {
 				return bad()
 			}
 			if x.GetError() != nil {
-				if !validFileError(x.GetError()) || !validFileErrorForMethod(operationMethod(x.GetKind()), x.GetError()) || x.GetError().GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN {
+				failure, original := x.GetError(), operationMethod(x.GetKind())
+				if !validFileError(failure) || !validFileErrorForMethod(original, failure) || failure.GetEffect() == foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN {
+					return bad()
+				}
+				if failure.GetCategory() == foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE &&
+					failure.GetCode() == "too_large" && !validFileResourceLimit(original, nil, x.GetWorkspacePath(), failure.GetDetails().GetLimit()) {
 					return bad()
 				}
 			} else if x.GetKind() == nodev1.FileOperationKind_FILE_OPERATION_KIND_REMOVAL {
