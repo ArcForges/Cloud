@@ -7,6 +7,7 @@ import { inspectGateProof } from "./ctr06-bootstrap-gate.ts";
 import { inspectBootstrapZip } from "./ctr06-bootstrap-zip.ts";
 import {
   inspectGithubBootstrapMetadata,
+  inspectGithubPublishedRelease,
   readPublicGithubBootstrap,
   readPublicGithubPublishedRelease,
   type GithubGet,
@@ -14,13 +15,20 @@ import {
 import {
   verifyCollectorIdentity,
   verifyCollectorIdentityWithKeys,
+  requireFreshWindow,
+  type AuthenticatedWindow,
   type CollectorIdentity,
 } from "./ctr06-bootstrap-oidc.ts";
 import {
   requireReviewedAuthorityProfile,
   type ReviewedAuthorityProfile,
 } from "./ctr06-bootstrap-profile.ts";
-import { checkObservedPageChain, evaluateObservedAuthority } from "./ctr06-bootstrap-policy.ts";
+import {
+  evaluateObservedAuthority,
+  inspectSourceEvidence,
+  type AuthorityLease,
+  type AuthoritySourceProfile,
+} from "./ctr06-bootstrap-policy.ts";
 import {
   assessObservedReconciliation,
   type ExpectedRelease,
@@ -37,9 +45,17 @@ import { object, parseDocument } from "./provenance.ts";
 const sha = (value: Buffer | string) => createHash("sha256").update(value).digest("hex");
 const identifier = /^[A-Za-z0-9._:-]{1,128}$/u;
 type Phase = "association" | "issue" | "use";
-type Lease = { id: string; revision: string; holder: string; start: number; end: number };
+type Lease = AuthorityLease;
 export type CollectorObservation = { payload: Buffer; token: string };
 type Capability = { id: string; targetDigest: string; value: Buffer };
+export type EffectAuthorization = Readonly<{
+  phase: "issue" | "use";
+  challenge: string;
+  proof: CollectorObservation;
+  digest: string;
+  lease: Lease;
+  window: AuthenticatedWindow;
+}>;
 
 /** A production implementation must be selected by reviewed source and independently validate its
  * authoritative coverage and actual enforcement; self-reported fields are not evidence of either. */
@@ -50,6 +66,8 @@ export interface BrokerPorts {
     proof: CollectorObservation,
     target: AttemptTarget,
     jobId: number,
+    lease: Lease,
+    at: number,
   ): Promise<void>;
   observe(target: AttemptTarget, phase: Phase, challenge: string): Promise<CollectorObservation>;
   openArtifact(target: AttemptTarget): Promise<{
@@ -61,16 +79,24 @@ export interface BrokerPorts {
   }>;
   verifyCoverage(payload: Buffer, lease: Lease, target: AttemptTarget): Promise<void>;
   verifyLease(lease: Lease, target: AttemptTarget): Promise<void>;
-  issue(target: AttemptTarget, issueId: string, lease: Lease): Promise<Capability>;
+  // The independently controlled issuer must verify the signed proof, source controls, lease and
+  // fencing at its atomic effect boundary; accepting a broker-supplied boolean is not authorization.
+  issue(
+    target: AttemptTarget,
+    issueId: string,
+    authorization: EffectAuthorization,
+  ): Promise<Capability>;
   publish(
     target: AttemptTarget,
     issueId: string,
     capability: Buffer,
-    lease: Lease,
+    authorization: EffectAuthorization,
     verifiedArtifact: Buffer,
   ): Promise<void>;
   revoke(issueId: string): Promise<void>;
   history(target: AttemptTarget, issueIds: string[]): Promise<unknown>;
+  /** Verify independently authenticated, complete private release/issuer/publisher history. */
+  verifyHistory(history: unknown, target: AttemptTarget, issueIds: string[]): Promise<unknown>;
 }
 
 export function brokerTargetDigest(target: AttemptTarget): string {
@@ -125,24 +151,13 @@ function release(target: AttemptTarget): ExpectedRelease {
     sourceArtifactId: target.artifactId,
   };
 }
-function time(value: unknown): number {
-  assert(
-    typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
-    "Invalid observation time",
-  );
-  return value;
-}
-function text(value: unknown): string {
-  assert(typeof value === "string" && identifier.test(value), "Invalid observation identifier");
-  return value;
-}
 
 async function verifyCollector(
   profile: BrokerTrustProfile,
   proof: CollectorObservation,
   target: AttemptTarget,
   at: number,
-): Promise<void> {
+): Promise<AuthenticatedWindow> {
   if (profile.kind === "github-oidc") {
     const identity = await profile.collectorRun(proof, target);
     assert.equal(
@@ -150,9 +165,10 @@ async function verifyCollector(
       profile.collectorSourceSha,
       "Collector source differs from reviewed profile",
     );
-    await verifyCollectorIdentity(proof.payload, proof.token, identity, at);
+    return verifyCollectorIdentity(proof.payload, proof.token, identity, at);
   } else {
-    verifyCollectorIdentityWithKeys(
+    await profile.beforeKeys?.(); // test-only transport delay; keys remain fixed in the test profile
+    return verifyCollectorIdentityWithKeys(
       proof.payload,
       proof.token,
       profile.collector,
@@ -162,18 +178,18 @@ async function verifyCollector(
   }
 }
 
-async function checkedObservation(
+async function validateObservation(
   boundary: BrokerPorts,
   profile: BrokerTrustProfile,
   approval: ApprovedBootstrap,
   target: AttemptTarget,
   phase: Phase,
-): Promise<{ lease: Lease; digest: string }> {
-  const challenge = randomBytes(32).toString("hex");
-  const observation = await boundary.observe(target, phase, challenge);
+  challenge: string,
+  observation: CollectorObservation,
+): Promise<{ lease: Lease; digest: string; window: AuthenticatedWindow }> {
   assert(observation.payload.length > 0 && observation.payload.length <= 1024 * 1024);
   const now = Math.floor(Date.now() / 1000);
-  await verifyCollector(profile, observation, target, now);
+  const window = await verifyCollector(profile, observation, target, now);
   const data = object(
     parseDocument(observation.payload),
     "schema phase challenge targetDigest producer eventDigest originalRun lease sources authority",
@@ -185,44 +201,79 @@ async function checkedObservation(
   assert.equal(data.producer, approval.merge);
   assert.equal(data.eventDigest, approval.eventDigest);
   assert.equal(data.originalRun, approval.originalRun);
-  const rawLease = object(data.lease, "id revision holder start end");
-  const lease: Lease = {
-    id: text(rawLease.id),
-    revision: text(rawLease.revision),
-    holder: text(rawLease.holder),
-    start: time(rawLease.start),
-    end: time(rawLease.end),
-  };
-  assert(
-    lease.start <= now && now < lease.end && lease.end - lease.start <= 300,
-    "Lease outside interval",
+  const lease = inspectSourceEvidence(
+    data.lease,
+    data.sources,
+    now,
+    `${target.run}:${target.attempt}`,
+    profile.requiredSources,
   );
-  assert.equal(lease.holder, `${target.run}:${target.attempt}`, "Wrong lease holder");
-  const domains = profile.requiredDomains;
-  assert(
-    domains.length > 0 &&
-      new Set(domains).size === domains.length &&
-      domains.every((value) => identifier.test(value)),
-    "Invalid reviewed source scope",
-  );
-  assert(
-    Array.isArray(data.sources) && data.sources.length === domains.length,
-    "Incomplete source domains",
-  );
-  const seen = new Set<string>();
-  for (const raw of data.sources) {
-    const source = object(raw, "domain revision pages");
-    const domain = text(source.domain);
-    assert(domains.includes(domain) && !seen.has(domain), "Unknown or duplicate source domain");
-    seen.add(domain);
-    assert.equal(source.revision, lease.revision, "Lease/source revision differs");
-    assert.equal(checkObservedPageChain(source.pages).revision, lease.revision);
-  }
   evaluateObservedAuthority(data.authority);
   await boundary.verifyCoverage(observation.payload, lease, target);
   await boundary.verifyLease(lease, target);
-  assert(Math.floor(Date.now() / 1000) < lease.end, "Lease expired during verification");
-  return { lease, digest: sha(observation.payload) };
+  const current = Math.floor(Date.now() / 1000);
+  requireFreshWindow(window, current);
+  assert(lease.start <= current && current < lease.end, "Lease expired during verification");
+  return { lease, digest: sha(observation.payload), window };
+}
+
+async function checkedObservation(
+  boundary: BrokerPorts,
+  profile: BrokerTrustProfile,
+  approval: ApprovedBootstrap,
+  target: AttemptTarget,
+  phase: Phase,
+) {
+  const challenge = randomBytes(32).toString("hex");
+  const raw = await boundary.observe(target, phase, challenge);
+  const proof = { payload: Buffer.from(raw.payload), token: raw.token };
+  const verified = await validateObservation(
+    boundary,
+    profile,
+    approval,
+    target,
+    phase,
+    challenge,
+    proof,
+  );
+  return { ...verified, phase, challenge, proof };
+}
+
+function requireCurrentEffect(proof: EffectAuthorization): void {
+  const now = Math.floor(Date.now() / 1000);
+  requireFreshWindow(proof.window, now);
+  assert(proof.lease.start <= now && now < proof.lease.end, "Effect lease is not current");
+  assert.equal(sha(proof.proof.payload), proof.digest, "Authenticated effect payload changed");
+}
+
+/** Independently controlled issuer/publisher adapters must use equivalent real signature, source and
+ * fence checks at their own atomic effect-acceptance boundary. The callback accepts the effect
+ * synchronously under the provider's actual fence; an asynchronous queued callback is not a fence.
+ * This helper is also used by the isolated external-provider fixture, not only by the broker caller. */
+export async function acceptFencedEffect<T>(
+  boundary: BrokerPorts,
+  profile: BrokerTrustProfile,
+  approval: ApprovedBootstrap,
+  target: AttemptTarget,
+  authorization: EffectAuthorization,
+  effect: () => T,
+): Promise<T> {
+  const verified = await validateObservation(
+    boundary,
+    profile,
+    approval,
+    target,
+    authorization.phase,
+    authorization.challenge,
+    authorization.proof,
+  );
+  assert.deepEqual(verified.lease, authorization.lease, "Effect lease or source fence differs");
+  assert.deepEqual(verified.window, authorization.window, "Authenticated effect window differs");
+  assert.equal(verified.digest, authorization.digest, "Authenticated effect digest differs");
+  requireCurrentEffect(authorization);
+  const accepted = effect();
+  assert(!(accepted instanceof Promise), "Effect acceptance must be synchronous under the fence");
+  return accepted;
 }
 
 /**
@@ -242,7 +293,7 @@ async function runBrokerEngine(
   const github =
     profile.kind === "github-oidc"
       ? await readPublicGithubBootstrap(target, approval)
-      : await inspectGithubBootstrapMetadata(profile.githubGet(target), target, approval);
+      : await inspectGithubBootstrapMetadata(profile.githubGet(target, boundary), target, approval);
   const gateJob = github.jobs["Require authenticated bootstrap authority evidence"];
   assert(typeof gateJob === "number" && github.gateCompletedAt !== undefined);
   const gate = await boundary.readGate(target);
@@ -258,11 +309,17 @@ async function runBrokerEngine(
     },
     gate,
     github.gateCompletedAt,
-    profile.requiredDomains,
+    profile.requiredSources,
     (proof, at) => verifyCollector(profile, proof, target, at),
   );
   assert.equal(checkedGate.digest, target.gateDigest, "Gate proof digest differs");
-  await boundary.verifyGateReadback(gate, target, gateJob);
+  await boundary.verifyGateReadback(
+    gate,
+    target,
+    gateJob,
+    checkedGate.lease,
+    github.gateCompletedAt,
+  );
   let admission = registry.reserve(approval, target);
   if (admission === "association-required") {
     const association = await checkedObservation(
@@ -276,6 +333,25 @@ async function runBrokerEngine(
     admission = registry.reserve(approval, target);
   }
   assert(admission !== "association-required");
+  async function readReconciliation(request: AttemptTarget, issueIds: string[]) {
+    const returned = await boundary.history(request, issueIds);
+    const authenticated = await boundary.verifyHistory(returned, request, issueIds);
+    const privateData = object(authenticated, "privateGithub credentials operations");
+    const publicGithub =
+      profile.kind === "github-oidc"
+        ? await readPublicGithubPublishedRelease(request)
+        : await inspectGithubPublishedRelease(profile.githubGet(request, boundary), request);
+    const raw = { ...privateData, publicGithub };
+    return {
+      raw,
+      observed: assessObservedReconciliation(
+        raw,
+        issueIds,
+        release(request),
+        Math.floor(Date.now() / 1000),
+      ),
+    };
+  }
   const state = replayBootstrap(journal.read().map((entry) => entry.event));
   const events = journal.read().map((entry) => entry.event);
   let priorPublished: PublishedRelease | undefined;
@@ -290,20 +366,7 @@ async function runBrokerEngine(
       )
       .map((event) => event.fields.issueId as string);
     if (issueIds.length === 0) continue;
-    const returned = await boundary.history(prior, issueIds);
-    const raw =
-      profile.kind === "github-oidc"
-        ? {
-            ...object(returned, "github credentials operations"),
-            github: await readPublicGithubPublishedRelease(prior),
-          }
-        : returned;
-    const observed = assessObservedReconciliation(
-      raw,
-      issueIds,
-      release(prior),
-      Math.floor(Date.now() / 1000),
-    );
+    const { raw, observed } = await readReconciliation(prior, issueIds);
     assert.notEqual(
       observed.kind,
       "unknown",
@@ -361,7 +424,9 @@ async function runBrokerEngine(
   registry.issueIntent(target, issueId); // durable before any issuer request
   let capability: Capability | undefined;
   try {
-    capability = await boundary.issue(target, issueId, issueProof.lease);
+    assert.equal(issueProof.phase, "issue");
+    requireCurrentEffect(issueProof as EffectAuthorization);
+    capability = await boundary.issue(target, issueId, issueProof as EffectAuthorization);
     assert(
       identifier.test(capability.id) &&
         Buffer.isBuffer(capability.value) &&
@@ -384,29 +449,29 @@ async function runBrokerEngine(
     signal?.throwIfAborted();
     const useProof = await checkedObservation(boundary, profile, approval, target, "use");
     assert.equal(useProof.lease.id, issueProof.lease.id, "Lease changed between issuance and use");
-    assert.equal(useProof.lease.revision, issueProof.lease.revision, "Lease revision changed");
+    assert.equal(useProof.lease.fence, issueProof.lease.fence, "Lease fence changed");
+    assert.deepEqual(
+      useProof.lease.sources,
+      issueProof.lease.sources,
+      "Lease source revisions changed",
+    );
     await boundary.verifyLease(useProof.lease, target);
     assert(Math.floor(Date.now() / 1000) < useProof.lease.end, "Lease expired before use");
     signal?.throwIfAborted();
     registry.publicationIntent(target, issueId); // durable before any publisher request
     try {
-      await boundary.publish(target, issueId, capability.value, useProof.lease, verifiedArtifact);
+      assert.equal(useProof.phase, "use");
+      requireCurrentEffect(useProof as EffectAuthorization);
+      await boundary.publish(
+        target,
+        issueId,
+        capability.value,
+        useProof as EffectAuthorization,
+        verifiedArtifact,
+      );
       signal?.throwIfAborted();
       await boundary.revoke(issueId);
-      const returned = await boundary.history(target, [issueId]);
-      const raw =
-        profile.kind === "github-oidc"
-          ? {
-              ...object(returned, "github credentials operations"),
-              github: await readPublicGithubPublishedRelease(target),
-            }
-          : returned;
-      const checked = assessObservedReconciliation(
-        raw,
-        [issueId],
-        release(target),
-        Math.floor(Date.now() / 1000),
-      );
+      const { observed: checked } = await readReconciliation(target, [issueId]);
       assert.equal(
         checked.kind,
         "published",
@@ -446,8 +511,9 @@ export type IsolatedTestProfile = {
   kind: "isolated-test";
   collector: CollectorIdentity;
   softwareJwks: Buffer;
-  requiredDomains: readonly string[];
-  githubGet(target: AttemptTarget): GithubGet;
+  requiredSources: readonly AuthoritySourceProfile[];
+  githubGet(target: AttemptTarget, boundary: BrokerPorts): GithubGet;
+  beforeKeys?(): Promise<void>;
 };
 type BrokerTrustProfile = ReviewedAuthorityProfile | IsolatedTestProfile;
 export async function runIsolatedBroker(

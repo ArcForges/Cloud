@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // This evaluates the supplied observations. It does not establish their source, completeness or enforcement.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { object } from "./provenance.ts";
 
 const idPattern = /^[A-Za-z0-9._:-]{1,128}$/u;
@@ -137,4 +138,182 @@ export function checkObservedPageChain(input: unknown): { ids: string[]; revisio
   }
   assert(revision !== undefined);
   return { ids: [...ids].sort(), revision };
+}
+
+/** The reviewed profile fixes identities and supported provider-specific observation/control formats.
+ * Values supplied in a signed payload never choose their own profile or authenticate themselves. */
+export type AuthoritySourceProfile = Readonly<{
+  domain: string;
+  namespace: string;
+  provider: string;
+  observationType: string;
+  enforcementType: string;
+}>;
+export type LeaseSource = Readonly<{
+  domain: string;
+  namespace: string;
+  provider: string;
+  revision: string;
+}>;
+export type AuthorityLease = Readonly<{
+  id: string;
+  holder: string;
+  fence: string;
+  start: number;
+  end: number;
+  sources: readonly LeaseSource[];
+}>;
+const sha256Pattern = /^[a-f0-9]{64}$/u;
+function safeTime(value: unknown): number {
+  assert(
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
+    "Invalid authority time",
+  );
+  return value;
+}
+function opaqueReceipt(value: unknown): void {
+  assert(
+    typeof value === "string" &&
+      value.length > 0 &&
+      value.length <= 65536 &&
+      /^[A-Za-z0-9_-]+$/u.test(value),
+    "Invalid source proof encoding",
+  );
+  const bytes = Buffer.from(value, "base64url");
+  assert(bytes.length > 0 && bytes.toString("base64url") === value, "Noncanonical source proof");
+}
+/** Exact canonical fields which a reviewed provider-specific adapter may authenticate. */
+export function sourceObservationMessage(
+  ref: LeaseSource,
+  collectedAt: number,
+  pagesDigest: string,
+): Buffer {
+  return Buffer.from(JSON.stringify({ ...ref, collectedAt, pagesDigest }));
+}
+export function sourceEnforcementMessage(
+  ref: LeaseSource,
+  lease: Pick<AuthorityLease, "id" | "holder" | "fence" | "start" | "end">,
+): Buffer {
+  return Buffer.from(
+    JSON.stringify({
+      ...ref,
+      leaseId: lease.id,
+      holder: lease.holder,
+      fence: lease.fence,
+      start: lease.start,
+      end: lease.end,
+    }),
+  );
+}
+function sourceReference(value: unknown): LeaseSource {
+  const ref = object(value, "domain namespace provider revision");
+  return {
+    domain: identity(ref.domain),
+    namespace: identity(ref.namespace),
+    provider: identity(ref.provider),
+    revision: identity(ref.revision),
+  };
+}
+
+/** Validate exact signed per-source evidence and the lease's complete source/revision/fence binding.
+ * The reviewed source adapter must independently authenticate provider observation bytes, inventory
+ * completeness and each enforcement receipt; matching strings, signatures and hashes alone do not. */
+export function inspectSourceEvidence(
+  rawLease: unknown,
+  rawSources: unknown,
+  at: number,
+  holder: string,
+  profiles: readonly AuthoritySourceProfile[],
+): AuthorityLease {
+  assert(Number.isSafeInteger(at) && at >= 0);
+  assert(profiles.length > 0 && profiles.length <= 128);
+  const profilesByDomain = new Map<string, AuthoritySourceProfile>();
+  for (const profile of profiles) {
+    for (const value of [
+      profile.domain,
+      profile.namespace,
+      profile.provider,
+      profile.observationType,
+      profile.enforcementType,
+    ])
+      identity(value);
+    assert(!profilesByDomain.has(profile.domain), "Duplicate reviewed authority source");
+    profilesByDomain.set(profile.domain, profile);
+  }
+  const data = object(rawLease, "id holder fence start end sources");
+  const id = identity(data.id);
+  const fence = identity(data.fence);
+  assert.equal(data.holder, holder, "Lease holder differs");
+  const start = safeTime(data.start);
+  const end = safeTime(data.end);
+  assert(start <= at && at < end && end - start <= 300, "Lease outside observation interval");
+  assert(
+    Array.isArray(data.sources) && data.sources.length === profiles.length,
+    "Lease source set incomplete",
+  );
+  const refs = new Map<string, LeaseSource>();
+  for (const raw of data.sources) {
+    const ref = sourceReference(raw);
+    const profile = profilesByDomain.get(ref.domain);
+    assert(profile && !refs.has(ref.domain), "Unexpected or duplicate lease source");
+    assert.equal(ref.namespace, profile.namespace, "Lease namespace differs");
+    assert.equal(ref.provider, profile.provider, "Lease provider differs");
+    refs.set(ref.domain, ref);
+  }
+  assert(
+    Array.isArray(rawSources) && rawSources.length === profiles.length,
+    "Authority source domains incomplete",
+  );
+  const seen = new Set<string>();
+  for (const raw of rawSources) {
+    const source = object(
+      raw,
+      "domain namespace provider revision collectedAt observation pages enforcement",
+    );
+    const domain = identity(source.domain);
+    const profile = profilesByDomain.get(domain);
+    const ref = refs.get(domain);
+    assert(profile && ref && !seen.has(domain), "Unexpected or duplicate authority source");
+    seen.add(domain);
+    assert.equal(source.namespace, ref.namespace, "Source namespace differs");
+    assert.equal(source.provider, ref.provider, "Source provider differs");
+    assert.equal(source.revision, ref.revision, "Source revision differs");
+    const collected = safeTime(source.collectedAt);
+    assert(
+      start <= collected && collected <= at && at - collected <= 120,
+      "Source observation is stale or outside lease",
+    );
+    const chain = checkObservedPageChain(source.pages);
+    assert.equal(chain.revision, ref.revision, "Page revision differs from source");
+    const observation = object(source.observation, "type provider revision digest attestation");
+    assert.equal(observation.type, profile.observationType, "Unsupported observation control");
+    assert.equal(observation.provider, ref.provider, "Observation identity differs");
+    assert.equal(observation.revision, ref.revision, "Observation revision differs");
+    assert(typeof observation.digest === "string" && sha256Pattern.test(observation.digest));
+    assert.equal(
+      observation.digest,
+      createHash("sha256").update(JSON.stringify(source.pages)).digest("hex"),
+      "Observation pages differ",
+    );
+    opaqueReceipt(observation.attestation);
+    const enforcement = object(source.enforcement, "type leaseId fence revision receipt");
+    assert.equal(enforcement.type, profile.enforcementType, "Unsupported enforcement control");
+    assert.equal(enforcement.leaseId, id, "Enforcement lease differs");
+    assert.equal(enforcement.fence, fence, "Enforcement fence differs");
+    assert.equal(enforcement.revision, ref.revision, "Enforcement revision differs");
+    opaqueReceipt(enforcement.receipt);
+  }
+  assert.equal(seen.size, profiles.length);
+  return Object.freeze({
+    id,
+    holder,
+    fence,
+    start,
+    end,
+    sources: Object.freeze(
+      [...refs.values()]
+        .sort((a, b) => a.domain.localeCompare(b.domain))
+        .map((ref) => Object.freeze(ref)),
+    ),
+  });
 }

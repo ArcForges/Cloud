@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Synthetic provider, issuer and publication service for isolated tests; never production authority.
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import { crc32, deflateRawSync } from "node:zlib";
-import type { BrokerPorts, IsolatedTestProfile } from "../../../tooling/ctr06-bootstrap-broker.ts";
-import { brokerTargetDigest } from "../../../tooling/ctr06-bootstrap-broker.ts";
+import type {
+  BrokerPorts,
+  EffectAuthorization,
+  IsolatedTestProfile,
+} from "../../../tooling/ctr06-bootstrap-broker.ts";
+import { acceptFencedEffect, brokerTargetDigest } from "../../../tooling/ctr06-bootstrap-broker.ts";
 import { bridgeSource } from "../../../tooling/ctr06-security-bridge-source.ts";
+import {
+  sourceObservationMessage,
+  sourceEnforcementMessage,
+  type LeaseSource,
+  type AuthorityLease,
+} from "../../../tooling/ctr06-bootstrap-policy.ts";
+import { verifyAuthenticatedHistoryWithKey } from "../../../tooling/ctr06-bootstrap-reconcile.ts";
 import type {
   ApprovedBootstrap,
   AttemptTarget,
@@ -148,13 +159,100 @@ const domains = [
   "github-workflows",
   "provider-deployment",
 ];
+export const sourceProfiles = domains.map((domain) => ({
+  domain,
+  namespace: `namespace-${domain}`,
+  provider: `provider-${domain}`,
+  observationType: "mock-authenticated-v1",
+  enforcementType: "mock-enforcement-v1",
+}));
+function evidence(holder: string, now: number) {
+  const refs = sourceProfiles.map((profile, index) => ({
+    domain: profile.domain,
+    namespace: profile.namespace,
+    provider: profile.provider,
+    revision: `revision-${index + 1}`,
+  }));
+  const lease = {
+    id: "lease1",
+    holder,
+    fence: "fence1",
+    start: now - 1,
+    end: now + 120,
+    sources: refs,
+  };
+  const sources = refs.map((ref) => {
+    const pages = [
+      { cursor: null, next: null as string | null, revision: ref.revision, ids: [ref.domain] },
+    ];
+    const digest = createHash("sha256").update(JSON.stringify(pages)).digest("hex");
+    return {
+      ...ref,
+      collectedAt: now,
+      pages,
+      observation: {
+        type: "mock-authenticated-v1",
+        provider: ref.provider,
+        revision: ref.revision,
+        digest,
+        attestation: sign(
+          "RSA-SHA256",
+          sourceObservationMessage(ref, now, digest),
+          sourcePair.privateKey,
+        ).toString("base64url"),
+      },
+      enforcement: {
+        type: "mock-enforcement-v1",
+        leaseId: lease.id,
+        fence: lease.fence,
+        revision: ref.revision,
+        receipt: sign(
+          "RSA-SHA256",
+          sourceEnforcementMessage(ref, lease),
+          sourcePair.privateKey,
+        ).toString("base64url"),
+      },
+    };
+  });
+  return { lease, sources };
+}
+function mutateEvidence(value: ReturnType<typeof evidence>, failure: string) {
+  const first = value.sources[0];
+  assert(first?.pages[0]);
+  if (failure === "missing-domain") value.sources.pop();
+  if (failure === "missing-page") first.pages[0].next = "missing";
+  if (failure === "revision") first.revision = "changed";
+  if (failure === "provider") first.provider = "other-provider";
+  if (failure === "namespace") first.namespace = "other-namespace";
+  if (failure === "old-observation") first.collectedAt -= 121;
+  if (failure === "observation-identity") first.observation.provider = "other-provider";
+  if (failure === "page-digest") first.observation.digest = "0".repeat(64);
+  if (failure === "receipt") first.enforcement.receipt = "";
+  if (failure === "missing-receipt") Reflect.deleteProperty(first.enforcement, "receipt");
+  if (failure === "missing-attestation") Reflect.deleteProperty(first.observation, "attestation");
+  if (failure === "forged-observation")
+    first.observation.attestation = Buffer.alloc(256).toString("base64url");
+  if (failure === "forged-receipt")
+    first.enforcement.receipt = Buffer.alloc(256).toString("base64url");
+  if (failure === "fence") first.enforcement.fence = "other-fence";
+  if (failure === "unknown-control") first.enforcement.type = "unsupported-control";
+  if (failure === "missing-lease-source") value.lease.sources.pop();
+  if (failure === "pseudo-aggregate") {
+    const ref = value.lease.sources[0];
+    assert(ref);
+    ref.revision = "aggregate-revision";
+  }
+}
 const gateEpoch = Math.floor(Date.now() / 1000) - 90;
 function gatePayload(
   value: Pick<
     AttemptTarget,
     "producer" | "run" | "runNumber" | "attempt" | "eventDigest" | "gateChallenge"
   >,
+  failure = "",
 ) {
+  const observations = evidence(`${value.run}:${value.attempt}`, gateEpoch);
+  mutateEvidence(observations, failure);
   return Buffer.from(
     JSON.stringify({
       schema: "arcforges.ctr06.bootstrap-gate.v1",
@@ -166,18 +264,7 @@ function gatePayload(
       eventDigest: value.eventDigest,
       challenge: value.gateChallenge,
       source: bridgeSource,
-      lease: {
-        id: "lease1",
-        revision: "rev1",
-        holder: `${value.run}:${value.attempt}`,
-        start: gateEpoch - 1,
-        end: gateEpoch + 120,
-      },
-      sources: domains.map((domain) => ({
-        domain,
-        revision: "rev1",
-        pages: [{ cursor: null, next: null, revision: "rev1", ids: [domain] }],
-      })),
+      ...observations,
       authority: {
         roots: ["runner"],
         principals: [{ id: "runner", capabilities: ["publication"] }],
@@ -195,6 +282,7 @@ type Entry = {
 
 const collector = { sourceSha: "9".repeat(40), runId: "345", runAttempt: "1" };
 const pair = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const sourcePair = generateKeyPairSync("rsa", { modulusLength: 2048 });
 export function githubFixture(value: AttemptTarget) {
   const repo = { id: 1372264358 };
   const names = [
@@ -276,11 +364,12 @@ export function githubFixture(value: AttemptTarget) {
 export const testProfile: IsolatedTestProfile = {
   kind: "isolated-test",
   collector,
-  requiredDomains: domains,
-  githubGet: (value) => async (key) => {
+  requiredSources: sourceProfiles,
+  githubGet: (value, boundary) => async (key) => {
     const answers = githubFixture(value);
-    assert(key in answers, `unexpected mock GitHub read ${key}`);
-    return structuredClone(answers[key]);
+    if (key in answers) return structuredClone(answers[key]);
+    assert(boundary instanceof SyntheticAuthority);
+    return boundary.publicMetadata(value, key);
   },
   softwareJwks: Buffer.from(
     JSON.stringify({
@@ -296,8 +385,9 @@ export function prepareSyntheticGate(
     AttemptTarget,
     "producer" | "run" | "runNumber" | "attempt" | "eventDigest" | "gateChallenge"
   >,
+  failure = "",
 ) {
-  const payload = gatePayload(context);
+  const payload = gatePayload(context, failure);
   const claims = {
     iss: "https://token.actions.githubusercontent.com",
     aud: `arcforges:ctr06:bootstrap-authority:v1:${createHash("sha256").update(payload).digest("hex")}`,
@@ -330,8 +420,15 @@ export class SyntheticAuthority implements BrokerPorts {
   readonly calls: string[] = [];
   actual: AttemptTarget | undefined;
   failure = "";
+  failurePhase = "";
+  phase = "";
+  tokenLifetimeSeconds = 60;
   blockRevocation = false;
   historyUnavailable = false;
+  publicUnknown = false;
+  privateAbsent = false;
+  publicReads = 0;
+  currentFence = "fence1";
   #prior: { payload: Buffer; token: string } | undefined;
   async reviewedApproval() {
     this.calls.push("reviewed");
@@ -345,24 +442,26 @@ export class SyntheticAuthority implements BrokerPorts {
     this.calls.push("gate-proof");
     return this.#gate ?? prepareSyntheticGate(request);
   }
-  async verifyGateReadback(_proof: unknown, _target: AttemptTarget, jobId: number) {
+  async verifyGateReadback(
+    proof: { payload: Buffer; token: string },
+    _target: AttemptTarget,
+    jobId: number,
+    lease: AuthorityLease,
+  ) {
     this.calls.push("gate-readback");
     assert.equal(jobId, 100);
     if (this.failure === "gate-readback") throw new Error("synthetic gate readback unavailable");
+    await this.verifyCoverage(proof.payload, lease);
   }
   async observe(request: AttemptTarget, phase: "association" | "issue" | "use", challenge: string) {
     this.calls.push(`observe:${phase}`);
     const now = Math.floor(Date.now() / 1000);
-    const sources = domains.map((domain) => ({
-      domain,
-      revision: "rev1",
-      pages: [{ cursor: null, next: null as string | null, revision: "rev1", ids: [domain] }],
-    }));
-    if (this.failure === "missing-domain") sources.pop();
-    const first = sources[0];
-    assert(first?.pages[0]);
-    if (this.failure === "missing-page") first.pages[0].next = "missing";
-    if (this.failure === "revision") first.revision = "changed";
+    this.phase = phase;
+    const observations = evidence(`${request.run}:${request.attempt}`, now);
+    if (!this.failurePhase || this.failurePhase === phase) {
+      mutateEvidence(observations, this.failure);
+      if (this.failure === "expired") observations.lease.end = now - 1;
+    }
     const authority = {
       roots: ["runner"],
       principals: [
@@ -379,14 +478,7 @@ export class SyntheticAuthority implements BrokerPorts {
         producer: approval.merge,
         eventDigest: approval.eventDigest,
         originalRun: approval.originalRun,
-        lease: {
-          id: "lease1",
-          revision: "rev1",
-          holder: `${request.run}:${request.attempt}`,
-          start: now - 1,
-          end: this.failure === "expired" ? now - 1 : now + 120,
-        },
-        sources,
+        ...observations,
         authority,
       }),
     );
@@ -410,7 +502,7 @@ export class SyntheticAuthority implements BrokerPorts {
       jti: "synthetic-jti",
       iat: now - 1,
       nbf: now - 1,
-      exp: now + 60,
+      exp: now + this.tokenLifetimeSeconds,
     };
     if (this.failure === "issuer") claims.iss = "https://invalid.example";
     const prefix = `${encode({ alg: "RS256", kid: "fixture", typ: "JWT" })}.${encode(claims)}`;
@@ -436,45 +528,89 @@ export class SyntheticAuthority implements BrokerPorts {
       })(),
     };
   }
-  async verifyCoverage() {
+  async verifyCoverage(payload: Buffer, lease: AuthorityLease) {
     this.calls.push("coverage");
     if (this.failure === "coverage") throw new Error("synthetic coverage unavailable");
-  }
-  async verifyLease() {
-    this.calls.push("lease");
-    if (this.failure === "lease-loss") throw new Error("synthetic lease lost");
-  }
-  async issue(request: AttemptTarget, issueId: string) {
-    this.calls.push("issue");
-    const secret = Buffer.from("PRIVATE-CAPABILITY-FIXTURE");
-    this.entries.set(issueId, {
-      credential: "active",
-      operation: "not_started",
-      secret: Buffer.from(secret),
-    });
-    if (this.failure === "issue-unknown") throw new Error("synthetic issuer response lost");
-    return {
-      id: `credential-${issueId}`,
-      targetDigest: brokerTargetDigest(request),
-      value: secret,
+    const document = JSON.parse(payload.toString("utf8")) as {
+      sources: {
+        domain: string;
+        namespace: string;
+        provider: string;
+        revision: string;
+        collectedAt: number;
+        observation: { digest: string; attestation: string };
+        enforcement: { receipt: string };
+      }[];
     };
+    for (const source of document.sources) {
+      const ref: LeaseSource = {
+        domain: source.domain,
+        namespace: source.namespace,
+        provider: source.provider,
+        revision: source.revision,
+      };
+      assert(
+        verify(
+          "RSA-SHA256",
+          sourceObservationMessage(ref, source.collectedAt, source.observation.digest),
+          sourcePair.publicKey,
+          Buffer.from(source.observation.attestation, "base64url"),
+        ),
+        "synthetic source observation signature differs",
+      );
+      assert(
+        verify(
+          "RSA-SHA256",
+          sourceEnforcementMessage(ref, lease),
+          sourcePair.publicKey,
+          Buffer.from(source.enforcement.receipt, "base64url"),
+        ),
+        "synthetic enforcement receipt differs",
+      );
+    }
+  }
+  async verifyLease(lease: AuthorityLease) {
+    this.calls.push("lease");
+    if (this.failure === "lease-loss" || lease.fence !== this.currentFence)
+      throw new Error("synthetic lease lost or fenced");
+  }
+  async issue(request: AttemptTarget, issueId: string, authorization: EffectAuthorization) {
+    this.calls.push("issue");
+    return acceptFencedEffect(this, testProfile, approval, request, authorization, () => {
+      assert.equal(authorization.phase, "issue");
+      const secret = Buffer.from("PRIVATE-CAPABILITY-FIXTURE");
+      this.entries.set(issueId, {
+        credential: "active",
+        operation: "not_started",
+        secret: Buffer.from(secret),
+      });
+      if (this.failure === "issue-unknown") throw new Error("synthetic issuer response lost");
+      return {
+        id: `credential-${issueId}`,
+        targetDigest: brokerTargetDigest(request),
+        value: secret,
+      };
+    });
   }
   async publish(
     request: AttemptTarget,
     issueId: string,
     capability: Buffer,
-    _lease: unknown,
+    authorization: EffectAuthorization,
     verifiedArtifact: Buffer,
   ) {
     this.calls.push("publish");
-    const entry = this.entries.get(issueId);
-    assert(entry);
-    assert.equal(entry.credential, "active");
-    assert.deepEqual(capability, entry.secret);
-    assert.deepEqual(verifiedArtifact, fixtureArtifact);
-    entry.operation = "published";
-    this.actual = { ...request };
-    if (this.failure === "publish-unknown") throw new Error("synthetic publisher response lost");
+    return acceptFencedEffect(this, testProfile, approval, request, authorization, () => {
+      assert.equal(authorization.phase, "use");
+      const entry = this.entries.get(issueId);
+      assert(entry);
+      assert.equal(entry.credential, "active");
+      assert.deepEqual(capability, entry.secret);
+      assert.deepEqual(verifiedArtifact, fixtureArtifact);
+      entry.operation = "published";
+      this.actual = { ...request };
+      if (this.failure === "publish-unknown") throw new Error("synthetic publisher response lost");
+    });
   }
   async revoke(issueId: string) {
     this.calls.push("revoke");
@@ -494,9 +630,12 @@ export class SyntheticAuthority implements BrokerPorts {
     const operations = issueIds.map((issueId) => {
       const entry = this.entries.get(issueId);
       assert(entry);
-      return { issueId, state: entry.operation, observedAt: now };
+      const publication =
+        entry.operation === "published" && this.actual ? this.publishedIdentity(this.actual) : null;
+      return { issueId, state: entry.operation, observedAt: now, publication };
     });
-    const actual = this.actual;
+    const actual =
+      !this.privateAbsent && this.actual?.release === request.release ? this.actual : undefined;
     const github = actual
       ? {
           state: "present",
@@ -533,6 +672,95 @@ export class SyntheticAuthority implements BrokerPorts {
           receiptAssetId: null,
         };
     void request;
-    return { github, credentials, operations };
+    const payload = Buffer.from(
+      JSON.stringify({
+        schema: "arcforges.ctr06.private-history.v1",
+        targetDigest: brokerTargetDigest(request),
+        issueIds,
+        privateGithub: github,
+        credentials,
+        operations,
+      }),
+    );
+    return {
+      payload,
+      signature: sign("RSA-SHA256", payload, sourcePair.privateKey).toString("base64url"),
+    };
+  }
+  async verifyHistory(history: unknown, request: AttemptTarget, issueIds: string[]) {
+    this.calls.push("history-authenticated");
+    if (this.failure === "history-authentication")
+      throw new Error("synthetic private source unavailable");
+    assert(
+      history && typeof history === "object" && "payload" in history && "signature" in history,
+    );
+    assert(Buffer.isBuffer(history.payload) && typeof history.signature === "string");
+    return verifyAuthenticatedHistoryWithKey(
+      history.payload,
+      history.signature,
+      sourcePair.publicKey,
+      brokerTargetDigest(request),
+      issueIds,
+    );
+  }
+  publishedIdentity(actual: AttemptTarget) {
+    return {
+      tag: actual.release,
+      merge: actual.producer,
+      artifactDigest: actual.artifactDigest,
+      artifactSize: this.assetSize,
+      receiptDigest: actual.receiptDigest,
+      receiptSize: Number(actual.receiptSize),
+      run: actual.run,
+      runNumber: actual.runNumber,
+      attempt: actual.attempt,
+      sourceArtifactId: actual.artifactId,
+      releaseId: "9001",
+      assetId: "9002",
+      receiptAssetId: "9003",
+    };
+  }
+  publicMetadata(request: AttemptTarget, key: string): unknown {
+    this.publicReads++;
+    const actual = this.actual;
+    if (key.startsWith("/releases/tags/")) {
+      if (this.publicUnknown || !actual || actual.release !== request.release) return null;
+      const carrier = `arcforges-ctr06-security-bridge-0.1.0-ci.${actual.runNumber}.${actual.attempt}.tar.gz`;
+      return {
+        id: 9001,
+        tag_name: actual.release,
+        target_commitish: actual.producer,
+        draft: false,
+        prerelease: true,
+        published_at: "2026-11-11T12:00:00Z",
+        assets: [
+          {
+            id: 9002,
+            name: carrier,
+            state: "uploaded",
+            digest: `sha256:${actual.artifactDigest}`,
+            size: Number(actual.artifactSize),
+          },
+          {
+            id: 9003,
+            name: "bootstrap-receipt.json",
+            state: "uploaded",
+            digest: `sha256:${actual.receiptDigest}`,
+            size: Number(actual.receiptSize),
+          },
+        ],
+      };
+    }
+    assert(actual && actual.release === request.release);
+    if (key.startsWith("/git/ref/tags/"))
+      return {
+        ref: `refs/tags/${actual.release}`,
+        object: { type: "commit", sha: actual.producer },
+      };
+    if (key.startsWith("/releases/9001/assets?"))
+      return (
+        this.publicMetadata(request, `/releases/tags/${request.release}`) as { assets: unknown[] }
+      ).assets;
+    throw new Error("unexpected synthetic public release read");
   }
 }

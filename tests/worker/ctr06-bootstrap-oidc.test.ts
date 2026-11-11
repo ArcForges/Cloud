@@ -2,7 +2,10 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
-import { verifyCollectorIdentityWithKeys } from "../../tooling/ctr06-bootstrap-oidc.ts";
+import {
+  requireFreshWindow,
+  verifyCollectorIdentityWithKeys,
+} from "../../tooling/ctr06-bootstrap-oidc.ts";
 
 // The external issuer is a software test key. Signature, payload binding, parsing and identity checks are real.
 const pair = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -48,7 +51,11 @@ function token(
 }
 
 test("collector signature binds exact payload and pinned workflow/source/run", () => {
-  verifyCollectorIdentityWithKeys(payload, token(), identity, at, keys);
+  const window = verifyCollectorIdentityWithKeys(payload, token(), identity, at, keys);
+  assert.deepEqual(window, { issuedAt: at - 5, notBefore: at - 5, expiresAt: at + 60 });
+  requireFreshWindow(window, at);
+  assert.throws(() => requireFreshWindow(window, at - 6));
+  assert.throws(() => requireFreshWindow(window, at + 60));
   assert.throws(() =>
     verifyCollectorIdentityWithKeys(
       Buffer.concat([payload, Buffer.from(" ")]),

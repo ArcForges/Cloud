@@ -42,18 +42,24 @@ if (process.platform === "linux") {
       "reviewed",
       "gate-proof",
       "gate-readback",
+      "coverage",
       "artifact",
       "observe:issue",
       "coverage",
       "lease",
       "issue",
+      "coverage",
+      "lease",
       "observe:use",
       "coverage",
       "lease",
       "lease",
       "publish",
+      "coverage",
+      "lease",
       "revoke",
       "history",
+      "history-authenticated",
       "revoke",
     ]);
     const events = journal.read();
@@ -219,6 +225,187 @@ if (process.platform === "linux") {
     assert.equal(mock.calls.filter((x) => x === "issue").length, 1);
     assert.equal(mock.calls.includes("publish"), false);
     journal.close();
+  });
+
+  test("signed gate and fresh issue/use observations require each distinct source and its matching fenced evidence", async (t) => {
+    const failures = [
+      "missing-domain",
+      "missing-page",
+      "revision",
+      "provider",
+      "namespace",
+      "old-observation",
+      "observation-identity",
+      "page-digest",
+      "receipt",
+      "missing-receipt",
+      "missing-attestation",
+      "forged-observation",
+      "forged-receipt",
+      "fence",
+      "unknown-control",
+      "missing-lease-source",
+      "pseudo-aggregate",
+    ];
+    for (const failure of failures) {
+      const root = scratchDirectory("ctr06-gate-sources-", t);
+      const journal = new BootstrapJournal(root);
+      const mock = new SyntheticAuthority();
+      const request = target();
+      const proof = prepareSyntheticGate(request, failure);
+      request.gateDigest = createHash("sha256").update(proof.payload).digest("hex");
+      mock.retainPreparedGate(proof);
+      await assert.rejects(runIsolatedBroker(journal, request, testProfile, mock), failure);
+      assert.deepEqual(journal.read(), [], failure);
+      journal.close();
+    }
+    for (const phase of ["issue", "use"])
+      for (const failure of failures) {
+        const root = scratchDirectory("ctr06-fresh-sources-", t);
+        const journal = new BootstrapJournal(root);
+        const mock = new SyntheticAuthority();
+        mock.failure = failure;
+        mock.failurePhase = phase;
+        await assert.rejects(
+          runIsolatedBroker(journal, target(), testProfile, mock),
+          `${phase}:${failure}`,
+        );
+        assert.equal(mock.actual, undefined, `${phase}:${failure}`);
+        if (phase === "issue") assert.equal(mock.entries.size, 0, failure);
+        journal.close();
+      }
+  });
+
+  test("actual time after delayed keys, coverage, lease, journal and boundary blocks expired issue/use proofs", async (t) => {
+    const sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 1250));
+    for (const phase of ["issue", "use"] as const)
+      for (const stage of ["keys", "coverage", "lease", "journal", "boundary"] as const) {
+        const root = scratchDirectory("ctr06-expiry-", t);
+        const journal = new BootstrapJournal(root);
+        const mock = new SyntheticAuthority();
+        mock.tokenLifetimeSeconds = 1;
+        let delayed = false;
+        const delay = async () => {
+          if (!delayed && mock.phase === phase) {
+            delayed = true;
+            await sleep();
+          }
+        };
+        const profile = { ...testProfile, beforeKeys: stage === "keys" ? delay : undefined };
+        if (stage === "coverage") {
+          const original = mock.verifyCoverage.bind(mock);
+          mock.verifyCoverage = async (...args) => {
+            await delay();
+            await original(...args);
+          };
+        }
+        if (stage === "lease") {
+          const original = mock.verifyLease.bind(mock);
+          mock.verifyLease = async (...args) => {
+            await delay();
+            await original(...args);
+          };
+        }
+        if (stage === "journal") {
+          const original = journal.append.bind(journal);
+          journal.append = (event) => {
+            const result = original(event);
+            if (
+              !delayed &&
+              event.kind === (phase === "issue" ? "issue_intent" : "publish_intent")
+            ) {
+              delayed = true;
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1250);
+            }
+            return result;
+          };
+        }
+        if (stage === "boundary" && phase === "issue") {
+          const original = mock.issue.bind(mock);
+          mock.issue = async (...args) => {
+            await delay();
+            return original(...args);
+          };
+        }
+        if (stage === "boundary" && phase === "use") {
+          const original = mock.publish.bind(mock);
+          mock.publish = async (...args) => {
+            await delay();
+            return original(...args);
+          };
+        }
+        await assert.rejects(
+          runIsolatedBroker(journal, target(), profile, mock),
+          `${phase}:${stage}`,
+        );
+        assert.equal(delayed, true, `${phase}:${stage}`);
+        assert.equal(mock.actual, undefined, `${phase}:${stage}`);
+        if (phase === "issue") assert.equal(mock.entries.size, 0, `${phase}:${stage}`);
+        else for (const entry of mock.entries.values()) assert.notEqual(entry.credential, "active");
+        journal.close();
+      }
+  });
+
+  test("issuer and publisher independently reject altered authenticated windows, source fences and stale workers", async (t) => {
+    for (const phase of ["issue", "use"] as const)
+      for (const mutation of ["window", "fence", "payload", "stale-worker"] as const) {
+        const root = scratchDirectory("ctr06-fenced-effect-", t);
+        const journal = new BootstrapJournal(root);
+        const mock = new SyntheticAuthority();
+        const alter = (authorization: Parameters<typeof mock.issue>[2]) => {
+          if (mutation === "stale-worker") {
+            mock.currentFence = "new-fence";
+            return authorization;
+          }
+          if (mutation === "window")
+            return {
+              ...authorization,
+              window: { ...authorization.window, expiresAt: authorization.window.expiresAt + 120 },
+            };
+          if (mutation === "fence")
+            return { ...authorization, lease: { ...authorization.lease, fence: "other-fence" } };
+          return {
+            ...authorization,
+            proof: {
+              ...authorization.proof,
+              payload: Buffer.concat([authorization.proof.payload, Buffer.from(" ")]),
+            },
+          };
+        };
+        if (phase === "issue") {
+          const original = mock.issue.bind(mock);
+          mock.issue = (request, issueId, proof) => original(request, issueId, alter(proof));
+        } else {
+          const original = mock.publish.bind(mock);
+          mock.publish = (request, issueId, capability, proof, artifact) =>
+            original(request, issueId, capability, alter(proof), artifact);
+        }
+        await assert.rejects(
+          runIsolatedBroker(journal, target(), testProfile, mock),
+          `${phase}:${mutation}`,
+        );
+        assert.equal(mock.actual, undefined, `${phase}:${mutation}`);
+        if (phase === "issue") assert.equal(mock.entries.size, 0, mutation);
+        else for (const entry of mock.entries.values()) assert.notEqual(entry.credential, "active");
+        journal.close();
+      }
+  });
+
+  test("public and private release conflicts cannot authorize repeat or another run", async (t) => {
+    for (const mode of ["public-unknown", "private-absent", "history-unavailable"]) {
+      const root = scratchDirectory("ctr06-release-views-", t);
+      const journal = new BootstrapJournal(root);
+      const mock = new SyntheticAuthority();
+      await runIsolatedBroker(journal, target(), testProfile, mock);
+      if (mode === "public-unknown") mock.publicUnknown = true;
+      if (mode === "history-unavailable") mock.historyUnavailable = true;
+      if (mode === "private-absent") mock.privateAbsent = true;
+      for (const request of [target(), target("2"), target("1", "124", "457")])
+        await assert.rejects(runIsolatedBroker(journal, request, testProfile, mock), mode);
+      assert.equal(mock.calls.filter((call) => call === "issue").length, 1);
+      assert(mock.publicReads > 0 || mode === "history-unavailable");
+      journal.close();
+    }
   });
 
   test("gate proof digest, challenge, signature and authenticated readback bind issuance to the actual attempt", async (t) => {

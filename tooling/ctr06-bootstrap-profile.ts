@@ -2,6 +2,7 @@
 // No provider scope, enforced lease or publication broker has been reviewed for live use.
 import type { BrokerPorts, CollectorObservation } from "./ctr06-bootstrap-broker.ts";
 import type { CollectorIdentity } from "./ctr06-bootstrap-oidc.ts";
+import type { AuthoritySourceProfile } from "./ctr06-bootstrap-policy.ts";
 import type { ApprovedBootstrap, AttemptTarget } from "./ctr06-bootstrap-registry.ts";
 import type { validateBridgeProducer } from "./ctr06-security-bridge-source.ts";
 
@@ -9,7 +10,7 @@ import type { validateBridgeProducer } from "./ctr06-security-bridge-source.ts";
 export type ReviewedAuthorityProfile = {
   kind: "github-oidc";
   collectorSourceSha: string;
-  requiredDomains: readonly string[];
+  requiredSources: readonly AuthoritySourceProfile[];
   /** Independently authenticate the collector run from reviewed GitHub metadata. */
   collectorRun(
     observation: CollectorObservation,

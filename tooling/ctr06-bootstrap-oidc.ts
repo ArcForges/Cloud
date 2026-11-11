@@ -55,6 +55,20 @@ const knownClaims = new Set([
   "check_run_id",
 ]);
 
+export type AuthenticatedWindow = Readonly<{
+  issuedAt: number;
+  notBefore: number;
+  expiresAt: number;
+}>;
+
+export function requireFreshWindow(window: AuthenticatedWindow, nowSeconds: number): void {
+  assert(Number.isSafeInteger(nowSeconds) && nowSeconds >= 0);
+  assert(
+    window.notBefore <= nowSeconds && nowSeconds < window.expiresAt,
+    "Authenticated proof is not fresh",
+  );
+}
+
 export type CollectorIdentity = {
   sourceSha: string;
   runId: string;
@@ -108,7 +122,7 @@ export function verifyCollectorIdentityWithKeys(
   identity: CollectorIdentity,
   nowSeconds: number,
   jwks: Buffer,
-): void {
+): AuthenticatedWindow {
   assert(payload.length > 0 && payload.length <= maximumPayload, "Authority payload size invalid");
   assert(Buffer.byteLength(token, "utf8") <= maximumToken, "OIDC token too large");
   assert(
@@ -167,6 +181,7 @@ export function verifyCollectorIdentityWithKeys(
   const expires = safeTime(claims.exp);
   assert(issued <= nowSeconds + 30 && notBefore <= nowSeconds && expires > nowSeconds);
   assert(expires > issued && expires - issued <= 300, "Collector token lifetime invalid");
+  return Object.freeze({ issuedAt: issued, notBefore, expiresAt: expires });
 }
 
 /** Production authentication: neither the issuer nor its key source is configurable by the caller. */
@@ -175,7 +190,7 @@ export async function verifyCollectorIdentity(
   token: string,
   identity: CollectorIdentity,
   nowSeconds: number,
-): Promise<void> {
+): Promise<AuthenticatedWindow> {
   const response = await fetch(jwksUrl, {
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
@@ -199,5 +214,11 @@ export async function verifyCollectorIdentity(
   } finally {
     await reader.cancel().catch(() => undefined);
   }
-  verifyCollectorIdentityWithKeys(payload, token, identity, nowSeconds, Buffer.concat(chunks));
+  return verifyCollectorIdentityWithKeys(
+    payload,
+    token,
+    identity,
+    nowSeconds,
+    Buffer.concat(chunks),
+  );
 }

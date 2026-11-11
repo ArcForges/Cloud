@@ -24,7 +24,7 @@ import { object, parseDocument } from "./provenance.ts";
 import { root } from "./process.ts";
 import { requireReviewedAuthorityProfile } from "./ctr06-bootstrap-profile.ts";
 import { inspectGateProof } from "./ctr06-bootstrap-gate.ts";
-import { verifyCollectorIdentity } from "./ctr06-bootstrap-oidc.ts";
+import { requireFreshWindow, verifyCollectorIdentity } from "./ctr06-bootstrap-oidc.ts";
 
 type Producer = ReturnType<typeof validateBridgeProducer>;
 const hexDigest = /^[a-f0-9]{64}$/u;
@@ -211,17 +211,17 @@ export async function runBootstrapEntry(mode: string, directory?: string): Promi
       context,
       proof,
       at,
-      profile.requiredDomains,
+      profile.requiredSources,
       async (item, when) => {
         const identity = await profile.collectorRun(item, context);
         assert.equal(identity.sourceSha, profile.collectorSourceSha);
-        await verifyCollectorIdentity(item.payload, item.token, identity, when);
+        return verifyCollectorIdentity(item.payload, item.token, identity, when);
       },
     );
     await profile.verifyGateControls(proof, producer, approval);
-    assert(
-      typeof checked.lease.end === "number" && Math.floor(Date.now() / 1000) < checked.lease.end,
-    );
+    const current = Math.floor(Date.now() / 1000);
+    requireFreshWindow(checked.window, current);
+    assert(checked.lease.start <= current && current < checked.lease.end);
     const output = process.env.GITHUB_OUTPUT;
     assert(output && path.isAbsolute(output), "Missing GitHub output file");
     appendFileSync(output, `gate-digest=${checked.digest}\ngate-challenge=${challenge}\n`, {

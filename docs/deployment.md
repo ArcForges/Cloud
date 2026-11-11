@@ -32,6 +32,29 @@ existing visible release, but a public 404 cannot prove that no draft, private r
 private durable journal currently supports Linux only; Windows still validates its native parser and cryptographic code. The old
 615.1 bridge is historical evidence, not a currently authorized execution or rollback server.
 
+The signed gate and fresh authority documents carry an exact source set. Each source names its domain, fixed reviewed namespace
+and provider identity, its own revision and collection time, full page chain and a bounded authenticated observation bound to the
+page digest. Its enforcement entry carries the supported control type, source revision, lease ID, fence and the provider receipt.
+The lease carries the complete source/revision set, holder, fencing identity and validity interval. Provider identities and control
+formats come from the reviewed source profile; the evidence cannot select its own trust settings. A source-specific adapter must
+verify the actual observation and enforcement against its authenticated authoritative source. Matching fields, a collector signature,
+a page digest or a receipt-shaped string alone does not prove complete coverage or active enforcement.
+
+A fresh issue/use response retains its authenticated not-before and expiry through all asynchronous checks and durable intent.
+The broker rechecks both that window and the lease before requesting an effect. The separately controlled issuer and publisher must
+independently validate the same signed target, source set, lease, fence and window at their own atomic acceptance boundary. The helper
+for a reviewed adapter checks those fields immediately before its synchronous fenced acceptance; the production enforcement point,
+issuer and publisher are not configured or proven by the isolated software-key test. An expired or uncertain authorization cannot
+issue or continue using a capability. A historical pre-artifact gate proof is checked at its actual completed-job time, not reused as a
+fresh issue/use proof.
+
+Recovery keeps authenticated complete private release history separate from the public GitHub observation. Private absence together
+with a public 404/unknown permits retry only when all previously issued capabilities are independently confirmed revoked or expired,
+all publisher operations are terminal with no effect and no worker remains in flight. A public 404 by itself remains unknown. A claimed
+publication must match the actual public release, the independently authenticated private release and a specific publisher operation;
+conflicting, incomplete or unavailable histories remain unknown. The software-key fixture exercises parsing, signatures and decisions,
+but cannot prove that any real private inventory is complete or fenced.
+
 ## One-time setup
 
 The user already has the paid Workers plan. Use the same account that owns `arcforges.com` and `arcforges-web`. This repository creates `arcforges-cloud`, its Container binding, managed image registry entries and the route `arcforges.com/api/*`. It must not replace Web's apex Custom Domain or DNS record.
