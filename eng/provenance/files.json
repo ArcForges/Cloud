@@ -765,6 +765,7 @@
     "eng/policy/dependency-reviews/af-ctr-06-r12.json",
     "eng/policy/dependency-reviews/af-ctr-06-r13.json",
     "eng/policy/dependency-reviews/af-ctr-06-r14.json",
+    "eng/policy/dependency-reviews/af-ctr-06-r15.json",
     "eng/policy/dependency-reviews/af-ctr-06-r2.json",
     "eng/policy/dependency-reviews/af-ctr-06-r3.json",
     "eng/policy/dependency-reviews/af-ctr-06-r4.json",
@@ -1019,6 +1020,7 @@
     "eng/provenance/records/center-runtime-r61.json",
     "eng/provenance/records/center-runtime-r62.json",
     "eng/provenance/records/center-runtime-r63.json",
+    "eng/provenance/records/center-runtime-r64.json",
     "eng/provenance/records/center-runtime-r7.json",
     "eng/provenance/records/center-runtime-r8.json",
     "eng/provenance/records/center-runtime-r9.json",
@@ -1977,5 +1979,5 @@
     "third-party/Protobuf.LICENSE.txt": "protobuf-bsd-legal-r1",
     "third-party/Puddle.LICENSE.txt": "go-puddle-legal-r1"
   },
-  "artifacts": ["center-runtime-r63", "center-worker-r63"]
+  "artifacts": ["center-runtime-r64", "center-worker-r63"]
 }
