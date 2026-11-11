@@ -302,7 +302,7 @@ export async function migrateTarget(target: PostgresTarget): Promise<GateRecord>
       throw new Error("The database history differs from this candidate.");
     if (status.version === 10 && status.runtimeRoleExists === true) {
       const { promoteCTR06Bridge } = await import("./ctr06-publisher.ts");
-      recordMigration(record, await promoteCTR06Bridge(target, candidate.image, variables));
+      recordMigration(record, await promoteCTR06Bridge(target, candidate.image, variables, center));
     } else {
       if (typeof status.version === "number" && status.version >= 11) {
         assert(

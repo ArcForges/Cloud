@@ -5,6 +5,7 @@
 // role, the runtime credential's slot is confirmed only after a successful promotion, and the production resources are refused
 // outside AF-PROD-01.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -26,6 +27,7 @@ import {
   unknownSlotStatus,
   withRuntimeCredential,
 } from "../../tooling/postgres-deploy.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 import {
   centerLifecycle,
   centerResources,
@@ -585,3 +587,160 @@ test("a restore that left the record without the live slot is handled like a new
   );
   assert(lines.some((line) => /record has no row for the live version's slot b/u.test(line)));
 });
+
+// Execute the real CLI as the entry module. The preloader substitutes only the
+// candidate identity and external process/provider transports; it does not
+// replace the schema-10 import of the actual publisher in the cycle cases.
+for (const scenario of [
+  { name: "production bridge guard", mode: "guard", target: "production", exit: 1 },
+  { name: "acceptance bridge guard", mode: "guard", target: "acceptance", exit: 1 },
+  { name: "awaited provider refusal", mode: "provider", target: "production", exit: 1 },
+  { name: "awaited provider cancellation", mode: "abort", target: "production", exit: 1 },
+  { name: "real provider child deadline", mode: "timeout", target: "production", exit: 1 },
+  { name: "status child nonzero", mode: "status-fail", target: "production", exit: 1 },
+  { name: "unknown history", mode: "refused", target: "production", exit: 1 },
+  { name: "runner child nonzero", mode: "runner-fail", target: "production", exit: 1 },
+  { name: "fresh pending migration", mode: "fresh", target: "production", exit: 0 },
+  { name: "migration child nonzero", mode: "migrate-fail", target: "production", exit: 1 },
+] as const) {
+  test(`the PostgreSQL CLI awaits ${scenario.name} and records its gate`, async (t) => {
+    const directory = scratchDirectory("ctr06-deploy-cycle-", t);
+    const repository = path.resolve(import.meta.dirname, "../..");
+    const preload = path.join(directory, "preload.mjs");
+    const docker = path.join(directory, "docker.mjs");
+    await writeFile(
+      preload,
+      String.raw`
+import { mock } from "node:test";
+import { appendFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+const child = await import("node:child_process");
+const src = process.env.CTR06_CYCLE_WORKTREE;
+const scratch = process.env.CTR06_CYCLE_SCRATCH;
+const mode = process.env.CTR06_CYCLE_MODE;
+mock.module("node:child_process", { namedExports: { ...child, spawn: (command, args, options) =>
+  command === "docker" ? child.spawn(process.execPath, [path.join(scratch, "docker.mjs"), ...args], options) : child.spawn(command, args, options)
+} });
+const url = (file) => pathToFileURL(path.join(src, "tooling", file)).href;
+const processUrl = url("process.ts");
+const realProcess = await import(processUrl);
+mock.module(processUrl, { namedExports: { ...realProcess, root: scratch } });
+mock.module(url("project.ts"), { namedExports: { verifyCandidate: async () => ({ image: "mock:sealed", imageId: "sha256:mock", revision: "a".repeat(40), dirty: false }) } });
+const sensitiveUrl = url("sensitive-process.ts");
+const realSensitive = await import(sensitiveUrl);
+mock.module(sensitiveUrl, { namedExports: { ...realSensitive, runSensitive: async () => {
+  appendFileSync(path.join(scratch, "events.log"), "provider-enter\n");
+  if (mode === "timeout") return await realSensitive.runSensitive("head", process.execPath, ["-e", "setTimeout(() => {}, 10000)"], process.env, "json", { deadlineMs: 100, killGraceMs: 100 });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const error = new Error(mode === "abort" ? "fixture-provider-cancelled" : "fixture-provider-refused");
+  if (mode === "abort") error.name = "AbortError";
+  throw error;
+} } });
+if (mode === "runner-fail") mock.module(url("ctr06-publisher.ts"), { namedExports: {
+  promoteCTR06Bridge: async (_target, image, variables, center) => {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    return await center(image, variables, ["admin", "prepare-ctr06-bridge"]);
+  }
+} });
+`,
+    );
+    await writeFile(
+      docker,
+      String.raw`
+import { appendFileSync } from "node:fs";
+import path from "node:path";
+const args = process.argv.slice(2);
+const mode = process.env.CTR06_CYCLE_MODE;
+appendFileSync(path.join(process.env.CTR06_CYCLE_SCRATCH, "calls.jsonl"), JSON.stringify(args) + "\n");
+if (args[0] === "load") process.exit(0);
+if (args[0] === "image" && args[1] === "inspect") { console.log("sha256:mock"); process.exit(0); }
+if (args[0] === "run" && args.at(-2) === "admin" && args.at(-1) === "ensure-database") { console.log(JSON.stringify({created:false})); process.exit(0); }
+if (args[0] === "run" && args.at(-2) === "migrate" && args.at(-1) === "status") {
+  if (mode === "status-fail") process.exit(23);
+  console.log(JSON.stringify({state: mode === "refused" ? "refused" : "pending", version: 10, runtimeRoleExists: mode !== "fresh" && mode !== "migrate-fail", serverVersionNum: 180006}));
+  process.exit(0);
+}
+if (args[0] === "run" && args.at(-2) === "admin" && args.at(-1) === "prepare-ctr06-bridge") process.exit(27);
+if (args[0] === "run" && args.at(-1) === "migrate") {
+  if (mode === "migrate-fail") process.exit(31);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  console.log(JSON.stringify({state:"current", grants:"reconciled", database:"fixture", version:11, runtimeRole:"arcforges_center_runtime", serverVersionNum:180006, testedMajor:18, serverMajorMatchesTested:true, ran:[]}));
+  process.exit(0);
+}
+console.error("unexpected synthetic docker call"); process.exit(42);
+`,
+    );
+    const env: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      WINDIR: process.env.WINDIR,
+      HOME: directory,
+      TMP: directory,
+      TEMP: directory,
+      CTR06_CYCLE_WORKTREE: repository,
+      CTR06_CYCLE_SCRATCH: directory,
+      CTR06_CYCLE_MODE: scenario.mode,
+      GITHUB_ACTIONS: "true",
+      GITHUB_REPOSITORY: "ArcForges/Cloud",
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_EVENT_NAME:
+        scenario.mode === "guard"
+          ? scenario.target === "production"
+            ? "workflow_dispatch"
+            : "push"
+          : "push",
+      GITHUB_SHA: "a".repeat(40),
+      CLOUDFLARE_ACCOUNT_ID: "c".repeat(32),
+      CLOUDFLARE_API_TOKEN: "synthetic-provider-only",
+      NEON_DATABASE_URL_DIRECT: "postgresql://synthetic@127.0.0.1/fixture",
+    };
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-test-module-mocks",
+        "--import",
+        preload,
+        path.join(repository, "tooling", "postgres-deploy.ts"),
+        "migrate",
+        "--target",
+        scenario.target,
+      ],
+      { cwd: repository, env, encoding: "utf8", timeout: 15_000, windowsHide: true },
+    );
+    assert.equal(result.error, undefined, result.stderr);
+    assert.equal(result.signal, null, result.stderr);
+    assert.equal(result.status, scenario.exit, result.stderr);
+    assert(!result.stderr.includes("unsettled top-level await"));
+    const gate = JSON.parse(
+      readFileSync(
+        path.join(directory, "artifacts", `postgres-gate-${scenario.target}.json`),
+        "utf8",
+      ),
+    ) as { target: string; revision: string; status: string; version?: number };
+    assert.equal(gate.target, scenario.target);
+    assert.equal(gate.revision, "a".repeat(40));
+    assert.equal(gate.status, scenario.exit === 0 ? "passed" : "failed");
+    const calls = readFileSync(path.join(directory, "calls.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    assert(calls.some((call) => call.at(-2) === "migrate" && call.at(-1) === "status"));
+    if (scenario.target === "acceptance")
+      assert(calls.some((call) => call.at(-1) === "ensure-database"));
+    if (scenario.mode === "guard") assert.match(result.stderr, /ciContext/u);
+    if (scenario.mode === "provider" || scenario.mode === "abort") {
+      assert.match(result.stderr, /fixture-provider-(refused|cancelled)/u);
+      assert.equal(readFileSync(path.join(directory, "events.log"), "utf8"), "provider-enter\n");
+    }
+    if (scenario.mode === "timeout") {
+      assert.match(result.stderr, /current Cloud main revision could not be verified/u);
+      assert.equal(readFileSync(path.join(directory, "events.log"), "utf8"), "provider-enter\n");
+    }
+    if (scenario.mode === "status-fail") assert.match(result.stderr, /exited with code 23/u);
+    if (scenario.mode === "refused") assert.match(result.stderr, /history differs/u);
+    if (scenario.mode === "runner-fail") assert.match(result.stderr, /exited with code 27/u);
+    if (scenario.mode === "migrate-fail") assert.match(result.stderr, /exited with code 31/u);
+    if (scenario.mode === "fresh") assert.equal(gate.version, 11);
+  });
+}

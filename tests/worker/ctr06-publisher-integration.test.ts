@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { copyFile, mkdir, rmdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { mock, test } from "node:test";
+import type { CenterRunner } from "../../tooling/postgres-deploy.ts";
 
 test(
   "CTR06 publisher uses real issuance, actual bridge service, cryptographic proof and real PostgreSQL migration",
@@ -87,22 +88,13 @@ test(
     mock.module("../../tooling/ctr06-bridge.ts", {
       namedExports: { ...realBridge, cloudflareReader: () => provider },
     });
-    mock.module("../../tooling/postgres-deploy.ts", {
-      namedExports: {
-        center: async (
-          candidateImage: string,
-          variables: Record<string, string>,
-          command: string[],
-          options: { secretsDirectory?: string },
-        ) =>
-          await rpc("/center", {
-            candidateImage,
-            variables,
-            command,
-            directory: options.secretsDirectory,
-          }),
-      },
-    });
+    const center: CenterRunner = async (candidateImage, variables, command, options) =>
+      await rpc("/center", {
+        candidateImage,
+        variables,
+        command,
+        directory: options?.secretsDirectory,
+      });
     mock.module("../../tooling/sensitive-process.ts", {
       namedExports: {
         ...realSensitive,
@@ -174,11 +166,16 @@ test(
       process.env.NEON_DATABASE_URL =
         "postgres://test:synthetic@ep-test-pooler.region.neon.tech/db?sslmode=require&channel_binding=require";
       const { promoteCTR06Bridge } = await import("../../tooling/ctr06-publisher.ts");
-      const result = await promoteCTR06Bridge("production", "source-candidate", {
-        ARCFORGES_CENTER_MODE: "self-hosted",
-        ARCFORGES_CENTER_MIGRATION_DATABASE_URL: database,
-        ARCFORGES_CENTER_RUNTIME_ROLE: legacyRole,
-      });
+      const result = await promoteCTR06Bridge(
+        "production",
+        "source-candidate",
+        {
+          ARCFORGES_CENTER_MODE: "self-hosted",
+          ARCFORGES_CENTER_MIGRATION_DATABASE_URL: database,
+          ARCFORGES_CENTER_RUNTIME_ROLE: legacyRole,
+        },
+        center,
+      );
       assert.equal(result.version, 11);
       assert.equal(result.grants, "reconciled");
       await rpc("/assert", {});

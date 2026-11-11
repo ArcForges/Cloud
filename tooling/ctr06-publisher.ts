@@ -17,7 +17,8 @@ import {
   type BridgeContext,
 } from "./ctr06-bridge.ts";
 import { neonRuntimeSecret, withNeonRuntimeSecret } from "./neon-runtime.ts";
-import { center, type PostgresTarget } from "./postgres-deploy.ts";
+// The CLI passes its runner; a runtime import here would cycle back into its top-level await.
+import type { CenterRunner, PostgresTarget } from "./postgres-deploy.ts";
 import { root, wrangler } from "./process.ts";
 import { proofProcessEnvironment, runSensitive } from "./sensitive-process.ts";
 
@@ -191,7 +192,9 @@ export async function promoteCTR06Bridge(
   target: PostgresTarget,
   candidateImage: string,
   variables: Record<string, string>,
+  center: CenterRunner,
 ): Promise<Record<string, unknown>> {
+  assert.equal(typeof center, "function", "The sealed center runner is unavailable.");
   const revision = ciContext(target);
   const account = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
   const apiToken = process.env.CLOUDFLARE_API_TOKEN ?? "";

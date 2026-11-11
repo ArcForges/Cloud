@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bridgeAudience, verifyBridgeProviderSnapshot } from "../../tooling/ctr06-bridge.ts";
+import { promoteCTR06Bridge } from "../../tooling/ctr06-publisher.ts";
+import type { CenterRunner } from "../../tooling/postgres-deploy.ts";
 
 const account = "c".repeat(32);
 const version = "00000000-0000-4000-8000-000000000001";
@@ -226,5 +228,12 @@ test("CTR06 live provider verification follows every cursor and rejects a late o
   old = true;
   await assert.rejects(() =>
     verifyLiveBridge(get, deployment, account, "production", version, image),
+  );
+});
+
+test("CTR06 bridge refuses a missing center runner before any provider work", async () => {
+  await assert.rejects(
+    () => promoteCTR06Bridge("production", "image", {}, undefined as unknown as CenterRunner),
+    /sealed center runner is unavailable/u,
   );
 });
