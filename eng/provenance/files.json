@@ -775,6 +775,7 @@
     "eng/policy/dependency-reviews/af-ctr-06-r2.json",
     "eng/policy/dependency-reviews/af-ctr-06-r20.json",
     "eng/policy/dependency-reviews/af-ctr-06-r21.json",
+    "eng/policy/dependency-reviews/af-ctr-06-r22.json",
     "eng/policy/dependency-reviews/af-ctr-06-r3.json",
     "eng/policy/dependency-reviews/af-ctr-06-r4.json",
     "eng/policy/dependency-reviews/af-ctr-06-r5.json",
@@ -877,6 +878,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r121.json",
     "eng/provenance/artifact-profiles/cloud-release-r122.json",
     "eng/provenance/artifact-profiles/cloud-release-r123.json",
+    "eng/provenance/artifact-profiles/cloud-release-r124.json",
     "eng/provenance/artifact-profiles/cloud-release-r13.json",
     "eng/provenance/artifact-profiles/cloud-release-r14.json",
     "eng/provenance/artifact-profiles/cloud-release-r15.json",
@@ -1042,6 +1044,7 @@
     "eng/provenance/records/center-runtime-r69.json",
     "eng/provenance/records/center-runtime-r7.json",
     "eng/provenance/records/center-runtime-r70.json",
+    "eng/provenance/records/center-runtime-r71.json",
     "eng/provenance/records/center-runtime-r8.json",
     "eng/provenance/records/center-runtime-r9.json",
     "eng/provenance/records/center-worker-r1.json",
@@ -1110,6 +1113,7 @@
     "eng/provenance/records/center-worker-r68.json",
     "eng/provenance/records/center-worker-r69.json",
     "eng/provenance/records/center-worker-r7.json",
+    "eng/provenance/records/center-worker-r70.json",
     "eng/provenance/records/center-worker-r8.json",
     "eng/provenance/records/center-worker-r9.json",
     "eng/provenance/records/cloud-02-cloud-runtime-notices-r1.json",
@@ -1872,6 +1876,7 @@
     "tests/worker/support/browser-fake.ts",
     "tests/worker/support/commit-support.ts",
     "tests/worker/support/ctr06-bootstrap-mock.ts",
+    "tests/worker/support/ctr06-bootstrap-production-driver.ts",
     "tests/worker/support/entitlement-fixtures.ts",
     "tests/worker/support/entitlement-sqlite-bridge.ts",
     "tests/worker/support/fake-r2.ts",
@@ -2042,5 +2047,5 @@
     "third-party/Protobuf.LICENSE.txt": "protobuf-bsd-legal-r1",
     "third-party/Puddle.LICENSE.txt": "go-puddle-legal-r1"
   },
-  "artifacts": ["center-runtime-r70", "center-worker-r69"]
+  "artifacts": ["center-runtime-r71", "center-worker-r70"]
 }
