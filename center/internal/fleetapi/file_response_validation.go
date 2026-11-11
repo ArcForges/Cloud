@@ -533,16 +533,15 @@ func validFileResourceLimit(request proto.Message, limit *foundationv1.LimitFail
 		if !maximum("4194304") {
 			return false
 		}
-		switch q := request.(type) {
-		case *nodev1.FileServiceWriteFileRequest:
-			_, ok := q.Precondition.(*nodev1.FileServiceWriteFileRequest_ExpectedSha256)
-			return ok
-		case *nodev1.FileServiceEditFileRequest:
+		switch request.(type) {
+		case *nodev1.FileServiceWriteFileRequest, *nodev1.FileServiceEditFileRequest:
 			return true
 		}
 	case "file_edit_result_bytes":
-		_, ok := request.(*nodev1.FileServiceEditFileRequest)
-		return ok && maximum("4194304")
+		q, ok := request.(*nodev1.FileServiceEditFileRequest)
+		// A non-growing exact replacement cannot exceed the already bounded
+		// original file, irrespective of its unknown content or size.
+		return ok && maximum("4194304") && len(q.GetNewText()) > len(q.GetOldText())
 	case "removal_descendants":
 		switch request.(type) {
 		case *nodev1.FileServicePlanRemovalRequest, *nodev1.FileServiceExecuteRemovalRequest:

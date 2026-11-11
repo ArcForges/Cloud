@@ -109,6 +109,14 @@ func limitResponse(method relayv1.RoutedMethod, name, maximum string) nodeFileRe
 		return &nodev1.FileServiceExecuteRemovalResponse{Outcome: &nodev1.FileServiceExecuteRemovalResponse_Error{Error: failure}}
 	case relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE:
 		return &nodev1.WorkspaceServiceRegisterWorkspaceResponse{Outcome: &nodev1.WorkspaceServiceRegisterWorkspaceResponse_Error{Error: failure}}
+	case relayv1.RoutedMethod_ROUTED_METHOD_UNREGISTER_NODE_WORKSPACE:
+		return &nodev1.WorkspaceServiceUnregisterWorkspaceResponse{Outcome: &nodev1.WorkspaceServiceUnregisterWorkspaceResponse_Error{Error: failure}}
+	case relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_WORKSPACES:
+		return &nodev1.WorkspaceServiceListWorkspacesResponse{Outcome: &nodev1.WorkspaceServiceListWorkspacesResponse_Error{Error: failure}}
+	case relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_WORKSPACE:
+		return &nodev1.WorkspaceServiceGetWorkspaceResponse{Outcome: &nodev1.WorkspaceServiceGetWorkspaceResponse_Error{Error: failure}}
+	case relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION:
+		return &nodev1.FileServiceGetFileOperationResponse{Outcome: &nodev1.FileServiceGetFileOperationResponse_Error{Error: failure}}
 	default:
 		panic("unsupported test response")
 	}
@@ -127,6 +135,8 @@ func TestCTR06SignedLimitBindsMethodMaximumAndKnownRequest(t *testing.T) {
 	overWrite.Data = make([]byte, 196609)
 	overEdit := proto.Clone(edit).(*nodev1.FileServiceEditFileRequest)
 	overEdit.NewText = proto.String(strings.Repeat("a", 65537))
+	growingEdit := proto.Clone(edit).(*nodev1.FileServiceEditFileRequest)
+	growingEdit.NewText = proto.String("bb")
 	absent := proto.Clone(write).(*nodev1.FileServiceWriteFileRequest)
 	absent.Precondition = &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}
 	cases := []struct {
@@ -139,20 +149,29 @@ func TestCTR06SignedLimitBindsMethodMaximumAndKnownRequest(t *testing.T) {
 		{"known small write true max", "file_write_bytes", "196608", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, write, false},
 		{"oversize write", "file_write_bytes", "196608.00", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, overWrite, true},
 		{"write existing unknown", "file_existing_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, write, true},
-		{"write absent has no existing hash", "file_existing_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, absent, false},
+		{"write absent may find existing large file", "file_existing_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, absent, true},
 		{"existing wrong maximum", "file_existing_bytes", "3", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, write, false},
 		{"edit existing unknown", "file_existing_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE, edit, true},
-		{"edit result unknown", "file_edit_result_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE, edit, true},
+		{"fractional existing maximum", "file_existing_bytes", "4194304.1", relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE, edit, false},
+		{"growing edit result unknown", "file_edit_result_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE, growingEdit, true},
+		{"non-growing edit result bounded", "file_edit_result_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE, edit, false},
 		{"edit text oversize", "file_edit_text_bytes", "65536", relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE, overEdit, true},
 		{"edit text known small", "file_edit_text_bytes", "65536", relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE, edit, false},
 		{"wrong method edit result", "file_edit_result_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, write, false},
 		{"plan count unknown", "removal_descendants", "1000", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, true},
+		{"plan bytes unknown", "removal_total_bytes", "67108864", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, true},
+		{"execute count unknown", "removal_descendants", "1000", relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL, execute, true},
 		{"execute bytes unknown", "removal_total_bytes", "67108864", relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL, execute, true},
+		{"root is not a descendant", "removal_descendants", "1001", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, false},
 		{"plan bytes bad max", "removal_total_bytes", "67108863", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, false},
 		{"wrong method plan", "removal_descendants", "1000", relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE, edit, false},
 		{"path oversize", "path_bytes", "4096", relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE, read, true},
 		{"root path oversize", "workspace_root_path_bytes", "4096", relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE, register, true},
 		{"unrecognized limit", "file_something_else", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, write, false},
+		{"operation status has no path bound", "path_bytes", "4096", relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION, &nodev1.FileServiceGetFileOperationRequest{OperationCommandId: pid(platform.NewID())}, false},
+		{"unregister has no path bound", "path_bytes", "4096", relayv1.RoutedMethod_ROUTED_METHOD_UNREGISTER_NODE_WORKSPACE, &nodev1.WorkspaceServiceUnregisterWorkspaceRequest{WorkspaceId: path.WorkspaceId}, false},
+		{"list workspaces has no root path bound", "workspace_root_path_bytes", "4096", relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_WORKSPACES, &nodev1.WorkspaceServiceListWorkspacesRequest{Kinds: []nodev1.WorkspaceKind{nodev1.WorkspaceKind_WORKSPACE_KIND_REGISTERED}}, false},
+		{"get workspace has no root path bound", "workspace_root_path_bytes", "4096", relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_WORKSPACE, &nodev1.WorkspaceServiceGetWorkspaceRequest{WorkspaceId: path.WorkspaceId}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

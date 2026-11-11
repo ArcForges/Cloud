@@ -145,11 +145,12 @@ func TestCTR06SignedResourceLimitAndReceipt(t *testing.T) {
 	})
 	for _, tc := range []struct {
 		name, limit, maximum string
-		valid                bool
+		valid, absent        bool
 	}{
-		{"false_maximum", "file_write_bytes", "3", false},
-		{"known_small_payload", "file_write_bytes", "196608", false},
-		{"unknown_existing_file", "file_existing_bytes", "4194304", true},
+		{"false_maximum", "file_write_bytes", "3", false, false},
+		{"known_small_payload", "file_write_bytes", "196608", false, false},
+		{"unknown_existing_file", "file_existing_bytes", "4194304", true, false},
+		{"absence_requested_existing_file", "file_existing_bytes", "4194304", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			command := platform.NewID()
@@ -158,6 +159,9 @@ func TestCTR06SignedResourceLimitAndReceipt(t *testing.T) {
 			inner := &nodev1.FileServiceWriteFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
 				Path: &nodev1.FilePath{WorkspaceId: idValue(platform.NewID()), Path: proto.String("limit-" + tc.name + ".txt")},
 				Data: []byte("x"), Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedSha256{ExpectedSha256: make([]byte, 32)}}
+			if tc.absent {
+				inner.Precondition = &nodev1.FileServiceWriteFileRequest_ExpectedAbsent{ExpectedAbsent: true}
+			}
 			h.proveFor(issued, user, "fleet.writeNodeFile", node.node.ID)
 			reply := &fleetv1.FleetServiceWriteNodeFileResponse{}
 			h.rpc(fleetv1connect.FleetServiceWriteNodeFileProcedure, &fleetv1.FleetServiceWriteNodeFileRequest{
@@ -181,6 +185,66 @@ func TestCTR06SignedResourceLimitAndReceipt(t *testing.T) {
 				}
 				if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'nodeAuditAvailable'='false'", command) != 1 {
 					t.Fatal("invalid signed limit was credited with a trusted observation")
+				}
+			}
+		})
+	}
+}
+
+// A non-growing edit cannot exceed the bound of its already bounded input;
+// a growing edit may exceed it based on the node-only input size.
+func TestCTR06SignedEditResultLimitAndReceipt(t *testing.T) {
+	h := routedHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connectFiles(node)
+	issued := h.accountSession(user, session.ScopeAccount)
+	answers := make(chan []byte, 1)
+	calls := serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+		body := <-answers
+		return node.node.Executed(call, body), body, true
+	})
+	for _, tc := range []struct {
+		name, replacement string
+		valid             bool
+	}{
+		{"non_growing", "x", false},
+		{"growing_unknown_input", "xx", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := platform.NewID()
+			var write nodev1.FileServiceWriteFileResponse
+			if err := proto.Unmarshal(signedLimitResponse("file_edit_result_bytes", "4194304"), &write); err != nil {
+				t.Fatal(err)
+			}
+			response := mustMarshal(t, &nodev1.FileServiceEditFileResponse{Outcome: &nodev1.FileServiceEditFileResponse_Error{Error: write.GetError()}})
+			answers <- response
+			inner := &nodev1.FileServiceEditFileRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command)},
+				Path:    &nodev1.FilePath{WorkspaceId: idValue(platform.NewID()), Path: proto.String("edit-" + tc.name + ".txt")},
+				OldText: proto.String("x"), NewText: proto.String(tc.replacement), ExpectedOccurrences: proto.Uint32(1), ExpectedSha256: make([]byte, 32)}
+			h.proveFor(issued, user, "fleet.editNodeFile", node.node.ID)
+			reply := &fleetv1.FleetServiceEditNodeFileResponse{}
+			h.rpc(fleetv1connect.FleetServiceEditNodeFileProcedure, &fleetv1.FleetServiceEditNodeFileRequest{
+				Meta: inner.Meta, NodeId: idValue(node.node.ID), Request: mustMarshal(t, inner),
+			}, issued.AccessToken, reply)
+			<-calls
+			record, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, command, int16(relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE))
+			if err != nil || record == nil || record.Final {
+				t.Fatalf("non-final receipt required: %+v %v", record, err)
+			}
+			if tc.valid {
+				if reply.GetError() != nil || !bytes.Equal(reply.GetValue().GetResponse(), response) || record.State != fleet.RoutedFailed {
+					t.Fatalf("valid node-observed growing result: reply=%v receipt=%+v", reply, record)
+				}
+				if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND (convert_from(payload,'UTF8')::jsonb->>'refusal')::int=$2", command, fleet.RefusalCode("resource/too_large")) != 1 {
+					t.Fatal("valid refusal absent from audit")
+				}
+			} else {
+				if errorKey(reply.GetError()) != "STATE/node_unreachable" || reply.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN || record.State != fleet.RoutedUnknown {
+					t.Fatalf("impossible result limit settled: reply=%v receipt=%+v", reply, record)
+				}
+				if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'nodeAuditAvailable'='false'", command) != 1 {
+					t.Fatal("invalid signed edit was credited with a trusted observation")
 				}
 			}
 		})
