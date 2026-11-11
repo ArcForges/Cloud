@@ -43,10 +43,12 @@ public sealed class HarnessRepositoryTests
         Assert.True(IsPinnedSecurityBridgeLegalLoader(source));
         Assert.Contains("verifyTrackedBridgeSource(sourceDirectory);", source, StringComparison.Ordinal);
         foreach (var name in new[] { "tooling/provenance.ts", "tooling/release-provenance.ts", "tooling/licence-boundary.ts" })
+        {
             Assert.Contains("path.join(sourceDirectory, \"" + name + "\")", source, StringComparison.Ordinal);
+            Assert.False(IsPinnedSecurityBridgeLegalLoader(source.Replace(name, name + ".unreviewed", StringComparison.Ordinal)));
+        }
 
         Assert.False(IsPinnedSecurityBridgeLegalLoader(source + "\nawait import(unreviewedPath);\n"));
-        Assert.False(IsPinnedSecurityBridgeLegalLoader(source.Replace("tooling/provenance.ts", "tooling/unreviewed.ts", StringComparison.Ordinal)));
         Assert.False(IsPinnedSecurityBridgeLegalLoader(source.Replace("verifyTrackedBridgeSource(sourceDirectory);", "", StringComparison.Ordinal)));
     }
 
