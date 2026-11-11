@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -180,6 +189,52 @@ scenario("verification bytecode is ignored without hiding unclassified source", 
   // A deliberately tracked .pyc is still classified as source; ignore rules only
   // exclude untracked interpreter output.
   git(f.root, "add", "-f", bytecode);
+  assert.throws(f.check, /Source inventory drift/u);
+});
+scenario("real center bytecode is ignored without concealing source or tracked files", (f) => {
+  git(f.root, "config", "core.excludesFile", path.join(f.root, ".git", "empty-ignore"));
+  f.write(".gitignore", readFileSync(path.join(owner, ".gitignore"), "utf8"));
+  f.write("eng/center.py", "value = 42\n");
+  f.inventory.firstParty.push(".gitignore", "eng/center.py");
+  f.save();
+  // A fresh checkout passes before a real Python import creates its bytecode.
+  assert.doesNotThrow(f.check);
+  const env = { ...process.env };
+  delete env.PYTHONDONTWRITEBYTECODE;
+  delete env.PYTHONPYCACHEPREFIX;
+  delete env.PYTHONOPTIMIZE;
+  const source = path.join(f.root, "eng", "center.py");
+  const script = [
+    "import importlib.util, sys",
+    "source = sys.argv[1]",
+    "spec = importlib.util.spec_from_file_location('center_probe', source)",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "print(importlib.util.cache_from_source(source))",
+  ].join("; ");
+  const cache = execFileSync("python", ["-c", script, source], {
+    cwd: f.root,
+    env,
+    encoding: "utf8",
+  }).trim();
+  assert.equal(path.dirname(cache), path.join(f.root, "eng", "__pycache__"));
+  assert.match(path.basename(cache), /^center\.cpython-\d+(?:\.opt-[12])?\.pyc$/u);
+  assert(lstatSync(cache).isFile(), "Python did not create the expected bytecode");
+  assert.doesNotThrow(f.check);
+
+  for (const file of [
+    "eng/__pycache__/unclassified.py",
+    "eng/__pycache__/center.cpython-314.pyc.backup",
+    "eng/__pycache__/other.cpython-314.pyc",
+    "eng/unclassified.py",
+    "other/__pycache__/center.cpython-314.pyc",
+  ]) {
+    f.write(file, "unclassified source fixture");
+    assert.throws(f.check, /Source inventory drift/u);
+    unlinkSync(path.join(f.root, file));
+  }
+  // Git still inventories a deliberately tracked bytecode file.
+  git(f.root, "add", "-f", "--", path.relative(f.root, cache).split(path.sep).join("/"));
   assert.throws(f.check, /Source inventory drift/u);
 });
 for (const field of [
@@ -551,7 +606,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       `const key = "${sampleNonce}";`,
     ),
   );
-  // AF-CTR-03: one block per file (the policy, the receipts af-ctr-03-r1 to af-ctr-03-r21, af-ctr-04-r1 to af-ctr-04-r13, af-ctr-05-r1 to af-ctr-05-r4, af-ctr-05-r6, af-ctr-05-r7, af-ctr-05-r8, af-ctr-05-r9, af-ctr-05-r10, af-ctr-05-r11, af-ctr-05-r12, af-ctr-05-r13, af-ctr-05-r14, af-ctr-05-r15, af-ctr-05-r16, af-ctr-05-r17, af-ctr-05-r18 af-ctr-06-r1 to af-ctr-06-r17, and af-ctr-06-bridge-r1), each row one exact
+  // AF-CTR-03: one block per file (the policy, the receipts af-ctr-03-r1 to af-ctr-03-r21, af-ctr-04-r1 to af-ctr-04-r13, af-ctr-05-r1 to af-ctr-05-r4, af-ctr-05-r6, af-ctr-05-r7, af-ctr-05-r8, af-ctr-05-r9, af-ctr-05-r10, af-ctr-05-r11, af-ctr-05-r12, af-ctr-05-r13, af-ctr-05-r14, af-ctr-05-r15, af-ctr-05-r16, af-ctr-05-r17, af-ctr-05-r18 af-ctr-06-r1 to af-ctr-06-r18, and af-ctr-06-bridge-r1), each row one exact
   // key-and-digest line of an immutable record named in the inputs maps.
   // The digests are computed here from the records, so this file holds no digest literal.
   const records = [
@@ -629,6 +684,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/af-ctr-06-r15.json",
     "eng/policy/dependency-reviews/af-ctr-06-r16.json",
     "eng/policy/dependency-reviews/af-ctr-06-r17.json",
+    "eng/policy/dependency-reviews/af-ctr-06-r18.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -659,7 +715,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       "eng/policy/dependency-reviews/af-ctr-04-r14.json",
       "eng/policy/dependency-reviews/af-ctr-05-r5.json",
       "eng/policy/dependency-reviews/af-ctr-05-r19.json",
-      "eng/policy/dependency-reviews/af-ctr-06-r18.json",
+      "eng/policy/dependency-reviews/af-ctr-06-r19.json",
       "eng/policy/dependency-reviews/af-ctr-06-bridge-r2.json",
     ])
       assert.ok(!exempt.test(other), other);
