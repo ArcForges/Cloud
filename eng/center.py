@@ -331,10 +331,11 @@ def drill(executable: Path) -> dict[str, object]:
     the runtime credential, dump it with pg_dump, restore it into a second, isolated server, migrate, rotate and confirm there
     (the restored promotion record steers the rotation to the other slot) and run the verify phase (receipt replay, outbox
     publication, job lease, audit chain) against the restored database."""
-    drill_root = ARTIFACTS / "drill"
-    drill_root.mkdir(parents=True, exist_ok=True)
-    # Do not overwrite an earlier drill's evidence on a later invocation.
-    drill_dir = Path(tempfile.mkdtemp(prefix="capture-", dir=drill_root))
+    # CaptureLogical checks every output ancestor: the verification checkout can be below a shared writable cache.
+    # A new private system temporary directory keeps each synthetic archive protected and retained for inspection.
+    # The product guard still checks the actual temporary path and refuses an unsafe or unavailable one.
+    drill_dir = Path(tempfile.mkdtemp(prefix="arcforges-center-drill-"))
+    say(f"synthetic restore drill outputs: {drill_dir}")
     dump = drill_dir / "center.dump"
     metadata = drill_dir / "center.metadata.json"
     owner_password = secrets.token_hex(24)
@@ -369,6 +370,8 @@ def drill(executable: Path) -> dict[str, object]:
             raise SystemExit(f"[center] the restore drill rotated slots {seed_slot} and {verify_slot}, expected a and b")
         drill_phase("verify", verify_url)
     return {"dumpBytes": dump.stat().st_size, "schemaVersion": status["version"], "serverVersionNum": status["serverVersionNum"],
+            "archivePath": str(dump), "archiveSha256": captured["archiveSha256"],
+            "metadataPath": str(metadata), "metadataSha256": captured["metadataSha256"],
             "slots": [seed_slot, verify_slot],
             "phases": ["seed", "dump", "restore", "migrate", "verify"]}
 
