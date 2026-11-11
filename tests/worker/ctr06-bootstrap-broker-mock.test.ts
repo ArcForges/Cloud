@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { verifyCollectorIdentityWithKeys } from "../../tooling/ctr06-bootstrap-oidc.ts";
 import path from "node:path";
@@ -18,6 +19,24 @@ import {
 import { scratchDirectory } from "./support/scratch.ts";
 
 if (process.platform === "linux") {
+  test("production-kind broker uses its real entry and decisions with only external transports substituted", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-test-module-mocks",
+        "--test",
+        "tests/worker/support/ctr06-bootstrap-production-driver.ts",
+      ],
+      { encoding: "utf8", timeout: 30000, env: {} },
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.match(
+      result.stdout,
+      /production kind uses real decisions for success, safe-empty, conflict and expiry/,
+    );
+  });
+
   test("mock external provider drives real proof, journal, issuer/use/revoke and checked publication", async (t) => {
     const root = scratchDirectory("ctr06-broker-", t);
     const journal = new BootstrapJournal(root);
