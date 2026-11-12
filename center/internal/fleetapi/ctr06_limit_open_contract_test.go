@@ -13,8 +13,8 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
-// This tests the published foundation shape used in errors. The separately
-// executed 450.1 consumer checks its own generated validators on actual bytes.
+// This tests the existing stricter AF-CTR-06 maximum helper and nested
+// foundation errors. The published 450.1 Decimal shape is checked separately.
 func TestCTR06FoundationDecimalAndNestedErrorShapes(t *testing.T) {
 	for _, tc := range []struct {
 		value string
@@ -43,7 +43,7 @@ func TestCTR06FoundationDecimalAndNestedErrorShapes(t *testing.T) {
 		{"missing maximum", func(e *foundationv1.ArcError) { e.GetDetails().GetLimit().Maximum = nil }},
 		{"missing name", func(e *foundationv1.ArcError) { e.GetDetails().GetLimit().LimitName = nil }},
 		{"bad available decimal", func(e *foundationv1.ArcError) {
-			e.GetDetails().GetLimit().Available = &foundationv1.Decimal{Value: proto.String("1.0")}
+			e.GetDetails().GetLimit().Available = &foundationv1.Decimal{Value: proto.String("01.0")}
 		}},
 		{"missing recovery nanos", func(e *foundationv1.ArcError) {
 			e.GetDetails().GetLimit().RecoveryAt = &foundationv1.Instant{UnixSeconds: proto.Int64(1)}

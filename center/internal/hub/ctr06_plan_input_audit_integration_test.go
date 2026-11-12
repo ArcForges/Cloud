@@ -39,16 +39,22 @@ func TestCTR06SignedPlanOwnershipInputAuditAndReceipt(t *testing.T) {
 	digest := sha256.Sum256(seededBody)
 	for _, tc := range []struct {
 		name, limit, maximum string
-		audit                string
+		audit, available     string
 		valid                bool
 	}{
-		{"canonical", "removal_ownership_input_bytes", "67108864", "valid", true},
-		{"opaque", "opaque.actual.bound", "67108864", "valid", true},
-		{"no_observation", "removal_ownership_input_bytes", "67108864", "none", true},
-		{"fractional", "removal_ownership_input_bytes", "67108864.00", "valid", false},
-		{"unequal", "removal_ownership_input_bytes", "67108864", "unequal", false},
-		{"item_count", "removal_ownership_input_bytes", "67108864", "item_count", false},
-		{"other_observation", "removal_ownership_input_bytes", "67108864", "other", false},
+		{"canonical", "removal_ownership_input_bytes", "67108864", "valid", "", true},
+		{"opaque", "opaque.actual.bound", "67108864", "valid", "", true},
+		{"available_decimal", "removal_ownership_input_bytes", "67108864", "valid", "1.00", true},
+		{"available_zero_fraction", "removal_ownership_input_bytes", "67108864", "valid", "0.0", true},
+		{"available_negative_nonzero", "opaque.actual.bound", "67108864", "valid", "-1.00", true},
+		{"available_leading_zero", "removal_ownership_input_bytes", "67108864", "valid", "01.0", false},
+		{"available_negative_zero", "removal_ownership_input_bytes", "67108864", "valid", "-0.0", false},
+		{"available_many_fractional", "removal_ownership_input_bytes", "67108864", "valid", "0.0000000001", false},
+		{"no_observation", "removal_ownership_input_bytes", "67108864", "none", "", true},
+		{"fractional", "removal_ownership_input_bytes", "67108864.00", "valid", "1.00", false},
+		{"unequal", "removal_ownership_input_bytes", "67108864", "unequal", "", false},
+		{"item_count", "removal_ownership_input_bytes", "67108864", "item_count", "", false},
+		{"other_observation", "removal_ownership_input_bytes", "67108864", "other", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			command := platform.NewID()
@@ -57,6 +63,9 @@ func TestCTR06SignedPlanOwnershipInputAuditAndReceipt(t *testing.T) {
 				t.Fatal(err)
 			}
 			failure := write.GetError()
+			if tc.available != "" {
+				failure.GetDetails().GetLimit().Available = &foundationv1.Decimal{Value: proto.String(tc.available)}
+			}
 			response := &nodev1.FileServicePlanRemovalResponse{
 				Meta:    &foundationv1.ResponseMeta{CorrelationId: failure.CorrelationId},
 				Outcome: &nodev1.FileServicePlanRemovalResponse_Error{Error: failure},
@@ -118,7 +127,7 @@ func TestCTR06SignedPlanOwnershipInputAuditAndReceipt(t *testing.T) {
 						t.Fatal("signed node observation not preserved in the durable center audit")
 					}
 				}
-				if tc.name == "canonical" {
+				if tc.name == "canonical" || tc.name == "available_decimal" {
 					replay := send()
 					if errorKey(replay.GetError()) != "STATE/node_unreachable" ||
 						replay.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||

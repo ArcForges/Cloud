@@ -29,13 +29,19 @@ func validRevision(v *foundationv1.Revision) bool {
 	return v != nil && v.Value != nil && v.GetValue() >= 0
 }
 
-func validDecimal(v *foundationv1.Decimal) bool {
-	if v == nil || v.Value == nil || !decimalToken.MatchString(v.GetValue()) ||
-		(strings.Contains(v.GetValue(), ".") && strings.HasSuffix(v.GetValue(), "0")) {
+// The published 450.1 Decimal shape allows trailing fractional zeroes.
+func validPublishedDecimal(v *foundationv1.Decimal) bool {
+	if v == nil || v.Value == nil || !decimalToken.MatchString(v.GetValue()) {
 		return false
 	}
 	n := strings.TrimLeft(strings.ReplaceAll(strings.TrimPrefix(v.GetValue(), "-"), ".", ""), "0")
 	return len(n) <= 28 && !(strings.HasPrefix(v.GetValue(), "-") && n == "")
+}
+
+// The existing stricter maximum check remains in addition to method binding.
+func validDecimal(v *foundationv1.Decimal) bool {
+	return validPublishedDecimal(v) &&
+		!(strings.Contains(v.GetValue(), ".") && strings.HasSuffix(v.GetValue(), "0"))
 }
 
 func validFileResponseMeta(v *foundationv1.ResponseMeta) bool {
@@ -114,7 +120,7 @@ func validFileError(e *foundationv1.ArcError) bool {
 			}
 		case *foundationv1.ErrorDetails_Limit:
 			v := detail.Limit
-			if v == nil || v.LimitName == nil || !contractToken.MatchString(v.GetLimitName()) || v.Maximum != nil && !validDecimal(v.Maximum) || v.Available != nil && !validDecimal(v.Available) || v.RecoveryAt != nil && !validFileInstant(v.RecoveryAt) {
+			if v == nil || v.LimitName == nil || !contractToken.MatchString(v.GetLimitName()) || v.Maximum != nil && !validDecimal(v.Maximum) || v.Available != nil && !validPublishedDecimal(v.Available) || v.RecoveryAt != nil && !validFileInstant(v.RecoveryAt) {
 				return false
 			}
 		case *foundationv1.ErrorDetails_Upgrade:
