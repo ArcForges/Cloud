@@ -250,3 +250,89 @@ func TestCTR06SignedEditResultLimitAndReceipt(t *testing.T) {
 		})
 	}
 }
+
+// Real composed Go center, PostgreSQL, routing receipt/audit and verified
+// signed channel; the node and signing key are synthetic, not native Node E2E.
+func TestCTR06SignedPlanResponseBudgetPreservesInnerReceiptAndAudit(t *testing.T) {
+	h := routedHarness(t)
+	user := h.db.Account(1)
+	node := h.enrollIn(user)
+	channel := h.connectFiles(node)
+	issued := h.accountSession(user, session.ScopeAccount)
+	answers := make(chan []byte, 1)
+	calls := serve(t, node, channel, func(call *relayv1.ChannelCall) (*relayv1.ResultHeader, []byte, bool) {
+		body := <-answers
+		return node.node.Executed(call, body), body, true
+	})
+	for _, tc := range []struct {
+		name, limit, maximum string
+		valid                bool
+	}{
+		{"canonical", "removal_plan_response_bytes", "1040384", true},
+		{"opaque", "historic.actual.budget", "1040384", true},
+		{"wrong_maximum", "removal_plan_response_bytes", "1040383", false},
+		{"noncanonical_decimal", "removal_plan_response_bytes", "1040384.00", false},
+		{"recognized_other_bound", "removal_descendants", "1040384", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := platform.NewID()
+			var write nodev1.FileServiceWriteFileResponse
+			if err := proto.Unmarshal(signedLimitResponse(tc.limit, tc.maximum), &write); err != nil {
+				t.Fatal(err)
+			}
+			refusal := write.GetError()
+			response := mustMarshal(t, &nodev1.FileServicePlanRemovalResponse{Meta: &foundationv1.ResponseMeta{CorrelationId: refusal.CorrelationId}, Outcome: &nodev1.FileServicePlanRemovalResponse_Error{Error: refusal}})
+			inner := &nodev1.FileServicePlanRemovalRequest{Meta: &foundationv1.RequestMeta{CommandId: idValue(command), CorrelationId: idValue(platform.NewID())}, Target: &nodev1.FileServicePlanRemovalRequest_WorkspacePath{WorkspacePath: &nodev1.FilePath{WorkspaceId: idValue(platform.NewID()), Path: proto.String("bounded/tree")}}}
+			raw := mustMarshal(t, inner)
+			send := func() *fleetv1.FleetServicePlanNodeRemovalResponse {
+				answers <- response
+				reply := &fleetv1.FleetServicePlanNodeRemovalResponse{}
+				h.rpc(fleetv1connect.FleetServicePlanNodeRemovalProcedure, &fleetv1.FleetServicePlanNodeRemovalRequest{Meta: inner.Meta, NodeId: idValue(node.node.ID), Request: raw}, issued.AccessToken, reply)
+				<-calls
+				return reply
+			}
+			reply := send()
+			record, err := fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, command, int16(relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL))
+			if err != nil || record == nil || record.Final {
+				t.Fatalf("non-final receipt required: %+v %v", record, err)
+			}
+			if tc.valid {
+				if reply.GetError() != nil || !bytes.Equal(reply.GetValue().GetResponse(), response) ||
+					record.State != fleet.RoutedFailed || !record.Delivered || record.Final || record.Attempts != 1 ||
+					record.Refusal == nil || *record.Refusal != fleet.RefusalCode("resource/too_large") {
+					t.Fatalf("first verified DID_NOT_HAPPEN response and durable receipt: reply=%v receipt=%+v", reply, record)
+				}
+				if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'verified'='true' AND convert_from(payload,'UTF8')::jsonb->>'state'='failed' AND (convert_from(payload,'UTF8')::jsonb->>'refusal')::int=$2", command, fleet.RefusalCode("resource/too_large")) != 1 {
+					t.Fatal("first verified DID_NOT_HAPPEN refusal not durably audited")
+				}
+				t.Log("first receipt: verified DID_NOT_HAPPEN, failed, delivered, non-final, attempt 1; audit persisted")
+				replay := send()
+				// A verified refusal on a resend does not prove an earlier delivery had no effect.
+				// The center preserves its conservative outer UNKNOWN even for identical signed inner bytes.
+				if errorKey(replay.GetError()) != "STATE/node_unreachable" ||
+					replay.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||
+					replay.GetError().GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND ||
+					replay.GetError().GetDetails().GetState().GetReason() != "channel_closed" {
+					t.Fatalf("resend lost conservative outer uncertainty: %v", replay)
+				}
+				record, err = fleet.ReadRoutedForMethod(context.Background(), h.db.Runtime, user, command, int16(relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL))
+				if err != nil || record == nil || record.State != fleet.RoutedUnknown || !record.Delivered || record.Final || record.Attempts != 2 ||
+					record.Refusal == nil || *record.Refusal != fleet.RefusalCode("resource/too_large") {
+					t.Fatalf("replay receipt: %+v %v", record, err)
+				}
+				if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'verified'='true' AND (convert_from(payload,'UTF8')::jsonb->>'refusal')::int=$2", command, fleet.RefusalCode("resource/too_large")) != 2 ||
+					h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'verified'='true' AND convert_from(payload,'UTF8')::jsonb->>'state'='unknown'", command) != 1 {
+					t.Fatal("verified resend refusal and conservative UNKNOWN were not durably audited")
+				}
+				t.Log("resend receipt: verified identical refusal, unknown, delivered, non-final, attempt 2; audit persisted")
+			} else {
+				if errorKey(reply.GetError()) != "STATE/node_unreachable" || reply.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN || record.State != fleet.RoutedUnknown {
+					t.Fatalf("invalid signed limit settled: reply=%v receipt=%+v", reply, record)
+				}
+				if h.count("SELECT count(*) FROM audit.audit_event WHERE event_type='fleet.routed.result' AND command_id=$1 AND convert_from(payload,'UTF8')::jsonb->>'nodeAuditAvailable'='false'", command) != 1 {
+					t.Fatal("invalid response credited with observation")
+				}
+			}
+		})
+	}
+}

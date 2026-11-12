@@ -128,6 +128,7 @@ func TestCTR06SignedLimitBindsMethodMaximumAndKnownRequest(t *testing.T) {
 	write := &nodev1.FileServiceWriteFileRequest{Path: path, Data: []byte("x"), Precondition: &nodev1.FileServiceWriteFileRequest_ExpectedSha256{ExpectedSha256: make([]byte, 32)}}
 	edit := &nodev1.FileServiceEditFileRequest{Path: path, OldText: proto.String("a"), NewText: proto.String("b"), ExpectedOccurrences: proto.Uint32(1), ExpectedSha256: make([]byte, 32)}
 	plan := &nodev1.FileServicePlanRemovalRequest{Target: &nodev1.FileServicePlanRemovalRequest_WorkspacePath{WorkspacePath: path}}
+	attemptPlan := &nodev1.FileServicePlanRemovalRequest{Target: &nodev1.FileServicePlanRemovalRequest_AttemptId{AttemptId: pid(platform.NewID())}}
 	execute := &nodev1.FileServiceExecuteRemovalRequest{PlanId: pid(platform.NewID()), PlanDigest: make([]byte, 32)}
 	read := &nodev1.FileServiceReadFileRequest{Path: oversizedPath, Offset: proto.Uint64(0), Length: proto.Uint64(1)}
 	register := &nodev1.WorkspaceServiceRegisterWorkspaceRequest{Path: proto.String("/" + strings.Repeat("a", 4096))}
@@ -161,6 +162,17 @@ func TestCTR06SignedLimitBindsMethodMaximumAndKnownRequest(t *testing.T) {
 		{"wrong method edit result", "file_edit_result_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, write, false},
 		{"plan count unknown", "removal_descendants", "1000", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, true},
 		{"plan bytes unknown", "removal_total_bytes", "67108864", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, true},
+		{"plan response canonical signed inner", "removal_plan_response_bytes", "1040384", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, true},
+		{"plan response opaque signed inner", "opaque.plan.bound", "1040384", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, true},
+		{"attempt plan response canonical", "removal_plan_response_bytes", "1040384", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, attemptPlan, true},
+		{"attempt plan response opaque", "opaque.plan.bound", "1040384", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, attemptPlan, true},
+		{"plan response wrong maximum", "removal_plan_response_bytes", "1040383", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, false},
+		{"plan response noncanonical decimal", "removal_plan_response_bytes", "1040384.00", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, false},
+		{"plan response malformed name", "bad plan bound", "1040384", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, false},
+		{"plan canonical count not response", "removal_descendants", "1040384", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, false},
+		{"plan response cannot name write", "removal_plan_response_bytes", "4194304", relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, write, false},
+		{"execute cannot report plan response", "removal_plan_response_bytes", "1040384", relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL, execute, false},
+		{"execute opaque cannot report plan response", "opaque.plan.bound", "1040384", relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL, execute, false},
 		{"execute count unknown", "removal_descendants", "1000", relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL, execute, true},
 		{"execute bytes unknown", "removal_total_bytes", "67108864", relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL, execute, true},
 		{"root is not a descendant", "removal_descendants", "1001", relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, plan, false},

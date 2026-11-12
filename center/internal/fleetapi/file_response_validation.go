@@ -494,14 +494,15 @@ func validMutation(r *nodev1.FileMutationResult, command *foundationv1.Id, edit 
 // These canonical producer names retain their own meanings even where two
 // bounds have the same maximum. Other 450.1-valid names remain open strings.
 var fileResourceMaximums = map[string]string{
-	"path_bytes":                "4096",
-	"workspace_root_path_bytes": "4096",
-	"file_write_bytes":          "196608",
-	"file_edit_text_bytes":      "65536",
-	"file_existing_bytes":       "4194304",
-	"file_edit_result_bytes":    "4194304",
-	"removal_descendants":       "1000",
-	"removal_total_bytes":       "67108864",
+	"path_bytes":                  "4096",
+	"workspace_root_path_bytes":   "4096",
+	"file_write_bytes":            "196608",
+	"file_edit_text_bytes":        "65536",
+	"file_existing_bytes":         "4194304",
+	"file_edit_result_bytes":      "4194304",
+	"removal_descendants":         "1000",
+	"removal_total_bytes":         "67108864",
+	"removal_plan_response_bytes": "1040384",
 }
 
 // possibleFileResourceBound checks only what this method and the original
@@ -609,6 +610,15 @@ func possibleFileResourceBound(method relayv1.RoutedMethod, request proto.Messag
 		q, ok := request.(*nodev1.FileServiceEditFileRequest)
 		// Exact non-growing replacement cannot exceed the bounded original.
 		return ok && q.OldText != nil && q.NewText != nil && len(q.GetNewText()) > len(q.GetOldText())
+	case "removal_plan_response_bytes":
+		if method != relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL {
+			return false
+		}
+		if request == nil {
+			return true
+		}
+		_, ok := request.(*nodev1.FileServicePlanRemovalRequest)
+		return ok
 	case "removal_descendants", "removal_total_bytes":
 		switch method {
 		case relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL:
