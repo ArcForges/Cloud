@@ -47,7 +47,8 @@ func New(t *testing.T) *Database {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	// A native Windows run against remote TLS PostgreSQL took about 44s to migrate and 16s to rotate.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	migration := pgtest.Connect(t, url)
 	if _, err = migrate.Apply(ctx, migration, build, migrate.Options{Runner: "test", RuntimeRole: group}); err != nil {
