@@ -203,7 +203,7 @@ func TestCTR06PlanRemovalCompleteResponseBudgetBoundaries(t *testing.T) {
 	path := &nodev1.FilePath{WorkspaceId: pid(platform.NewID()), Path: proto.String("tree")}
 	request := &nodev1.FileServicePlanRemovalRequest{Meta: &foundationv1.RequestMeta{CommandId: pid(platform.NewID()), CorrelationId: pid(platform.NewID())}, Target: &nodev1.FileServicePlanRemovalRequest_WorkspacePath{WorkspacePath: path}}
 	plan := &nodev1.FileRemovalPlan{PlanId: pid(platform.NewID()), Digest: make([]byte, 32), ExpiresAt: &foundationv1.Instant{UnixSeconds: proto.Int64(1800000000), Nanos: proto.Uint32(0)},
-		TotalBytes: proto.Uint64(0), RequiresApproval: proto.Bool(true), QuarantineAvailable: proto.Bool(false), Risk: nodev1.RiskClass_RISK_CLASS_HIGH.Enum(), Target: &nodev1.FileRemovalPlan_WorkspacePath{WorkspacePath: path}}
+		TotalBytes: proto.Uint64(1), RequiresApproval: proto.Bool(true), QuarantineAvailable: proto.Bool(false), Risk: nodev1.RiskClass_RISK_CLASS_HIGH.Enum(), Target: &nodev1.FileRemovalPlan_WorkspacePath{WorkspacePath: path}}
 	item := func(name string, kind nodev1.FileEntryKind) *nodev1.FileRemovalItem {
 		digest := sha256.Sum256([]byte(name))
 		return &nodev1.FileRemovalItem{Path: proto.String(name), Kind: kind.Enum(), SizeBytes: proto.Uint64(0), IdentitySha256: digest[:], OwnerVerified: proto.Bool(false)}
@@ -217,7 +217,10 @@ func TestCTR06PlanRemovalCompleteResponseBudgetBoundaries(t *testing.T) {
 	for index := 0; index < 920; index++ {
 		plan.Items = append(plan.Items, item(fmt.Sprintf("%s/f%04d", prefix, index), nodev1.FileEntryKind_FILE_ENTRY_KIND_FILE))
 	}
-	response := &nodev1.FileServicePlanRemovalResponse{Meta: &foundationv1.ResponseMeta{CorrelationId: request.Meta.CorrelationId}, Outcome: &nodev1.FileServicePlanRemovalResponse_Value{Value: &nodev1.FileServicePlanRemovalValue{Plan: plan}}}
+	plan.Items[len(plan.Items)-1].SizeBytes = proto.Uint64(1)
+	plan.Items[len(plan.Items)-1].OwnerVerified = proto.Bool(true)
+	inputDigest := sha256.Sum256([]byte("x"))
+	response := &nodev1.FileServicePlanRemovalResponse{Meta: &foundationv1.ResponseMeta{CorrelationId: request.Meta.CorrelationId}, Outcome: &nodev1.FileServicePlanRemovalResponse_Value{Value: &nodev1.FileServicePlanRemovalValue{Plan: plan}}, Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_INPUT_BYTES.Enum(), SizeBytes: proto.Uint64(1), DigestInputBytes: proto.Uint64(1), Sha256: inputDigest[:]}}}}
 	remaining := maximum - proto.Size(response)
 	if remaining < 0 || remaining > 920*240 {
 		t.Fatalf("unexpected fixture remainder: %d", remaining)
@@ -240,7 +243,7 @@ func TestCTR06PlanRemovalCompleteResponseBudgetBoundaries(t *testing.T) {
 		t.Fatalf("exact maximum refused: %v", err)
 	}
 	withAudit := proto.Clone(response).(*nodev1.FileServicePlanRemovalResponse)
-	withAudit.Audit = &nodev1.FileAuditMetadata{}
+	withAudit.Audit.Observations = append(withAudit.Audit.Observations, &nodev1.FileAuditObservation{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_READ_BYTES.Enum(), SizeBytes: proto.Uint64(0), DigestInputBytes: proto.Uint64(0), Sha256: make([]byte, 32)})
 	if proto.Size(withAudit) <= maximum {
 		t.Fatal("audit message not counted in complete response")
 	}

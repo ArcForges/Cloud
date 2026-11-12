@@ -411,7 +411,12 @@ func validFileObservation(method relayv1.RoutedMethod, o *nodev1.FileAuditObserv
 	switch kind {
 	case nodev1.FileAuditKind_FILE_AUDIT_KIND_READ_BYTES:
 		return method == relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE && o.GetSizeBytes() <= 65536 && o.GetDigestInputBytes() == o.GetSizeBytes()
-	case nodev1.FileAuditKind_FILE_AUDIT_KIND_INPUT_BYTES, nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES:
+	case nodev1.FileAuditKind_FILE_AUDIT_KIND_INPUT_BYTES:
+		if method == relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL {
+			return o.GetSizeBytes() > 0 && o.GetSizeBytes() <= 67108864 && o.GetDigestInputBytes() == o.GetSizeBytes() && o.ItemCount == nil
+		}
+		return (method == relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE || method == relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE) && o.GetSizeBytes() <= 4194304 && o.GetDigestInputBytes() == o.GetSizeBytes()
+	case nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES:
 		return (method == relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE || method == relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE) && o.GetSizeBytes() <= 4194304 && o.GetDigestInputBytes() == o.GetSizeBytes()
 	case nodev1.FileAuditKind_FILE_AUDIT_KIND_SEARCH_TRANSCRIPT:
 		if method != relayv1.RoutedMethod_ROUTED_METHOD_SEARCH_NODE_FILES || o.ItemCount == nil || o.GetItemCount() > 10000 || o.GetSizeBytes() > 8388608 || (o.GetSizeBytes() == 0) != (o.GetItemCount() == 0) {
@@ -425,7 +430,7 @@ func validFileObservation(method relayv1.RoutedMethod, o *nodev1.FileAuditObserv
 	case nodev1.FileAuditKind_FILE_AUDIT_KIND_WORKSPACE_METADATA:
 		return (method == relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_WORKSPACES || method == relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_WORKSPACE || method == relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE || method == relayv1.RoutedMethod_ROUTED_METHOD_UNREGISTER_NODE_WORKSPACE) && o.ItemCount != nil && o.GetItemCount() <= 500 && o.GetSizeBytes() <= 131072 && o.GetDigestInputBytes() == o.GetSizeBytes()
 	case nodev1.FileAuditKind_FILE_AUDIT_KIND_OPERATION_METADATA:
-		return (method == relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION || method == relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL || method == relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL) && o.GetSizeBytes() <= 131072 && o.GetDigestInputBytes() == o.GetSizeBytes()
+		return (method == relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION || method == relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL) && o.GetSizeBytes() <= 131072 && o.GetDigestInputBytes() == o.GetSizeBytes()
 	default:
 		return false
 	}
@@ -494,15 +499,16 @@ func validMutation(r *nodev1.FileMutationResult, command *foundationv1.Id, edit 
 // These canonical producer names retain their own meanings even where two
 // bounds have the same maximum. Other 450.1-valid names remain open strings.
 var fileResourceMaximums = map[string]string{
-	"path_bytes":                  "4096",
-	"workspace_root_path_bytes":   "4096",
-	"file_write_bytes":            "196608",
-	"file_edit_text_bytes":        "65536",
-	"file_existing_bytes":         "4194304",
-	"file_edit_result_bytes":      "4194304",
-	"removal_descendants":         "1000",
-	"removal_total_bytes":         "67108864",
-	"removal_plan_response_bytes": "1040384",
+	"path_bytes":                    "4096",
+	"workspace_root_path_bytes":     "4096",
+	"file_write_bytes":              "196608",
+	"file_edit_text_bytes":          "65536",
+	"file_existing_bytes":           "4194304",
+	"file_edit_result_bytes":        "4194304",
+	"removal_descendants":           "1000",
+	"removal_total_bytes":           "67108864",
+	"removal_ownership_input_bytes": "67108864",
+	"removal_plan_response_bytes":   "1040384",
 }
 
 // possibleFileResourceBound checks only what this method and the original
@@ -610,7 +616,7 @@ func possibleFileResourceBound(method relayv1.RoutedMethod, request proto.Messag
 		q, ok := request.(*nodev1.FileServiceEditFileRequest)
 		// Exact non-growing replacement cannot exceed the bounded original.
 		return ok && q.OldText != nil && q.NewText != nil && len(q.GetNewText()) > len(q.GetOldText())
-	case "removal_plan_response_bytes":
+	case "removal_plan_response_bytes", "removal_ownership_input_bytes":
 		if method != relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL {
 			return false
 		}
