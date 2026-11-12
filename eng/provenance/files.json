@@ -166,6 +166,7 @@
     "center/internal/fleet/validate_test.go",
     "center/internal/fleet/vectors_test.go",
     "center/internal/fleetapi/capture_integration_test.go",
+    "center/internal/fleetapi/ctr06_attempt_qualification_test.go",
     "center/internal/fleetapi/ctr06_available_decimal_test.go",
     "center/internal/fleetapi/ctr06_limit_open_contract_test.go",
     "center/internal/fleetapi/ctr06_plan_input_audit_test.go",
@@ -261,6 +262,8 @@
     "center/internal/hub/channel_integration_test.go",
     "center/internal/hub/close_integration_test.go",
     "center/internal/hub/conn.go",
+    "center/internal/hub/ctr06_attempt_qualification_integration_test.go",
+    "center/internal/hub/ctr06_attempt_qualification_test.go",
     "center/internal/hub/ctr06_bridge_integration_test.go",
     "center/internal/hub/ctr06_capability_replay_test.go",
     "center/internal/hub/ctr06_file_target_integration_test.go",
@@ -785,6 +788,7 @@
     "eng/policy/dependency-reviews/af-ctr-06-r26.json",
     "eng/policy/dependency-reviews/af-ctr-06-r27.json",
     "eng/policy/dependency-reviews/af-ctr-06-r28.json",
+    "eng/policy/dependency-reviews/af-ctr-06-r29.json",
     "eng/policy/dependency-reviews/af-ctr-06-r3.json",
     "eng/policy/dependency-reviews/af-ctr-06-r4.json",
     "eng/policy/dependency-reviews/af-ctr-06-r5.json",
@@ -892,6 +896,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r126.json",
     "eng/provenance/artifact-profiles/cloud-release-r127.json",
     "eng/provenance/artifact-profiles/cloud-release-r128.json",
+    "eng/provenance/artifact-profiles/cloud-release-r129.json",
     "eng/provenance/artifact-profiles/cloud-release-r13.json",
     "eng/provenance/artifact-profiles/cloud-release-r14.json",
     "eng/provenance/artifact-profiles/cloud-release-r15.json",
@@ -1064,6 +1069,7 @@
     "eng/provenance/records/center-runtime-r75.json",
     "eng/provenance/records/center-runtime-r76.json",
     "eng/provenance/records/center-runtime-r77.json",
+    "eng/provenance/records/center-runtime-r78.json",
     "eng/provenance/records/center-runtime-r8.json",
     "eng/provenance/records/center-runtime-r9.json",
     "eng/provenance/records/center-worker-r1.json",
@@ -1137,6 +1143,7 @@
     "eng/provenance/records/center-worker-r72.json",
     "eng/provenance/records/center-worker-r73.json",
     "eng/provenance/records/center-worker-r74.json",
+    "eng/provenance/records/center-worker-r75.json",
     "eng/provenance/records/center-worker-r8.json",
     "eng/provenance/records/center-worker-r9.json",
     "eng/provenance/records/cloud-02-cloud-runtime-notices-r1.json",
@@ -2070,5 +2077,5 @@
     "third-party/Protobuf.LICENSE.txt": "protobuf-bsd-legal-r1",
     "third-party/Puddle.LICENSE.txt": "go-puddle-legal-r1"
   },
-  "artifacts": ["center-runtime-r77", "center-worker-r74"]
+  "artifacts": ["center-runtime-r78", "center-worker-r75"]
 }

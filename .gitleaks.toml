@@ -921,7 +921,7 @@ regexes = [
 ]
 
 [[allowlists]]
-description = "AF-CTR-06: the same two reviewed record digests in the inputs map of the immutable dependency review receipt af-ctr-06-r29 (available decimal source provenance binding). Only these two exact key-and-digest lines of this exact file are exempt."
+description = "AF-CTR-06: the same two reviewed record digests in the inputs map of the immutable dependency review receipt af-ctr-06-r29 (attempt qualification consumer source provenance binding). Only these two exact key-and-digest lines of this exact file are exempt."
 condition = "AND"
 targetRules = ["generic-api-key"]
 paths = ['''^eng/policy/dependency\-reviews/af\-ctr\-06\-r29\.json$''']
