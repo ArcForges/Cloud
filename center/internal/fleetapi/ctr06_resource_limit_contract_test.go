@@ -74,4 +74,14 @@ func TestCTR06DecodedResourceLimitsHaveExactOuterDetails(t *testing.T) {
 	if _, err := checkInner(relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, marshal(t, write), &command); err != nil {
 		t.Fatalf("exact write maximum rejected: %v", err)
 	}
+	// A short workspace path or an attempt ID says nothing about the node's complete plan size.
+	// The center must route these instead of inventing a pre-delivery response-size observation.
+	for _, target := range []*nodev1.FileServicePlanRemovalRequest{
+		{Meta: meta, Target: &nodev1.FileServicePlanRemovalRequest_WorkspacePath{WorkspacePath: path("tree")}},
+		{Meta: meta, Target: &nodev1.FileServicePlanRemovalRequest_AttemptId{AttemptId: pid(platform.NewID())}},
+	} {
+		if _, err := checkInner(relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL, marshal(t, target), &command); err != nil {
+			t.Fatalf("unobservable plan response size became an outer refusal: %v", err)
+		}
+	}
 }

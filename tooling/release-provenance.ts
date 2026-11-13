@@ -30,6 +30,15 @@ interface ReleaseProfile {
     packages: Record<string, { version: string; integrity: string }>;
     legalFiles: string[];
   };
+  securityBridge: {
+    sourceCommit: string;
+    sourceTree: string;
+    sourceArchiveSha256: string;
+    compiler: string;
+    linuxArchiveSha256: string;
+    windowsArchiveSha256: string;
+    producerInputs: Record<string, string>;
+  };
   bridgeAssets: {
     sourceCommit: string;
     sourceTree: string;
@@ -101,9 +110,10 @@ export function releaseProfile(owner: string) {
   assert.equal(hash(readOwned(owner, profilePath), "lf"), profileHash, "Changed release profile");
   const p = object(
     read(owner, profilePath),
-    "schemaVersion id ownerCommit worker image bridgeAssets",
+    "schemaVersion id ownerCommit worker image bridgeAssets securityBridge",
   );
   assert.equal(p.schemaVersion, 1);
+  verifySecurityBridgeProfile(owner, p.securityBridge);
   assert.match(text(p.id), /^cloud-release-r[1-9][0-9]*$/u);
   digest(p.ownerCommit, 40);
   const worker = object(
@@ -201,6 +211,79 @@ export function releaseProfile(owner: string) {
   }
   const profile = p as unknown as ReleaseProfile;
   return { profile, profilePath, profileHash, artifacts: artifacts.sort() };
+}
+
+/** Admission of the new bootstrap producer inputs; no released successor digest is claimed. */
+export function verifySecurityBridgeProfile(owner: string, value: unknown): void {
+  const security = object(
+    value,
+    "sourceCommit sourceTree sourceArchiveSha256 compiler linuxArchiveSha256 windowsArchiveSha256 producerInputs",
+  );
+  assert.equal(security.sourceCommit, "8e5f6e26aa97b123d9f60b91f780364a094e74cd");
+  assert.equal(security.sourceTree, "4a315ea6b47d96c3262e8111fcc26ad1957097f2");
+  assert.equal(
+    security.sourceArchiveSha256,
+    "ea07d57bdc0acf43c2e58bdc3666d8334185600f46e903e2d5a109547e59293c",
+  );
+  assert.equal(security.compiler, "go1.27.4");
+  assert.equal(
+    security.linuxArchiveSha256,
+    "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840",
+  );
+  assert.equal(
+    security.windowsArchiveSha256,
+    "178ab98950ac69ab25069307dc6ade79f3816e414cce95b4da166a115cde1e7e",
+  );
+  const inputs = object(security.producerInputs);
+  const expected = [
+    ".github/workflows/ci.yml",
+    ".node-version",
+    "eng/provenance/records/go-go-legal-r2.json",
+    "eng/verification/ctr06-security-bridge-metadata.cs",
+    "eng/verification/ctr06_bridge_bundle.py",
+    "eng/verification/ctr06_security_bridge_bundle.py",
+    "eng/verification/ctr06_security_bridge_compiler.py",
+    "eng/verification/ctr06_security_bridge_driver.py",
+    "eng/verification/ctr06_security_bridge_native_check.py",
+    "eng/verification/ctr06_security_bridge_nonroot_probe.go",
+    "eng/verification/ctr06_security_bridge_oci.py",
+    "eng/verification/proof-gate.ts",
+    "eng/verify_steps.py",
+    "global.json",
+    "package-lock.json",
+    "package.json",
+    "third-party/Go.LICENSE.txt",
+    "tooling/build-identity.ts",
+    "tooling/ctr06-bootstrap-broker.ts",
+    "tooling/ctr06-bootstrap-entry.ts",
+    "tooling/ctr06-bootstrap-gate.ts",
+    "tooling/ctr06-bootstrap-github.ts",
+    "tooling/ctr06-bootstrap-journal.ts",
+    "tooling/ctr06-bootstrap-oidc.ts",
+    "tooling/ctr06-bootstrap-policy.ts",
+    "tooling/ctr06-bootstrap-profile.ts",
+    "tooling/ctr06-bootstrap-reconcile.ts",
+    "tooling/ctr06-bootstrap-registry.ts",
+    "tooling/ctr06-bootstrap-zip.ts",
+    "tooling/ctr06-security-bridge-legal.ts",
+    "tooling/ctr06-security-bridge-producer.ts",
+    "tooling/ctr06-security-bridge-seal.ts",
+    "tooling/ctr06-security-bridge-source.ts",
+    "tooling/process.ts",
+    "tooling/provenance.ts",
+    "tooling/release-provenance.ts",
+  ].sort();
+  assert.deepEqual(
+    Object.keys(inputs).sort(),
+    expected,
+    "Unclassified security bridge producer input",
+  );
+  for (const [name, expectedHash] of Object.entries(inputs))
+    assert.equal(
+      hash(readOwned(owner, relative(name)), "lf"),
+      digest(expectedHash),
+      `Changed security bridge input: ${name}`,
+    );
 }
 
 /** Compare a real release asset with the same active profile as the image and Worker. */

@@ -29,13 +29,19 @@ func validRevision(v *foundationv1.Revision) bool {
 	return v != nil && v.Value != nil && v.GetValue() >= 0
 }
 
-func validDecimal(v *foundationv1.Decimal) bool {
-	if v == nil || v.Value == nil || !decimalToken.MatchString(v.GetValue()) ||
-		(strings.Contains(v.GetValue(), ".") && strings.HasSuffix(v.GetValue(), "0")) {
+// The published 450.1 Decimal shape allows trailing fractional zeroes.
+func validPublishedDecimal(v *foundationv1.Decimal) bool {
+	if v == nil || v.Value == nil || !decimalToken.MatchString(v.GetValue()) {
 		return false
 	}
 	n := strings.TrimLeft(strings.ReplaceAll(strings.TrimPrefix(v.GetValue(), "-"), ".", ""), "0")
 	return len(n) <= 28 && !(strings.HasPrefix(v.GetValue(), "-") && n == "")
+}
+
+// The existing stricter maximum check remains in addition to method binding.
+func validDecimal(v *foundationv1.Decimal) bool {
+	return validPublishedDecimal(v) &&
+		!(strings.Contains(v.GetValue(), ".") && strings.HasSuffix(v.GetValue(), "0"))
 }
 
 func validFileResponseMeta(v *foundationv1.ResponseMeta) bool {
@@ -114,7 +120,7 @@ func validFileError(e *foundationv1.ArcError) bool {
 			}
 		case *foundationv1.ErrorDetails_Limit:
 			v := detail.Limit
-			if v == nil || v.LimitName == nil || !contractToken.MatchString(v.GetLimitName()) || v.Maximum != nil && !validDecimal(v.Maximum) || v.Available != nil && !validDecimal(v.Available) || v.RecoveryAt != nil && !validFileInstant(v.RecoveryAt) {
+			if v == nil || v.LimitName == nil || !contractToken.MatchString(v.GetLimitName()) || v.Maximum != nil && !validDecimal(v.Maximum) || v.Available != nil && !validPublishedDecimal(v.Available) || v.RecoveryAt != nil && !validFileInstant(v.RecoveryAt) {
 				return false
 			}
 		case *foundationv1.ErrorDetails_Upgrade:
@@ -209,15 +215,15 @@ func operationMethod(kind nodev1.FileOperationKind) relayv1.RoutedMethod {
 // A malformed combination cannot finalize a routing receipt.
 func validFileErrorForMethod(method relayv1.RoutedMethod, e *foundationv1.ArcError) bool {
 	key := strings.ToLower(strings.TrimPrefix(e.GetCategory().String(), "ERROR_CATEGORY_")) + "/" + e.GetCode()
-	// Six native-checking file/workspace methods' file_changed entries depend
-	// on a bounded Design erratum under review; this WIP must not ship until approved.
+	// Design 06a section 4 permits the bounded native-identity annotation errata;
+	// the published generic error shape remains separate from these method profiles.
 	allowed := map[relayv1.RoutedMethod]string{
 		relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE:            " validation/path_not_found validation/invalid_argument conflict/file_changed resource/too_large state/file_access_denied authorization/permission_denied ",
 		relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE:           " validation/path_not_found validation/invalid_argument conflict/file_changed conflict/command_id_reused resource/too_large resource/enforcement_unavailable state/file_access_denied state/invalid_state authorization/permission_denied authorization/approval_required execution/operation_failed ",
 		relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE:            " validation/path_not_found validation/invalid_argument conflict/file_changed conflict/occurrence_mismatch conflict/command_id_reused resource/too_large resource/enforcement_unavailable state/file_access_denied state/invalid_state authorization/permission_denied authorization/approval_required execution/operation_failed ",
 		relayv1.RoutedMethod_ROUTED_METHOD_SEARCH_NODE_FILES:         " conflict/file_changed validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied ",
 		relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_DIRECTORY:       " conflict/file_changed validation/invalid_cursor validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied ",
-		relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL:         " conflict/file_changed validation/path_not_found validation/invalid_argument state/not_found state/in_use conflict/command_id_reused resource/too_large state/file_access_denied authorization/permission_denied ",
+		relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL:         " conflict/file_changed validation/path_not_found validation/invalid_argument state/not_found state/in_use state/invalid_state conflict/command_id_reused resource/too_large state/file_access_denied authorization/permission_denied ",
 		relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL:      " validation/invalid_argument state/not_found conflict/digest_mismatch conflict/file_changed conflict/command_id_reused state/in_use resource/too_large resource/enforcement_unavailable state/expired state/invalid_state authorization/permission_denied authorization/approval_required state/file_access_denied execution/operation_failed ",
 		relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION:   " validation/invalid_argument state/not_found authorization/permission_denied ",
 		relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE:   " conflict/file_changed validation/path_not_found validation/invalid_argument resource/too_large state/file_access_denied authorization/permission_denied conflict/command_id_reused ",
@@ -243,10 +249,15 @@ func validFileErrorForMethod(method relayv1.RoutedMethod, e *foundationv1.ArcErr
 				return false
 			}
 		case "planned_tree_changed":
-			if method != relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL {
+			if method != relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL && method != relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL {
 				return false
 			}
 		}
+	}
+	qualification := attemptQualificationReason(e.GetDetails().GetState().GetReason())
+	if qualification && (method != relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL || key != "state/invalid_state") ||
+		method == relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL && key == "state/invalid_state" && !qualification {
+		return false
 	}
 	// Native exclusion guards are mandatory for these effects. Failure to establish
 	// one is RESOURCE/enforcement_unavailable, not a generic access refusal.
@@ -411,7 +422,12 @@ func validFileObservation(method relayv1.RoutedMethod, o *nodev1.FileAuditObserv
 	switch kind {
 	case nodev1.FileAuditKind_FILE_AUDIT_KIND_READ_BYTES:
 		return method == relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE && o.GetSizeBytes() <= 65536 && o.GetDigestInputBytes() == o.GetSizeBytes()
-	case nodev1.FileAuditKind_FILE_AUDIT_KIND_INPUT_BYTES, nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES:
+	case nodev1.FileAuditKind_FILE_AUDIT_KIND_INPUT_BYTES:
+		if method == relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL {
+			return o.GetSizeBytes() > 0 && o.GetSizeBytes() <= 67108864 && o.GetDigestInputBytes() == o.GetSizeBytes() && o.ItemCount == nil
+		}
+		return (method == relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE || method == relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE) && o.GetSizeBytes() <= 4194304 && o.GetDigestInputBytes() == o.GetSizeBytes()
+	case nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES:
 		return (method == relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE || method == relayv1.RoutedMethod_ROUTED_METHOD_EDIT_NODE_FILE) && o.GetSizeBytes() <= 4194304 && o.GetDigestInputBytes() == o.GetSizeBytes()
 	case nodev1.FileAuditKind_FILE_AUDIT_KIND_SEARCH_TRANSCRIPT:
 		if method != relayv1.RoutedMethod_ROUTED_METHOD_SEARCH_NODE_FILES || o.ItemCount == nil || o.GetItemCount() > 10000 || o.GetSizeBytes() > 8388608 || (o.GetSizeBytes() == 0) != (o.GetItemCount() == 0) {
@@ -425,7 +441,7 @@ func validFileObservation(method relayv1.RoutedMethod, o *nodev1.FileAuditObserv
 	case nodev1.FileAuditKind_FILE_AUDIT_KIND_WORKSPACE_METADATA:
 		return (method == relayv1.RoutedMethod_ROUTED_METHOD_LIST_NODE_WORKSPACES || method == relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_WORKSPACE || method == relayv1.RoutedMethod_ROUTED_METHOD_REGISTER_NODE_WORKSPACE || method == relayv1.RoutedMethod_ROUTED_METHOD_UNREGISTER_NODE_WORKSPACE) && o.ItemCount != nil && o.GetItemCount() <= 500 && o.GetSizeBytes() <= 131072 && o.GetDigestInputBytes() == o.GetSizeBytes()
 	case nodev1.FileAuditKind_FILE_AUDIT_KIND_OPERATION_METADATA:
-		return (method == relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION || method == relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL || method == relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL) && o.GetSizeBytes() <= 131072 && o.GetDigestInputBytes() == o.GetSizeBytes()
+		return (method == relayv1.RoutedMethod_ROUTED_METHOD_GET_NODE_FILE_OPERATION || method == relayv1.RoutedMethod_ROUTED_METHOD_EXECUTE_NODE_REMOVAL) && o.GetSizeBytes() <= 131072 && o.GetDigestInputBytes() == o.GetSizeBytes()
 	default:
 		return false
 	}
@@ -494,14 +510,16 @@ func validMutation(r *nodev1.FileMutationResult, command *foundationv1.Id, edit 
 // These canonical producer names retain their own meanings even where two
 // bounds have the same maximum. Other 450.1-valid names remain open strings.
 var fileResourceMaximums = map[string]string{
-	"path_bytes":                "4096",
-	"workspace_root_path_bytes": "4096",
-	"file_write_bytes":          "196608",
-	"file_edit_text_bytes":      "65536",
-	"file_existing_bytes":       "4194304",
-	"file_edit_result_bytes":    "4194304",
-	"removal_descendants":       "1000",
-	"removal_total_bytes":       "67108864",
+	"path_bytes":                    "4096",
+	"workspace_root_path_bytes":     "4096",
+	"file_write_bytes":              "196608",
+	"file_edit_text_bytes":          "65536",
+	"file_existing_bytes":           "4194304",
+	"file_edit_result_bytes":        "4194304",
+	"removal_descendants":           "1000",
+	"removal_total_bytes":           "67108864",
+	"removal_ownership_input_bytes": "67108864",
+	"removal_plan_response_bytes":   "1040384",
 }
 
 // possibleFileResourceBound checks only what this method and the original
@@ -609,6 +627,15 @@ func possibleFileResourceBound(method relayv1.RoutedMethod, request proto.Messag
 		q, ok := request.(*nodev1.FileServiceEditFileRequest)
 		// Exact non-growing replacement cannot exceed the bounded original.
 		return ok && q.OldText != nil && q.NewText != nil && len(q.GetNewText()) > len(q.GetOldText())
+	case "removal_plan_response_bytes", "removal_ownership_input_bytes":
+		if method != relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL {
+			return false
+		}
+		if request == nil {
+			return true
+		}
+		_, ok := request.(*nodev1.FileServicePlanRemovalRequest)
+		return ok
 	case "removal_descendants", "removal_total_bytes":
 		switch method {
 		case relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL:
@@ -649,6 +676,57 @@ func validFileResourceLimit(method relayv1.RoutedMethod, request proto.Message, 
 	return false
 }
 
+// The two handler-only reasons are not a generic invalid_state allow-list.
+func attemptQualificationReason(reason string) bool {
+	return reason == "attempt_references_unverified" || reason == "attempt_tracking_unverified"
+}
+
+// This is the exact PlanRemoval attempt profile from Design 06a section 4. The
+// request correlation, when supplied, must match. Without it, a FULL receipt
+// replay retains the first call's correlation; a new channel call ID cannot bind
+// those historical inner bytes. The signed outer header still binds the actual
+// call, caller, node, method and exact request/response digests in hub.bindResult.
+// A signature authenticates these bytes, not the node's filesystem observation.
+func validAttemptQualification(method relayv1.RoutedMethod, request nodeFileRequest, response nodeFileResponse) bool {
+	q, ok := request.(*nodev1.FileServicePlanRemovalRequest)
+	if !ok || method != relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL {
+		return false
+	}
+	selector, ok := q.Target.(*nodev1.FileServicePlanRemovalRequest_AttemptId)
+	if !ok {
+		return false
+	}
+	if _, valid := parseID(selector.AttemptId); !valid {
+		return false
+	}
+	failure := response.GetError()
+	state := failure.GetDetails().GetState()
+	if failure.GetCategory() != foundationv1.ErrorCategory_ERROR_CATEGORY_STATE || failure.GetCode() != "invalid_state" ||
+		state.GetState() != "file" || !attemptQualificationReason(state.GetReason()) || state.Resource != nil || state.Native != nil ||
+		failure.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN ||
+		failure.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_NEVER || failure.GetRetry().RetryAt != nil ||
+		failure.GetRetry().ReconciliationOperation != nil || len(response.GetAudit().GetObservations()) != 0 {
+		return false
+	}
+	actual, valid := parseID(failure.CorrelationId)
+	if !valid {
+		return false
+	}
+	if correlation := q.GetMeta().GetCorrelationId(); correlation != nil {
+		expected, valid := parseID(correlation)
+		if !valid || actual != expected {
+			return false
+		}
+	}
+	if meta := response.GetMeta(); meta != nil {
+		correlation, valid := parseID(meta.CorrelationId)
+		if !valid || correlation != actual {
+			return false
+		}
+	}
+	return true
+}
+
 // validateFileResult binds a signed handler response to its original request.
 // It does not claim that the center itself opened the filesystem object.
 func validateFileResult(method relayv1.RoutedMethod, request []byte, response nodeFileResponse) error {
@@ -663,6 +741,11 @@ func validateFileResult(method relayv1.RoutedMethod, request []byte, response no
 	if failure := response.GetError(); failure != nil {
 		if !validFileError(failure) || !validFileErrorForMethod(method, failure) {
 			return bad()
+		}
+		if attemptQualificationReason(failure.GetDetails().GetState().GetReason()) {
+			if !validAttemptQualification(method, v, response) {
+				return bad()
+			}
 		}
 		if failure.GetCategory() == foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE &&
 			failure.GetCode() == "too_large" && !validFileResourceLimit(method, v, nil, failure.GetDetails().GetLimit()) {

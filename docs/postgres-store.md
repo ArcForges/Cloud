@@ -697,13 +697,17 @@ The protected main-push deployment (`.github/workflows/ci.yml`, job `deploy`, Gi
    - The Container passes `ARCFORGES_CENTER_DATABASE_URL` to the Go center, which then reads the Hello greeting through the runtime
      role (`helloBackend` `postgresql-runtime`). The Hello's own Neon credential reaches only the C# host.
 
-For an existing schema-10 database, the protected PostgreSQL step first verifies the published 615.1 bridge carrier and promotes
-that bridge with a fresh runtime generation. The provider's uploaded version, complete 100% rollout and sealed image must agree;
+The historical existing schema-10 delivery path verified the published 615.1 bridge carrier and promoted that bridge with a fresh
+runtime generation. That Go 1.27.3 bridge is retained only as historical evidence and backup provenance; it is not a permitted
+new promotion or rollback executor. Phase 1 disables the protected delivery path, and the Go 1.27.4 security successor is not yet
+published or bound. A separately reviewed phase 2 must bind its actual released identity before this sequence may resume.
+The provider's uploaded version, complete 100% rollout and sealed image must agree;
 an OIDC proof binds that protected workflow and the database/role identities. The migration owner then drains receipt and lease
 writes, removes every older writer's relevant privileges, expires the old lease and applies 0011 in one transaction. A published
 bridge, a slot record or a password rotation alone is not retirement evidence. This bridge promotion changes the running revision
-before step 3; if a later operation fails, inspect the provider and database floor before retrying. Only the 615.1 bridge server or a
-newer server may be used for rollback, with the current protected admin and promotion tools and the recorded runtime generation;
+before step 3; if a later operation fails, inspect the provider and database floor before retrying. Once phase 2 is complete, only the
+bound security successor bridge server or a newer server satisfying that security floor may be used for rollback, with the current
+protected admin and promotion tools and the recorded runtime generation;
 an old privileged CLI must not rotate or regrant the retired roles.
 
 **Required secret.** `NEON_DATABASE_URL_DIRECT` is the direct (not `-pooler`) URL of the Neon owner role (the migration role),
@@ -790,8 +794,12 @@ needs `sslmode=require` or `verify-full` (upgraded to `verify-full`) and `channe
 
 ### Upgrading an existing schema-10 database
 
-The ordinary commands above bootstrap a fresh database. An existing schema-10 database also needs the exact native bridge
-executable. The first Cloud release containing these assets provides
+The ordinary commands above bootstrap a fresh database. Existing schema-10 upgrade and rollback are disabled during phase 1: the
+new security successor has not been published or pinned, and 615.1's Go 1.27.3 executables must not be used as the upgrade or
+rollback executor. The following asset description records the historical bridge only; a separately reviewed phase 2 must bind
+and enforce the actual released successor before this procedure is enabled. Old supported backup provenance remains unchanged.
+
+The historical procedure for an existing schema-10 database needs the exact native bridge executable. The first Cloud release containing these assets provides
 `arcforges-ctr06-bridge-8e5-linux-amd64.zip` and `arcforges-ctr06-bridge-8e5-windows-amd64.zip`. Each archive has its sealed
 manifest, corresponding 8e5 source, dependency inventory and licences. The Linux executable is the released 615.1 OCI member,
 SHA-256 `028223a3dcbcbd6d7724558de02409e1e8874d876049f03fed38f47998773ba4`. The Windows executable is a separate native build

@@ -91,7 +91,7 @@ jobs:
           dotnet build Cloud.slnx -c Release --no-restore
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
           cache-dependency-path: |
             center/go.sum
             center/tools/go.sum
@@ -203,7 +203,7 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         if: matrix.language == 'go'
         with:
-          go-version: "1.27.3"
+          go-version: "1.27.4"
           cache-dependency-path: center/go.sum
       - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
         with:
@@ -231,12 +231,11 @@ jobs:
 
   candidate:
     name: Native AOT image and Worker build
-    # Delivery on a main push (the bytes deploy ships; the PR was verified before merge, so nothing re-validates it);
-    # validation after source and quality for every other PR and a dispatch. Owner PRs build it in the local hook. The proof
-    # deployment builds none: it deploys the main push's candidate of the same commit (proof-gate).
+    # Phase 1 suppresses the ordinary main-push delivery candidate. PR/dispatch validation remains as before.
+    # Owner PRs build it in the local hook; proof dispatch never builds a candidate.
     needs: [source, quality]
     if: >-
-      !cancelled() && (github.event_name == 'push' || (github.event_name != 'schedule'
+      github.event_name != 'push' && !cancelled() && (github.event_name == 'push' || (github.event_name != 'schedule'
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
       && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
       && needs.source.result == 'success' && needs.quality.result == 'success'))
@@ -293,9 +292,220 @@ jobs:
           test "$CANDIDATE" = success
           if [ "$EVENT" = pull_request ]; then test "$REVIEW" = success; else test "$REVIEW" = skipped; fi
 
+  ctr06-security-bridge-authority:
+    name: Require authenticated bootstrap authority evidence
+    if: >-
+      false && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # User decision 2026-11-13: external bootstrap is deferred, not an AF06 development gate.
+    # Keep this entry disabled until a future reviewed enablement; no bootstrap is consumed by this merge.
+    # The source has no reviewed live collector/broker profile; direct entry still refuses without one.
+    # The job has no write or OIDC token and cannot adopt mock or caller-supplied authority.
+    permissions:
+      contents: read
+    outputs:
+      gate-digest: ${{ steps.gate.outputs.gate-digest }}
+      gate-challenge: ${{ steps.gate.outputs.gate-challenge }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - id: gate
+        name: Evaluate the actual bootstrap authority profile
+        run: node tooling/ctr06-bootstrap-entry.ts authority
+
+  ctr06-security-bridge-linux:
+    name: Construct security bridge (Linux)
+    needs: [ctr06-security-bridge-authority]
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.ctr06-security-bridge-authority.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - run: npm ci --ignore-scripts
+      - name: Construct and verify the fixed-source Linux bridge
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/ctr06-source" 8e5f6e26aa97b123d9f60b91f780364a094e74cd
+          curl --fail --silent --show-error --location https://go.dev/dl/go1.27.4.linux-amd64.tar.gz -o "$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz"
+          node tooling/ctr06-security-bridge-producer.ts linux "$RUNNER_TEMP/ctr06-source" "$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz" "$(command -v go)" "$RUNNER_TEMP/ctr06-linux"
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ctr06-security-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ctr06-linux/sealed
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 1
+
+  ctr06-security-bridge-windows:
+    name: Construct security bridge (Windows)
+    needs: [ctr06-security-bridge-authority]
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.ctr06-security-bridge-authority.result == 'success'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - run: npm ci --ignore-scripts
+      - name: Construct and verify the fixed-source Windows bridge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:RUNNER_TEMP 'ctr06-source'
+          $archive = Join-Path $env:RUNNER_TEMP 'go1.27.4.windows-amd64.zip'
+          $output = Join-Path $env:RUNNER_TEMP 'ctr06-windows'
+          git worktree add --detach $source 8e5f6e26aa97b123d9f60b91f780364a094e74cd
+          if ($LASTEXITCODE -ne 0) { throw 'Bridge source checkout failed' }
+          curl.exe --fail --silent --show-error --location https://go.dev/dl/go1.27.4.windows-amd64.zip -o $archive
+          if ($LASTEXITCODE -ne 0) { throw 'Go archive retrieval failed' }
+          node tooling/ctr06-security-bridge-producer.ts windows $source $archive (Get-Command go.exe).Source $output
+          if ($LASTEXITCODE -ne 0) { throw 'Native bridge construction failed' }
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ctr06-security-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ctr06-windows/sealed
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 1
+
+  ctr06-security-bridge-seal:
+    name: Verify and seal the same-run bridge carrier
+    needs:
+      [ctr06-security-bridge-authority, ctr06-security-bridge-linux, ctr06-security-bridge-windows]
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.ctr06-security-bridge-authority.result == 'success'
+      && needs.ctr06-security-bridge-linux.result == 'success'
+      && needs.ctr06-security-bridge-windows.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          artifact-ids: ${{ needs.ctr06-security-bridge-linux.outputs.artifact-id }}
+          path: ${{ runner.temp }}/ctr06-linux
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          artifact-ids: ${{ needs.ctr06-security-bridge-windows.outputs.artifact-id }}
+          path: ${{ runner.temp }}/ctr06-windows
+      - name: Recheck source, components and sealed carrier
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/ctr06-source" 8e5f6e26aa97b123d9f60b91f780364a094e74cd
+          curl --fail --silent --show-error --location https://go.dev/dl/go1.27.4.linux-amd64.tar.gz -o "$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz"
+          node tooling/ctr06-security-bridge-seal.ts "$RUNNER_TEMP/ctr06-source" "$RUNNER_TEMP/ctr06-linux" "$RUNNER_TEMP/ctr06-windows" "$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz" "$(command -v go)" "$RUNNER_TEMP/ctr06-seal"
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ctr06-security-sealed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ctr06-seal/sealed
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 1
+
+  ctr06-security-bridge-publish:
+    name: Publish the single security bridge bootstrap
+    concurrency:
+      group: ctr06-security-bridge-bootstrap
+      cancel-in-progress: false
+    needs: [ctr06-security-bridge-authority, ctr06-security-bridge-seal]
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.ctr06-security-bridge-authority.result == 'success'
+      && needs.ctr06-security-bridge-seal.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Issuance belongs to the independent broker, never to a bootstrap job token.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          artifact-ids: ${{ needs.ctr06-security-bridge-seal.outputs.artifact-id }}
+          path: ${{ runner.temp }}/ctr06-sealed
+      - name: Request broker publication of the verified carrier
+        env:
+          ARCFORGES_CTR06_SEALED_ARTIFACT_ID: ${{ needs.ctr06-security-bridge-seal.outputs.artifact-id }}
+          ARCFORGES_CTR06_GATE_DIGEST: ${{ needs.ctr06-security-bridge-authority.outputs.gate-digest }}
+          ARCFORGES_CTR06_GATE_CHALLENGE: ${{ needs.ctr06-security-bridge-authority.outputs.gate-challenge }}
+        run: node tooling/ctr06-bootstrap-entry.ts publication "$RUNNER_TEMP/ctr06-sealed"
+
   ctr06-bridge-assets-state:
     name: Check immutable self-hosted bridge assets
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Contradictory event predicates make this historical asset job unreachable during phase 1.
+    if: github.event_name == 'push' && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -425,8 +635,9 @@ jobs:
 
   deploy:
     name: Deploy Cloudflare
+    # Phase 1 is build-and-publish only. A reviewed phase 2 must explicitly restore delivery.
     if: >-
-      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      false && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && needs.candidate.result == 'success' && needs.ctr06-bridge-assets-state.result == 'success'
       && (needs.ctr06-bridge-assets-state.outputs.linux-present == 'true' || needs.ctr06-bridge-linux-asset.result == 'success')
       && (needs.ctr06-bridge-assets-state.outputs.windows-present == 'true' || needs.ctr06-bridge-windows-asset.result == 'success')
@@ -534,7 +745,7 @@ jobs:
     name: Proof Cloudflare access and resources
     if: >-
       github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-      && inputs.proof != 'none'
+      && inputs.proof != 'none' && inputs.proof != 'deploy'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: cloudflare
@@ -551,7 +762,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      # Reads (and, for provision and deploy, idempotently creates) only the reserved proof resources; observe
+      # Reads (and, for provision, idempotently creates) only the reserved proof resources; observe
       # only reads the proof Container application. Output names capabilities, states and HTTP statuses and,
       # for observe, allowlisted provider fields; no token, secret, environment value or log line is printed.
       - name: Verify token access and provision or observe the reserved proof resources
@@ -606,8 +817,9 @@ jobs:
 
   deploy-proof:
     name: Deploy Cloudflare proof environment
+    # Phase 1 cannot promote any bridge; phase 2 must explicitly review and restore this path.
     if: >-
-      !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      false && !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
       && inputs.proof == 'deploy' && needs.proof-gate.result == 'success'
       && needs.proof-access.result == 'success'
     needs: [proof-gate, proof-access]

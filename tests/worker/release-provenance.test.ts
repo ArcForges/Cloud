@@ -12,6 +12,7 @@ import {
   verifyBridgeAsset,
   verifyImageFiles,
   verifyReleaseFiles,
+  verifySecurityBridgeProfile,
   verifyWorker,
 } from "../../tooling/release-provenance.ts";
 import { root } from "../../tooling/process.ts";
@@ -67,6 +68,47 @@ test("the active profile binds both bridge assets and refuses substituted bytes"
       changed.writeUInt8(changed.readUInt8(offset) ^ 1, offset);
       assert.throws(() => verifyBridgeAsset(root, platform, changed));
     }
+  }
+});
+
+test("security bridge producer admission has an exact input set and independent source/compiler pins", () => {
+  const { profile } = releaseProfile(root);
+  verifySecurityBridgeProfile(root, profile.securityBridge);
+  for (const mutate of [
+    (security: Record<string, unknown>) => {
+      security.sourceCommit = "a".repeat(40);
+    },
+    (security: Record<string, unknown>) => {
+      security.sourceTree = "a".repeat(40);
+    },
+    (security: Record<string, unknown>) => {
+      security.sourceArchiveSha256 = "a".repeat(64);
+    },
+    (security: Record<string, unknown>) => {
+      security.compiler = "go1.27.3";
+    },
+    (security: Record<string, unknown>) => {
+      security.windowsArchiveSha256 = "a".repeat(64);
+    },
+    (security: Record<string, unknown>) => {
+      delete object(security.producerInputs)["tooling/ctr06-security-bridge-producer.ts"];
+    },
+    (security: Record<string, unknown>) => {
+      delete object(security.producerInputs)["tooling/ctr06-bootstrap-broker.ts"];
+    },
+    (security: Record<string, unknown>) => {
+      object(security.producerInputs)["tooling/ctr06-bootstrap-gate.ts"] = "a".repeat(64);
+    },
+    (security: Record<string, unknown>) => {
+      object(security.producerInputs)["tooling/unreviewed.ts"] = "a".repeat(64);
+    },
+    (security: Record<string, unknown>) => {
+      object(security.producerInputs)["tooling/ctr06-security-bridge-producer.ts"] = "a".repeat(64);
+    },
+  ]) {
+    const security = structuredClone(profile.securityBridge) as unknown as Record<string, unknown>;
+    mutate(security);
+    assert.throws(() => verifySecurityBridgeProfile(root, security));
   }
 });
 

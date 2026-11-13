@@ -36,6 +36,10 @@ ARTIFACTS = ROOT / "artifacts" / "center"
 WINDOWS = os.name == "nt"
 EXE = ".exe" if WINDOWS else ""
 ENV = {**os.environ, "GOTOOLCHAIN": "local", "GOFLAGS": "-mod=readonly", "GOTELEMETRY": "off"}
+if "ARCFORGES_CENTER_GO" in os.environ:
+    ENV.pop("GOROOT", None)
+ENV.pop("ARCFORGES_CENTER_GO", None)
+ENV.pop("ARCFORGES_CTR06_BRIDGE_GO", None)
 # The admitted inputs of center/dependencies.json, relative to center/.
 INPUTS = ("go.mod", "go.sum", "toolchain.json", "tools/go.mod", "tools/go.sum")
 # The native fuzz targets and their packages; each runs for FUZZ_TIME on Linux (their seed corpora run in every go test).
@@ -61,8 +65,32 @@ def say(message: str) -> None:
     print(f"[center] {message}", flush=True)
 
 
+def selected_center_tool(name: str) -> str:
+    """Use the same explicitly selected native Go for every center subprocess, including gofmt."""
+    value = os.environ.get("ARCFORGES_CENTER_GO")
+    if value is None or name not in ("go", "gofmt"):
+        return name
+    path = Path(value)
+    expected_name = "go.exe" if WINDOWS else "go"
+    actual_name = path.name.lower() if WINDOWS else path.name
+    if not path.is_absolute() or actual_name != expected_name:
+        raise SystemExit("[center] ARCFORGES_CENTER_GO must name an existing absolute native Go executable")
+    try:
+        path = path.resolve(strict=True)
+    except OSError as error:
+        raise SystemExit("[center] ARCFORGES_CENTER_GO must name an existing absolute native Go executable") from error
+    actual_name = path.name.lower() if WINDOWS else path.name
+    if not path.is_file() or actual_name != expected_name:
+        raise SystemExit("[center] ARCFORGES_CENTER_GO must name an existing absolute native Go executable")
+    tool = path if name == "go" else path.with_name("gofmt" + EXE)
+    if not tool.is_file():
+        raise SystemExit("[center] the selected native Go directory must also contain gofmt")
+    return str(tool)
+
+
 def go(*args: str, cwd: Path = CENTER, capture: bool = False, env: dict[str, str] | None = None) -> str:
-    result = subprocess.run(args, cwd=cwd, env=env or ENV, text=True, encoding="utf-8",
+    argv = (selected_center_tool(args[0]), *args[1:])
+    result = subprocess.run(argv, cwd=cwd, env=env or ENV, text=True, encoding="utf-8",
                             stdout=subprocess.PIPE if capture else None)
     if result.returncode != 0:
         raise SystemExit(f"[center] failed ({result.returncode}): {' '.join(args)}")
@@ -76,9 +104,13 @@ def digest(path: Path) -> str:
 def check_toolchain() -> str:
     toolchain = json.loads((CENTER / "toolchain.json").read_text(encoding="utf-8"))
     pinned = toolchain["goVersion"]
-    actual = go("go", "version", capture=True).split()
-    if len(actual) < 3 or actual[2] != pinned:
-        raise SystemExit(f"[center] install the pinned {pinned} (center/toolchain.json) on this native verification host")
+    host = "windows" if WINDOWS else "linux" if sys.platform.startswith("linux") else ""
+    if not host:
+        raise SystemExit("[center] the verification hosts are native Linux and native Windows")
+    actual = go("go", "version", capture=True).strip()
+    target = go("go", "env", "GOOS", "GOARCH", capture=True).split()
+    if actual != f"go version {pinned} {host}/amd64" or target != [host, "amd64"]:
+        raise SystemExit(f"[center] the pinned {pinned} (center/toolchain.json) must target native {host}/amd64")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     archive = toolchain["linuxAmd64"]
     if archive["url"] not in dockerfile or archive["sha256"] not in dockerfile:

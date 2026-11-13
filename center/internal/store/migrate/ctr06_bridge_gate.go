@@ -15,6 +15,15 @@ import (
 // No user-supplied flag or migration number is accepted as promotion evidence.
 var ErrCTR06RetirementUnproven = errors.New("0011 requires verified bridge promotion and retirement of all pre-bridge receipt and lease writers")
 
+// ErrCTR06SecurityBridgeUnbound is a fixed phase-1 stop. The historical
+// Go 1.27.3 bridge is not an active upgrade or rollback executor. A reviewed
+// phase 2 must bind an actually published security successor before restoring
+// these entry points; no runtime flag or user-supplied proof overrides it.
+var ErrCTR06SecurityBridgeUnbound = errors.New("the security bridge successor is not yet bound; phase-1 bridge operations are unavailable")
+
+// RequireCTR06SecurityBridge cannot be configured or overridden in phase 1.
+func RequireCTR06SecurityBridge() error { return ErrCTR06SecurityBridgeUnbound }
+
 // guardCTR06Schema is intentionally conservative. A genuinely fresh database
 // can bootstrap only when no routed receipt, lease, historical slot, other
 // connection, mutable role path or SECURITY DEFINER exists. Every existing

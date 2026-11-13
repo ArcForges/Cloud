@@ -60,6 +60,9 @@ type CTR06LocalCredential func(context.Context, PreparedBridgeRoles) (string, er
 // boundaries; another process with that account's access must not inspect or
 // change the manager or its child.
 func ApplySelfHostedCTR06(ctx context.Context, conn *pgx.Conn, build []Migration, options Options, bridgePath string, prepare CTR06LocalCredential) (result Result, finalErr error) {
+	if err := RequireCTR06SecurityBridge(); err != nil {
+		return Result{State: StateRefused}, err
+	}
 	if prepare == nil || options.BridgeProof != nil || bridgePath == "" {
 		return result, ErrCTR06RetirementUnproven
 	}

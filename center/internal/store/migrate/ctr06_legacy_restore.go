@@ -100,6 +100,9 @@ type LegacyRestoreReport struct {
 }
 
 func RestoreLegacy(ctx context.Context, cfg config.Migration, archivePath, expected, provenancePath, provenanceDigest, runner string, issuer CTR06RestoreIssuer) (report LegacyRestoreReport, finalErr error) {
+	if err := RequireCTR06SecurityBridge(); err != nil {
+		return report, err
+	}
 	archiveCommitted, admissionReady := false, false
 	defer func() {
 		if finalErr != nil && archiveCommitted && !admissionReady {

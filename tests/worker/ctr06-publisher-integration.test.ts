@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Run only from the isolated PG18 Go test driver. The module mocks below
-// replace owner-only provider transports; the driver runs real Go/PG/crypto.
-// From center/, with isolated PG18 and ARCFORGES_TEST_POSTGRES_REQUIRED=1,
-// set ARCFORGES_TEST_POSTGRES_URL, CTR06_TEST_BRIDGE_BIN,
-// CTR06_TEST_BRIDGE_ARCHIVE, and CTR06_TEST_OUTPUT_DIR; then run:
-// go test -race -count=1 -timeout=3m ./cmd/arcforges-center -run '^TestCTR06ProtectedPublisherIntegration$'
-// The driver starts this test with a private loopback URL and token; invoking
-// the named npm script without that driver refuses instead of silently skipping.
+// This phase-1 negative requires the isolated-driver configuration and proves
+// the actual publisher stops before the driver or owner-only provider transports.
+// The pre-phase-1 real Go/PG/crypto integration remains in the fixed historical
+// source fixture. This refusal is not upgrade or rollback acceptance.
+// Run `npm run test:ctr06:publisher:driver` with its isolated fixture variables;
+// missing configuration refuses instead of silently skipping.
 import assert from "node:assert/strict";
 import { copyFile, mkdir, rmdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { mock, test } from "node:test";
+import type { CenterRunner } from "../../tooling/postgres-deploy.ts";
 
 test(
-  "CTR06 publisher uses real issuance, actual bridge service, cryptographic proof and real PostgreSQL migration",
+  "phase 1 publisher refuses before the isolated driver or provider can be called",
   {},
   async () => {
     const driver = process.env.CTR06_TEST_DRIVER_URL;
@@ -37,7 +36,10 @@ test(
     const application = "00000000-0000-4000-8000-000000000002";
     const image = `registry.cloudflare.com/${account}/arcforges-cloud@sha256:9b90c26264806fda339cdcff44dcf987bccf702117b3cd3e81ed7248de9730f0`;
     const originalFetch = globalThis.fetch;
+    let rpcCalls = 0;
+    let fetchCalls = 0;
     const rpc = async (endpoint: string, value: unknown) => {
+      rpcCalls++;
       const response = await originalFetch(driver + endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${authorization}` },
@@ -87,22 +89,13 @@ test(
     mock.module("../../tooling/ctr06-bridge.ts", {
       namedExports: { ...realBridge, cloudflareReader: () => provider },
     });
-    mock.module("../../tooling/postgres-deploy.ts", {
-      namedExports: {
-        center: async (
-          candidateImage: string,
-          variables: Record<string, string>,
-          command: string[],
-          options: { secretsDirectory?: string },
-        ) =>
-          await rpc("/center", {
-            candidateImage,
-            variables,
-            command,
-            directory: options.secretsDirectory,
-          }),
-      },
-    });
+    const center: CenterRunner = async (candidateImage, variables, command, options) =>
+      await rpc("/center", {
+        candidateImage,
+        variables,
+        command,
+        directory: options?.secretsDirectory,
+      });
     mock.module("../../tooling/sensitive-process.ts", {
       namedExports: {
         ...realSensitive,
@@ -141,6 +134,7 @@ test(
       },
     });
     globalThis.fetch = (async (input, init) => {
+      fetchCalls++;
       const url = new URL(String(input));
       if (url.hostname === "pipelines.actions.githubusercontent.com") {
         const issued = await rpc("/oidc", { audience: url.searchParams.get("audience") });
@@ -174,14 +168,22 @@ test(
       process.env.NEON_DATABASE_URL =
         "postgres://test:synthetic@ep-test-pooler.region.neon.tech/db?sslmode=require&channel_binding=require";
       const { promoteCTR06Bridge } = await import("../../tooling/ctr06-publisher.ts");
-      const result = await promoteCTR06Bridge("production", "source-candidate", {
-        ARCFORGES_CENTER_MODE: "self-hosted",
-        ARCFORGES_CENTER_MIGRATION_DATABASE_URL: database,
-        ARCFORGES_CENTER_RUNTIME_ROLE: legacyRole,
-      });
-      assert.equal(result.version, 11);
-      assert.equal(result.grants, "reconciled");
-      await rpc("/assert", {});
+      await assert.rejects(
+        () =>
+          promoteCTR06Bridge(
+            "production",
+            "source-candidate",
+            {
+              ARCFORGES_CENTER_MODE: "self-hosted",
+              ARCFORGES_CENTER_MIGRATION_DATABASE_URL: database,
+              ARCFORGES_CENTER_RUNTIME_ROLE: legacyRole,
+            },
+            center,
+          ),
+        /security bridge successor is not yet bound/u,
+      );
+      assert.equal(rpcCalls, 0);
+      assert.equal(fetchCalls, 0);
     } finally {
       if (stagedFileCreated) await unlink(stagedCarrier);
       if (stagedDirectoryCreated) await rmdir(stagedDirectory);

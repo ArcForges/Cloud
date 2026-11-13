@@ -1,5 +1,62 @@
 # Cloudflare deployment
 
+> **AF-CTR-06 development delivery, user decision 2026-11-13:** unavailable external authority qualification,
+> the one-time security-bridge publication and subsequent successor/dark deployment are deferred external work.
+> They do not block development completion after the agreed product, native verification and review requirements pass.
+> The authority job is explicitly disabled, so a main merge does not call the unconfigured service or consume the bootstrap.
+> Its dependent build/seal/publication jobs and the already-disabled deployment paths do not run.
+> Unconfigured live features remain disabled; external actions remain unperformed/NOT PROVEN, never relabelled as passed.
+> A future reviewed enablement must still satisfy the retained authority, published-identity and deployment safeguards below.
+> Existing independent proof access/observe/provision actions retain their purposes and are not executed by this delivery.
+
+## Security-bridge authority integration
+
+The versioned `arcforges.ctr06.bootstrap-authority.v1` integration is currently **disabled**. No reviewed collector host,
+provider-specific authority inventory, enforced change-control lease, credential issuer or publication broker is configured in
+Cloud source. There is no environment variable, JSON document, test key or URL an operator can supply to make this version publish.
+The bootstrap jobs have no `contents:write` or `id-token:write` permission and the read-only entry refuses without a reviewed profile.
+The Linux broker state-machine and isolated software-key tests do not establish real provider authority or publication eligibility.
+
+A future reviewed integration must bind the fixed GitHub issuer and its authenticated JWKS to an exact collector repository,
+workflow and source, and must provide authenticated, complete source-specific coverage for all credentials and delegated paths,
+including package restore and broker identities. Its independent enforcement must actually prevent relevant authority changes
+until issuer-observed revocation or expiry and termination of every in-flight operation. Owner/provider administrators can connect
+only the reviewed source profile to their actual read-only evidence and control mechanisms; they must not put credentials in the
+bootstrap job, repository, logs or evidence artifacts. Missing coverage, a stale or unverifiable lease, an uncertain prior issuer or
+publication result, and unavailable authoritative readback remain **NOT PROVEN**. The current profile contains no live adapter and
+must not be merged to consume the one authorized bootstrap on the strength of mock tests.
+
+The broker keeps one durable authorization and per-attempt target, validates the original gate separately from the fresh issuance
+proof and lease, and compares the public GitHub ZIP digest with the actual downloaded bytes before inspecting the bounded, two-file
+ZIP32 carrier and receipt. Unsupported archive features are refused. Public GitHub release metadata and tag objects can confirm an
+existing visible release, but a public 404 cannot prove that no draft, private release or in-flight publication exists. The broker's
+private durable journal currently supports Linux only; Windows still validates its native parser and cryptographic code. The old
+615.1 bridge is historical evidence, not a currently authorized execution or rollback server.
+
+The signed gate and fresh authority documents carry an exact source set. Each source names its domain, fixed reviewed namespace
+and provider identity, its own revision and collection time, full page chain and a bounded authenticated observation bound to the
+page digest. Its enforcement entry carries the supported control type, source revision, lease ID, fence and the provider receipt.
+The lease carries the complete source/revision set, holder, fencing identity and validity interval. Provider identities and control
+formats come from the reviewed source profile; the evidence cannot select its own trust settings. A source-specific adapter must
+verify the actual observation and enforcement against its authenticated authoritative source. Matching fields, a collector signature,
+a page digest or a receipt-shaped string alone does not prove complete coverage or active enforcement.
+
+A fresh issue/use response retains its authenticated not-before and expiry through all asynchronous checks and durable intent.
+The broker rechecks that window, the lease and each source collection time after asynchronous controls and durable intent. Each source
+must be at most 120 seconds old at the gate output and at each issuer or publisher effect. The separately controlled issuer and publisher must
+independently validate the same signed target, source set, lease, fence and window at their own atomic acceptance boundary. The helper
+for a reviewed adapter checks those fields immediately before its synchronous fenced acceptance; the production enforcement point,
+issuer and publisher are not configured or proven by the isolated software-key test. An expired or uncertain authorization cannot
+issue or continue using a capability. A historical pre-artifact gate proof is checked at its actual completed-job time, not reused as a
+fresh issue/use proof.
+
+Recovery keeps authenticated complete private release history separate from the public GitHub observation. Private absence together
+with a public 404/unknown permits retry only when all previously issued capabilities are independently confirmed revoked or expired,
+all publisher operations are terminal with no effect and no worker remains in flight. A public 404 by itself remains unknown. A claimed
+publication must match the actual public release, the independently authenticated private release and a specific publisher operation;
+conflicting, incomplete or unavailable histories remain unknown. The software-key fixture exercises parsing, signatures and decisions,
+but cannot prove that any real private inventory is complete or fenced.
+
 ## One-time setup
 
 The user already has the paid Workers plan. Use the same account that owns `arcforges.com` and `arcforges-web`. This repository creates `arcforges-cloud`, its Container binding, managed image registry entries and the route `arcforges.com/api/*`. It must not replace Web's apex Custom Domain or DNS record.

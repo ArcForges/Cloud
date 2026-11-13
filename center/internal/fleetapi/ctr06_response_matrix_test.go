@@ -5,6 +5,8 @@ package fleetapi
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
+	"strings"
 	"testing"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
@@ -191,5 +193,69 @@ func TestCTR06NestedErrorAndAuditShapesAreNotTrusted(t *testing.T) {
 	}
 	if validFileObservation(relayv1.RoutedMethod_ROUTED_METHOD_WRITE_NODE_FILE, &nodev1.FileAuditObservation{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_WRITTEN_BYTES.Enum(), SizeBytes: proto.Uint64(1), DigestInputBytes: proto.Uint64(2), Sha256: make([]byte, 32)}) {
 		t.Fatal("inconsistent digest length accepted")
+	}
+}
+
+// Complete shape-valid messages at the existing signed-result limit; this does
+// not itself prove a native Node or a signed network delivery.
+func TestCTR06PlanRemovalCompleteResponseBudgetBoundaries(t *testing.T) {
+	const maximum = 1_040_384
+	path := &nodev1.FilePath{WorkspaceId: pid(platform.NewID()), Path: proto.String("tree")}
+	request := &nodev1.FileServicePlanRemovalRequest{Meta: &foundationv1.RequestMeta{CommandId: pid(platform.NewID()), CorrelationId: pid(platform.NewID())}, Target: &nodev1.FileServicePlanRemovalRequest_WorkspacePath{WorkspacePath: path}}
+	plan := &nodev1.FileRemovalPlan{PlanId: pid(platform.NewID()), Digest: make([]byte, 32), ExpiresAt: &foundationv1.Instant{UnixSeconds: proto.Int64(1800000000), Nanos: proto.Uint32(0)},
+		TotalBytes: proto.Uint64(1), RequiresApproval: proto.Bool(true), QuarantineAvailable: proto.Bool(false), Risk: nodev1.RiskClass_RISK_CLASS_HIGH.Enum(), Target: &nodev1.FileRemovalPlan_WorkspacePath{WorkspacePath: path}}
+	item := func(name string, kind nodev1.FileEntryKind) *nodev1.FileRemovalItem {
+		digest := sha256.Sum256([]byte(name))
+		return &nodev1.FileRemovalItem{Path: proto.String(name), Kind: kind.Enum(), SizeBytes: proto.Uint64(0), IdentitySha256: digest[:], OwnerVerified: proto.Bool(false)}
+	}
+	prefix := "tree"
+	plan.Items = append(plan.Items, item(prefix, nodev1.FileEntryKind_FILE_ENTRY_KIND_DIRECTORY))
+	for depth := 0; depth < 5; depth++ {
+		prefix += "/" + strings.Repeat(string(rune('a'+depth)), 210)
+		plan.Items = append(plan.Items, item(prefix, nodev1.FileEntryKind_FILE_ENTRY_KIND_DIRECTORY))
+	}
+	for index := 0; index < 920; index++ {
+		plan.Items = append(plan.Items, item(fmt.Sprintf("%s/f%04d", prefix, index), nodev1.FileEntryKind_FILE_ENTRY_KIND_FILE))
+	}
+	plan.Items[len(plan.Items)-1].SizeBytes = proto.Uint64(1)
+	plan.Items[len(plan.Items)-1].OwnerVerified = proto.Bool(true)
+	inputDigest := sha256.Sum256([]byte("x"))
+	response := &nodev1.FileServicePlanRemovalResponse{Meta: &foundationv1.ResponseMeta{CorrelationId: request.Meta.CorrelationId}, Outcome: &nodev1.FileServicePlanRemovalResponse_Value{Value: &nodev1.FileServicePlanRemovalValue{Plan: plan}}, Audit: &nodev1.FileAuditMetadata{Observations: []*nodev1.FileAuditObservation{{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_INPUT_BYTES.Enum(), SizeBytes: proto.Uint64(1), DigestInputBytes: proto.Uint64(1), Sha256: inputDigest[:]}}}}
+	remaining := maximum - proto.Size(response)
+	if remaining < 0 || remaining > 920*240 {
+		t.Fatalf("unexpected fixture remainder: %d", remaining)
+	}
+	for _, entry := range plan.Items[6:] {
+		extra := min(remaining, 240)
+		entry.Path = proto.String(entry.GetPath() + strings.Repeat("x", extra))
+		remaining -= extra
+	}
+	if remaining != 0 || proto.Size(response) != maximum {
+		t.Fatalf("complete candidate size = %d, remainder = %d", proto.Size(response), remaining)
+	}
+	raw := marshal(t, response)
+	original := marshal(t, request)
+	method := relayv1.RoutedMethod_ROUTED_METHOD_PLAN_NODE_REMOVAL
+	if len(raw) != maximum {
+		t.Fatalf("serialized size = %d", len(raw))
+	}
+	if _, err := decodeFileResponse(method, raw, original); err != nil {
+		t.Fatalf("exact maximum refused: %v", err)
+	}
+	withAudit := proto.Clone(response).(*nodev1.FileServicePlanRemovalResponse)
+	withAudit.Audit.Observations = append(withAudit.Audit.Observations, &nodev1.FileAuditObservation{Kind: nodev1.FileAuditKind_FILE_AUDIT_KIND_READ_BYTES.Enum(), SizeBytes: proto.Uint64(0), DigestInputBytes: proto.Uint64(0), Sha256: make([]byte, 32)})
+	if proto.Size(withAudit) <= maximum {
+		t.Fatal("audit message not counted in complete response")
+	}
+	last := plan.Items[len(plan.Items)-1]
+	last.Path = proto.String(last.GetPath() + "x")
+	if proto.Size(response) != maximum+1 {
+		t.Fatalf("adjacent serialized size = %d", proto.Size(response))
+	}
+	if err := validateFileResult(method, original, response); err != nil {
+		t.Fatalf("adjacent candidate has a non-size shape error: %v", err)
+	}
+	if _, err := decodeFileResponse(method, marshal(t, response), original); err == nil {
+		t.Fatal("response above maximum accepted")
 	}
 }

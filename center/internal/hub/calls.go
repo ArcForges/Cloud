@@ -599,6 +599,12 @@ func verifyResult(publicKey []byte, frame resultFrame) (*relayv1.ResultHeader, s
 // (absent from a REFUSED_VERIFICATION result, which echoes nothing it could not verify), and for EXECUTED the response's size and
 // digest; any other outcome carries no payload.
 func bindResult(p *pending, header *relayv1.ResultHeader, payload []byte, nodeID platform.ID) string {
+	// Qualification is a signed handler outcome, never an outer routed refusal.
+	// Keep generic 450.1 shape and unrelated capability/replay refusals unchanged.
+	reason := header.GetError().GetDetails().GetState().GetReason()
+	if reason == "attempt_references_unverified" || reason == "attempt_tracking_unverified" {
+		return "result_mismatch"
+	}
 	if id, _ := idOf(header.NodeId); id != nodeID {
 		return "result_mismatch"
 	}

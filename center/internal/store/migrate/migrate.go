@@ -413,6 +413,15 @@ func (f *Failure) Error() string {
 // Apply runs the pending migrations of the build under the migration lock and reconciles the runtime role's grants. The
 // connection must be a direct session (not a transaction pooler): the advisory lock is a session lock.
 func Apply(ctx context.Context, conn *pgx.Conn, build []Migration, options Options) (Result, error) {
+	if options.BridgeProof != nil {
+		return Result{State: StateRefused}, ErrCTR06SecurityBridgeUnbound
+	}
+	return applyMigrations(ctx, conn, build, options)
+}
+
+// applyMigrations also retains the isolated historical proof implementation
+// for compatibility research. The public entry above refuses that old proof.
+func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, options Options) (Result, error) {
 	options.defaults()
 	result := Result{BuildVersion: len(build), RuntimeRole: options.RuntimeRole, Applied: []Applied{}, Pending: []string{}}
 	defer func() {

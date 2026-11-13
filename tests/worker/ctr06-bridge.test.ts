@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { bridgeAudience, verifyBridgeProviderSnapshot } from "../../tooling/ctr06-bridge.ts";
+import { promoteCTR06Bridge } from "../../tooling/ctr06-publisher.ts";
+import type { CenterRunner } from "../../tooling/postgres-deploy.ts";
 
 const account = "c".repeat(32);
 const version = "00000000-0000-4000-8000-000000000001";
@@ -227,4 +229,26 @@ test("CTR06 live provider verification follows every cursor and rejects a late o
   await assert.rejects(() =>
     verifyLiveBridge(get, deployment, account, "production", version, image),
   );
+});
+
+test("phase 1 refuses the historical bridge before provider work or credential delivery", async () => {
+  let called = false;
+  const center: CenterRunner = async () => {
+    called = true;
+    throw new Error("unexpected center");
+  };
+  const variables = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("unexpected credential access");
+      },
+    },
+  );
+  for (const target of ["production", "acceptance"] as const)
+    await assert.rejects(
+      () => promoteCTR06Bridge(target, "image", variables, center),
+      /security bridge successor is not yet bound/u,
+    );
+  assert.equal(called, false);
 });
