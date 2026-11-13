@@ -1016,18 +1016,12 @@ test("phase 1 proof deployment dispatch cannot provision or deploy before phase 
 });
 
 test("every other event keeps its jobs: main push delivery, PR validation, schedule security, other dispatches", () => {
-  // The evaluator models a successful gate for the complete graph. The actual gate
-  // is unconfigured and always fails; its real shell entry is tested separately.
-  assert.deepEqual(ran({ event: "push", ref: main }), [
-    "ctr06-security-bridge-authority",
-    "ctr06-security-bridge-linux",
-    "ctr06-security-bridge-publish",
-    "ctr06-security-bridge-seal",
-    "ctr06-security-bridge-windows",
-  ]);
+  // External qualification/publication is deferred by the user. A main merge must
+  // neither invoke the unconfigured service nor consume the one bootstrap.
+  assert.deepEqual(ran({ event: "push", ref: main }), []);
   assert.deepEqual(
     ran({ event: "push", ref: main, failing: ["ctr06-security-bridge-authority"] }),
-    ["ctr06-security-bridge-authority"],
+    [],
   );
   assert.deepEqual(
     ran({ event: "pull_request", ref: "refs/pull/1/merge", author: "dependabot[bot]" }),
@@ -1047,8 +1041,8 @@ test("every other event keeps its jobs: main push delivery, PR validation, sched
     ]);
 });
 
-// The phase-1 event graph is deliberately build/publish-only and fails closed
-// before any publication token while external authority is unproven.
+// The deferred event graph cannot start bootstrap or deployment. Retained job
+// definitions keep their original isolation for a future reviewed enablement.
 function assertBootstrapIsolation(selectedJobs: Map<string, string>): void {
   const authority = "ctr06-security-bridge-authority";
   const linux = "ctr06-security-bridge-linux";
@@ -1070,6 +1064,7 @@ function assertBootstrapIsolation(selectedJobs: Map<string, string>): void {
   );
   assert.match(condition(selectedJobs.get("deploy-proof") ?? "") ?? "", /^false &&/u);
   const gate = selectedJobs.get(authority) ?? "";
+  assert.match(condition(gate) ?? "", /^false &&/u);
   assert.match(gate, /^ {4}permissions:\n {6}contents: read\n {4}outputs:/mu);
   assert.match(gate, /gate-digest: \$\{\{ steps\.gate\.outputs\.gate-digest \}\}/u);
   assert.match(gate, /gate-challenge: \$\{\{ steps\.gate\.outputs\.gate-challenge \}\}/u);
@@ -1163,6 +1158,11 @@ function assertBootstrapIsolation(selectedJobs: Map<string, string>): void {
   for (const scenario of scenarios) {
     const result = running(scenario, selectedJobs);
     for (const name of [
+      authority,
+      linux,
+      windows,
+      seal,
+      publish,
       "candidate",
       "ctr06-bridge-assets-state",
       "ctr06-bridge-linux-asset",
@@ -1194,9 +1194,10 @@ function assertBootstrapIsolation(selectedJobs: Map<string, string>): void {
   assert.equal(proof.has("deploy-proof"), false);
 }
 
-test("phase 1 event isolation rejects bypasses and preserves exact dependencies", () => {
+test("deferred external delivery rejects activation and preserves bootstrap safeguards", () => {
   assertBootstrapIsolation(jobs);
   for (const [job, before, after] of [
+    ["ctr06-security-bridge-authority", "false && !cancelled()", "!cancelled()"],
     [
       "ctr06-security-bridge-authority",
       "node tooling/ctr06-bootstrap-entry.ts authority",

@@ -295,10 +295,12 @@ jobs:
   ctr06-security-bridge-authority:
     name: Require authenticated bootstrap authority evidence
     if: >-
-      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      false && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # The source has no reviewed live collector/broker profile; the entry refuses until one exists.
+    # User decision 2026-11-13: external bootstrap is deferred, not an AF06 development gate.
+    # Keep this entry disabled until a future reviewed enablement; no bootstrap is consumed by this merge.
+    # The source has no reviewed live collector/broker profile; direct entry still refuses without one.
     # The job has no write or OIDC token and cannot adopt mock or caller-supplied authority.
     permissions:
       contents: read

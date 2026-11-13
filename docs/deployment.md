@@ -1,12 +1,13 @@
 # Cloudflare deployment
 
-> **AF-CTR-06 security bootstrap, phase 1:** the ordinary main-push candidate, bridge assets and deployment are disabled.
-> A `proof: deploy` dispatch runs only the read-only gate: it cannot provision proof resources or deploy. Independent proof
-> `access`, `observe` and `provision` keep their existing purposes. The dedicated security-bridge publication path is also
-> disabled by its unconfigured authority gate: actual identity, permissions and delegation are **NOT PROVEN**. A test mock,
-> absent DB calls or a user-supplied flag cannot unlock it. The historical delivery sequence below is not an authorization
-> to run it during phase 1. A later reviewed phase 2 must bind the real published successor and restore the applicable gates
-> before migration, promotion, rollback or deployment; publication alone is not task delivery.
+> **AF-CTR-06 development delivery, user decision 2026-11-13:** unavailable external authority qualification,
+> the one-time security-bridge publication and subsequent successor/dark deployment are deferred external work.
+> They do not block development completion after the agreed product, native verification and review requirements pass.
+> The authority job is explicitly disabled, so a main merge does not call the unconfigured service or consume the bootstrap.
+> Its dependent build/seal/publication jobs and the already-disabled deployment paths do not run.
+> Unconfigured live features remain disabled; external actions remain unperformed/NOT PROVEN, never relabelled as passed.
+> A future reviewed enablement must still satisfy the retained authority, published-identity and deployment safeguards below.
+> Existing independent proof access/observe/provision actions retain their purposes and are not executed by this delivery.
 
 ## Security-bridge authority integration
 
