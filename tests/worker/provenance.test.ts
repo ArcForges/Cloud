@@ -727,7 +727,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       "eng/policy/dependency-reviews/af-ctr-04-r14.json",
       "eng/policy/dependency-reviews/af-ctr-05-r5.json",
       "eng/policy/dependency-reviews/af-ctr-05-r19.json",
-      "eng/policy/dependency-reviews/af-ctr-06-r30.json",
+      "eng/policy/dependency-reviews/af-ctr-06-r31.json",
       "eng/policy/dependency-reviews/af-ctr-06-bridge-r2.json",
     ])
       assert.ok(!exempt.test(other), other);
