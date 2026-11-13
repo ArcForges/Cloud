@@ -56,7 +56,7 @@
     "test:ctr06:publisher:driver": "node --experimental-test-module-mocks --test tests/worker/ctr06-publisher-integration.test.ts"
   },
   "dependencies": {
-    "@arcforges/ai-internal": "1.0.0-ci.287.1",
+    "@arcforges/ai-internal": "1.0.0-ci.437.1",
     "@cloudflare/containers": "0.3.7"
   },
   "devDependencies": {
