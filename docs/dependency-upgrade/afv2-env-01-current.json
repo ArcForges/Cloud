@@ -2,15 +2,15 @@
   "schemaVersion": 1,
   "task": "AFV2-ENV-01",
   "repository": "Cloud",
-  "sourceBaseline": "307ddd7375e6d162e784b538fdd0c6fbdaf6b972",
+  "sourceBaseline": "5ac9a8f90108994ae7ab00fafa46c07e00e804d5",
   "observedOn": "2026-11-15",
   "reviewState": "source-and-licence-reviewed; actual compilation and existing test results recorded separately",
   "inputs": {
     "global.json": "556626ce7b80caffbf84df58145d4776ccc165ffc04d11c37fa39e54f910c1b3",
     ".node-version": "5c293036fc0a61ad76e15d85f454c3c7cec157e181e035b69f95058a2c239144",
     ".python-version": "673e2ba07f95bfcfe0a543258b8e267954e403d1f466481c546f467f86b31d46",
-    "package.json": "cf536087b3182871b957b27a8c5aded83db2ef6c2423cb6f6ae33871b25e8464",
-    "package-lock.json": "3c8034b8dd4f82ccf0f217c8b8e9da5855d01045d33bdc6c0e553cb54f6254c0",
+    "package.json": "d9b3b4e12a0c9beff38343c70370b38ec7bfcd60ff29e4f6785b3da7276619e4",
+    "package-lock.json": "19b174f88f5fcd8fa7a46c3c0d30ee326b70fd43567141365a13c6415c6f09a5",
     "Directory.Packages.props": "a14869d5b584097f0aa37d018d6c453977280d07ae876d7a554813ae27d98bc2",
     "Directory.Build.props": "9fd1a1c0c8730a93ecfc59b2be5eda93fb8f0aeb6854ced6d62e4c11bd004b93",
     "center/go.mod": "d6459f9329016b874ae7c3806d6a5acd0012e70d62042927c0e9ec51f4c1d382",
@@ -10273,28 +10273,6 @@
       "scope": "build-and-development-tool"
     },
     {
-      "path": "node_modules/consola",
-      "name": "consola",
-      "version": "3.4.2",
-      "integrity": "sha512-5IKcdX0nnYavi6G7TtOhwkYzyjfJlatbjMjuLSfE2kYT5pMDOilZ4OvMhi637CcDICTmz3wARPoyhqyX1Y+XvA==",
-      "resolved": "https://registry.npmjs.org/consola/-/consola-3.4.2.tgz",
-      "license": "MIT",
-      "dev": true,
-      "official": {
-        "kind": "npm",
-        "id": "consola",
-        "version": "3.4.2",
-        "observed_at": "2026-11-15T06:11:34.255950+00:00",
-        "sources": ["https://registry.npmjs.org/consola/latest"],
-        "bodySha256": "2c795fb04e0dfb3d70bfcda87ef2aecfce16788245940b078ec5e1a5f1d9d5d1",
-        "deprecation": null,
-        "license": "MIT"
-      },
-      "assessment": "latest-official-stable",
-      "firstParty": false,
-      "scope": "build-and-development-tool"
-    },
-    {
       "path": "node_modules/cookie-es",
       "name": "cookie-es",
       "version": "3.1.1",
@@ -10309,28 +10287,6 @@
         "observed_at": "2026-11-15T06:11:34.262137+00:00",
         "sources": ["https://registry.npmjs.org/cookie-es/latest"],
         "bodySha256": "715b468179294ae8b42ae7b324ec79beb0f8803d6dc1e565803eee355e83d289",
-        "deprecation": null,
-        "license": "MIT"
-      },
-      "assessment": "latest-official-stable",
-      "firstParty": false,
-      "scope": "build-and-development-tool"
-    },
-    {
-      "path": "node_modules/defu",
-      "name": "defu",
-      "version": "6.1.7",
-      "integrity": "sha512-7z22QmUWiQ/2d0KkdYmANbRUVABpZ9SNYyH5vx6PZ+nE5bcC0l7uFvEfHlyld/HcGBFTL536ClDt3DEcSlEJAQ==",
-      "resolved": "https://registry.npmjs.org/defu/-/defu-6.1.7.tgz",
-      "license": "MIT",
-      "dev": true,
-      "official": {
-        "kind": "npm",
-        "id": "defu",
-        "version": "6.1.7",
-        "observed_at": "2026-11-15T06:11:34.281572+00:00",
-        "sources": ["https://registry.npmjs.org/defu/latest"],
-        "bodySha256": "99722899373641b9e068ccddb2e96bfd79457c8205daa7967044cabf97ac0735",
         "deprecation": null,
         "license": "MIT"
       },
@@ -10582,50 +10538,6 @@
           "unpackedSize": 20250,
           "npm-signature": "-----BEGIN PGP SIGNATURE-----\r\nVersion: OpenPGP.js v4.10.10\r\nComment: https://openpgpjs.org\r\n\r\nwsFzBAEBCAAGBQJiuKpkACEJED1NWxICdlZqFiEECWMYAoorWMhJKdjhPU1b\r\nEgJ2Vmrj/g//e5m5iJ46HfrSfjCQ4XfSGH/LfB4/Yy1MpT9kzRvKwlHfmYQ6\r\nv+ojjMMH0asp77IQjgnarEd4w512K6C+y4Dy4nID6VsWKRqHEAvdAhIUOor1\r\nmkHk/K5SYc26AmQIq98mPfcY7MiIdWCYB8keDgUR/ZrnnZI3uezxD1FGHKC9\r\n9QBjCyudS+85zi/UK3Qk89p5Q99qI19Opz8+D+gxijvsUS5+6HdJkLfjACJb\r\nt+2JsAN37ZKn838bA4vkFZefIXp7Aggckn3czv9ImfviFzJM4h0nXkVrXG1p\r\nwAzsafbY8S/l6ZR6n3ydLCdrVgFczEUSVeBCNnpJsgnVe9Jwado3IFoF3nCf\r\nLCmrAF11eQy/H0G7dtf7N8UCnDQVz/EjvAZpqtS33AZ1DtBR1uxk3bZf8VAL\r\nZRrSgkvwCwo/WnYg5fsHLSKjU4CiQwdKXivquVaZL+PfEk6k0dfASDT6DSJ/\r\n7Tvx4dKjgdTK3GZjoraDjpGvvarSpXtApZXKJHKOXIS09JTeTr1xhMIm4hDP\r\n0PhQfHI80W3SrlqH1KfG2nGny1hBXQ7Z4uu/LnU0XQQNlsczMWsMoW6JHSua\r\njj4Ots4C0pSAeDKbB/ylfpOIbkmMixruPaeJjT1axB02YXvXMdUcN1IShM8b\r\nAo/EC66aITpTYKz+pCor0/39ZUzR9/v6YUI=\r\n=2FRA\r\n-----END PGP SIGNATURE-----\r\n"
         }
-      },
-      "assessment": "latest-official-stable",
-      "firstParty": false,
-      "scope": "build-and-development-tool"
-    },
-    {
-      "path": "node_modules/mime",
-      "name": "mime",
-      "version": "4.1.2",
-      "integrity": "sha512-ikRzZ2RwbUVDyL9SsU0f2Phcmav4yq5r8faH5ZZKHtOZrMBLnrQOrj0uvqZ5R1uQnj+RO7Wcklw/lAf81mP9LQ==",
-      "resolved": "https://registry.npmjs.org/mime/-/mime-4.1.2.tgz",
-      "license": "MIT",
-      "dev": true,
-      "official": {
-        "kind": "npm",
-        "id": "mime",
-        "version": "4.1.2",
-        "observed_at": "2026-11-15T06:11:34.261034+00:00",
-        "sources": ["https://registry.npmjs.org/mime/latest"],
-        "bodySha256": "70fb00c18164e4ab865133ab69f9e1feae044db283a9ccaedbceb3999df8a66d",
-        "deprecation": null,
-        "license": "MIT"
-      },
-      "assessment": "latest-official-stable",
-      "firstParty": false,
-      "scope": "build-and-development-tool"
-    },
-    {
-      "path": "node_modules/node-fetch-native",
-      "name": "node-fetch-native",
-      "version": "1.6.7",
-      "integrity": "sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==",
-      "resolved": "https://registry.npmjs.org/node-fetch-native/-/node-fetch-native-1.6.7.tgz",
-      "license": "MIT",
-      "dev": true,
-      "official": {
-        "kind": "npm",
-        "id": "node-fetch-native",
-        "version": "1.6.7",
-        "observed_at": "2026-11-15T06:11:34.271240+00:00",
-        "sources": ["https://registry.npmjs.org/node-fetch-native/latest"],
-        "bodySha256": "34fae03c7de6ae225bb2c604a9b22565127879e64494c6bad415730df7fbef30",
-        "deprecation": null,
-        "license": "MIT"
       },
       "assessment": "latest-official-stable",
       "firstParty": false,
@@ -11157,9 +11069,9 @@
     {
       "path": "node_modules/unenv",
       "name": "unenv",
-      "version": "1.10.0",
-      "integrity": "sha512-wY5bskBQFL9n3Eca5XnhH6KbUo/tfvkwm9OpcdCvLaeA7piBNbavbOKJySEwQ1V0RH6HvNlSAFRTpvTqgKRQXQ==",
-      "resolved": "https://registry.npmjs.org/unenv/-/unenv-1.10.0.tgz",
+      "version": "2.0.0-rc.24",
+      "integrity": "sha512-i7qRCmY42zmCwnYlh9H2SvLEypEFGye5iRmEMKjcGi7zk9UquigRjFtTLz0TYqr0ZGLZhaMHl/foy1bZR+Cwlw==",
+      "resolved": "https://registry.npmjs.org/unenv/-/unenv-2.0.0-rc.24.tgz",
       "license": "MIT",
       "dev": true,
       "official": {
@@ -11194,9 +11106,21 @@
           "unpackedSize": 431931
         }
       },
-      "assessment": "latest-official-stable",
+      "assessment": "exact-upstream-required-build-tool-api;fixed-prerelease",
       "firstParty": false,
-      "scope": "build-and-development-tool"
+      "scope": "build-and-development-tool; dev-only exact unenv defineEnv API required by Wrangler and its preset",
+      "selectionEvidence": {
+        "kind": "actual-locked-and-installed-build-tool",
+        "packageManifest": "node_modules/unenv/package.json",
+        "packageManifestSha256Lf": "beb23fc92aa4c83a6d22a29f8427532ff9012e53c965c4fdd88839586dde344c",
+        "requiredBy": {
+          "wrangler": "2.0.0-rc.24",
+          "@cloudflare/unenv-preset": "2.0.0-rc.24"
+        },
+        "originalLegalFile": "node_modules/unenv/LICENSE",
+        "originalLegalSha256Lf": "46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082",
+        "finding": "Prior official latest-stable observation is retained as historical research, not the selected version. The fixed upstream-declared rc API is necessary for the existing production/proof tool flow; original MIT terms remain unchanged."
+      }
     },
     {
       "path": "node_modules/workerd",
@@ -15800,18 +15724,20 @@
     "All completed dependency and toolchain upgrades are retained. Exact selected versions, upstream observations and original legal-file evidence remain recorded without further research.",
     "Go selected graphs contain upstream test/metadata requirements and untagged fixed commits; pgservicefile is an actual shipped runtime input. These facts remain visible. The user excluded additional transitive-latest and untagged-version qualification work from this completion scope; no new general policy exemption is asserted.",
     "The pinned Python stage bootstraps separate LLVM/GNU programs; product compilation selects the verified LLVM23.1.5/GNU2.47 tool routes. Their implementation is absent from the final product image.",
-    "The existing exact published Contracts cohort is retained. No unpublished future cohort or new deployment is required or invented by the narrowed task."
+    "The existing exact published Contracts cohort is retained. No unpublished future cohort or new deployment is required or invented by the narrowed task.",
+    "Compatibility correction: unenv2.0.0-rc.24 is fixed as a dev-only upstream-required build API, with no global override. consola, defu, mime and node-fetch-native became unselected orphans and are removed. All other locked entries are retained; the emitted production Worker is byte-identical to the preceding reviewed output."
   ],
   "authorEvidence": [
     "Windows locked restore/Release build0warnings0errors; both Go module tidy/verify and allcenterGo tests passed.",
     "Windows typecheck, toolchain refusal/layout tests,2unenv adapter cases, affected bridge/OIDC tests and actual nodejs_compat Wrangler production dry-run passed.",
     "H22 actual SDK11/Node26/npm12/Python3.15 preflight and4toolchain tests passed at34fa; network-none SDK container accepts all8verifiednative tools with no missing shared libraries.",
-    "The unchanged25bridge-unit cases passed on native Linux after the explicit file-loader fix:24passes and1existing optional offline-native-bundle fixture skip; this is author diagnostic evidence, not a final native status."
+    "The unchanged25bridge-unit cases passed on native Linux after the explicit file-loader fix:24passes and1existing optional offline-native-bundle fixture skip; this is author diagnostic evidence, not a final native status.",
+    "Windows MCP39448: install without peer warnings, clean npm ci --ignore-scripts, both existing unenv tests, typecheck and real production/proof Wrangler dry-runs returned0. MCP38204: the original production-bundle C# test passed1/1 with0skip; MCP39704: affected C# guards passed17/17; MCP32792: proof-gate passed25/25 with0skip and its format check returned0."
   ],
   "acceptance": "Independent source/licence review completed. Author compilation and existing test evidence is recorded separately and faithfully; no final native success status, merged PR, publication or deployment is asserted here.",
   "summary": {
     "nugetCoordinates": 62,
-    "npmEntries": 135,
+    "npmEntries": 131,
     "goSelectedRows": 55,
     "runtimeGoModules": 23,
     "unboundOfficial": []
