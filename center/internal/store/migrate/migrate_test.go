@@ -141,7 +141,7 @@ func TestTheTestedMajorIsThePinnedImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	match := regexp.MustCompile(`POSTGRES_IMAGE = "postgres:([0-9]+)-alpine@sha256:[0-9a-f]{64}"`).FindSubmatch(source)
+	match := regexp.MustCompile(`POSTGRES_IMAGE = "postgres:([0-9]+)(?:\.[0-9]+)?-alpine(?:[0-9]+\.[0-9]+)?@sha256:[0-9a-f]{64}"`).FindSubmatch(source)
 	if match == nil || string(match[1]) != strconv.Itoa(TestedMajor) {
 		t.Fatalf("eng/center.py pins %q; TestedMajor is %d", match, TestedMajor)
 	}
