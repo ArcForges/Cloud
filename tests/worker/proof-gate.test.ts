@@ -1515,8 +1515,8 @@ test("the main-push path and the reviewed proof deployment steps remain pinned",
   };
   assert.match(deploy, /artifacts\/proof-key-registration\.json/u);
   assert.deepEqual(pins, {
-    candidate: "e9304d0b4ed9b27272acf3bf654ee7271e924a214e243212930321b6699a8b00",
-    deploy: "5c24cd113b6560786cef1b9ff48f1ebcb0ef9edcdfd52378def561d02caf1cef",
-    proofSteps: "20efb69cf61403398f2b612ee7bfe925a3d2bf3b6b876e8e323c37e1f2cb298c",
+    candidate: "e75331420f419246bbe1bbe163698f2254095bf223e7480e4569c276d403de31",
+    deploy: "4dbfe83f395d403592ecc45447697b18b545e470073f040f775682f45d2a82be",
+    proofSteps: "de3b13d8db0a7f4df9ea53afa9d25c933c4d62553d70fc5715cf12d11ce97e5c",
   });
 });
