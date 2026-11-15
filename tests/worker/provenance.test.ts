@@ -504,7 +504,7 @@ function gitleaksConfig(text: string): { extend: string[]; allowlists: Allowlist
   };
   const extend: string[] = [];
   const allowlists: Allowlist[] = [];
-  let table: "none" | "extend" | "allowlist" = "none";
+  let table: string = "none";
   const lines = text.split("\n");
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index] ?? "";

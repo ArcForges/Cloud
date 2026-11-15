@@ -1,6 +1,6 @@
 # ArcForges Cloud
 
-The production Container runs the ArcForges center, `arcforges-center`, written in Go ([center](docs/center.md), [AD-0021](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/decisions/AD-0021-central-access-go-center.md)); today it serves the anonymous Hello, which reads PostgreSQL (Neon) through the center's least-privilege runtime role, and its health. Its [PostgreSQL store](docs/postgres-store.md) holds the platform tables (command receipts, inbox, outbox, job leases, audit, signing keys) and is migrated by the deploy job before promotion. A small TypeScript Worker preserves the public binary gRPC-Web endpoint and its deny-by-default route table, generated from the center's registrations. The image retains the C# 14 / .NET 10 Native AOT executable for the isolated proof environment and the Hello rollback until AF-CTR-09. The center consumes the published Contracts Go module and the C# host the NuGet packages of the same cohort. The same `arcforges-center` binary runs as a self-hosted center without the Worker.
+The production Container runs the ArcForges center, `arcforges-center`, written in Go ([center](docs/center.md), [AD-0021](https://github.com/ArcForges/ArcForges-Design/blob/main/docs/decisions/AD-0021-central-access-go-center.md)); today it serves the anonymous Hello, which reads PostgreSQL (Neon) through the center's least-privilege runtime role, and its health. Its [PostgreSQL store](docs/postgres-store.md) holds the platform tables (command receipts, inbox, outbox, job leases, audit, signing keys) and is migrated by the deploy job before promotion. A small TypeScript Worker preserves the public binary gRPC-Web endpoint and its deny-by-default route table, generated from the center's registrations. The image retains the C# 15 / .NET 11 Native AOT executable for the isolated proof environment and the Hello rollback until AF-CTR-09. The center consumes the published Contracts Go module and the C# host the NuGet packages of the same cohort. The same `arcforges-center` binary runs as a self-hosted center without the Worker.
 
 ```text
 Web or published gRPC-Web client
@@ -23,7 +23,7 @@ Cloud is an active repository of the ArcForges flagship ([AD-0001](https://githu
 
 ## Quick start
 
-Prerequisites: .NET SDK **10.0.403**, Node **24.21.0**, npm **11.19.0**, Go **1.27.4** (`center/toolchain.json`; gcc on Linux for the race detector), and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
+Prerequisites: .NET SDK **11.0.100**, Node **26.13.1**, npm **12.2.2**, Go **1.27.4** (`center/toolchain.json`; gcc on Linux for the race detector), and Docker with a Linux x64 daemon. Worker tooling uses TypeScript **7.0.2**. The final image contains a real native executable and runtime OS dependencies, with no .NET runtime/JIT or JVM.
 
 ```sh
 npm ci --ignore-scripts

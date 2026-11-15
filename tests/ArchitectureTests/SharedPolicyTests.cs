@@ -228,7 +228,7 @@ public sealed class SharedPolicyTests
         try
         {
             var project = new ProjectFacts(new("subject.csproj", ProjectRole.Foundation, CloudRepository.Owner),
-                "net10.0", "Library", "AGPL-3.0-only", "AGPL", [], [file], [typeof(object).Assembly.Location],
+                "net11.0", "Library", "AGPL-3.0-only", "AGPL", [], [file], [typeof(object).Assembly.Location],
                 new Dictionary<string, string> { ["AssemblyName"] = "Subject" }, new Dictionary<string, string>());
             File.WriteAllText(file, "public class Api { public string Value => string.Empty; }");
             Assert.NotNull(CloudRepository.ReadCompilation(project));
@@ -249,7 +249,7 @@ public sealed class SharedPolicyTests
         try
         {
             var project = new ProjectFacts(new("subject.csproj", ProjectRole.Foundation, CloudRepository.Owner),
-                "net10.0", "Library", "AGPL-3.0-only", "AGPL", [], [file], [typeof(object).Assembly.Location],
+                "net11.0", "Library", "AGPL-3.0-only", "AGPL", [], [file], [typeof(object).Assembly.Location],
                 new Dictionary<string, string> { ["AssemblyName"] = "Subject" }, new Dictionary<string, string>());
             File.WriteAllText(file, "public class Api { public string Value => string.Empty; }");
             _ = ProjectGraph.ReadCompilation(project);

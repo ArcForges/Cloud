@@ -175,7 +175,7 @@ public sealed class RepositoryInventoryTests
         """;
 
     private const string Lock = """
-        { "version": 2, "dependencies": { "net10.0": { "ArcForges.Contracts.Validation": { "type": "Direct", "requested": "[1.0.0-ci.205.1, )", "resolved": "1.0.0-ci.205.1" } } } }
+        { "version": 2, "dependencies": { "net11.0": { "ArcForges.Contracts.Validation": { "type": "Direct", "requested": "[1.0.0-ci.205.1, )", "resolved": "1.0.0-ci.205.1" } } } }
         """;
 
     [Fact]

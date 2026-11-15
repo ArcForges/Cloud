@@ -18,6 +18,7 @@
     ".npmrc",
     ".prettierignore",
     ".prettierrc.json",
+    ".python-version",
     "AGENTS.md",
     "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
@@ -697,7 +698,9 @@
     "docs/shared-families.md",
     "docs/storage-plans.md",
     "docs/validation-policy.md",
+    "eng/actionlint.yaml",
     "eng/center.py",
+    "eng/check_toolchain.py",
     "eng/generated/contracts-identity.json",
     "eng/migrations/catalog.ts",
     "eng/migrations/cli.ts",
@@ -1303,6 +1306,7 @@
     "eng/provenance/records/sharp-0-35-5-cloud-runtime-notices-r1.json",
     "eng/provenance/records/sharp-0-35-5-cloud-worker-bundle-r1.json",
     "eng/provenance/template.json",
+    "eng/test_toolchain.py",
     "eng/verification/browser/.npmrc",
     "eng/verification/browser/acceptance.ts",
     "eng/verification/browser/adapter-check/check.ts",
@@ -1927,6 +1931,7 @@
     "tests/worker/support/traceparent.ts",
     "tests/worker/support/windows-machine.ts",
     "tests/worker/toolchain.test.ts",
+    "tests/worker/unenv-compat.test.ts",
     "tooling/build-identity.ts",
     "tooling/cloudflare.ts",
     "tooling/ctr06-bootstrap-broker.ts",
@@ -1963,6 +1968,8 @@
     "tooling/release-provenance.ts",
     "tooling/sealed-tool.ts",
     "tooling/sensitive-process.ts",
+    "tooling/unenv-compat.ts",
+    "tooling/wrangler-init.ts",
     "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj",
     "tools/ArcForges.Cloud.Generation/ContractsIdentity.cs",
     "tools/ArcForges.Cloud.Generation/HelloProbe.cs",
@@ -2081,5 +2088,8 @@
     "third-party/Protobuf.LICENSE.txt": "protobuf-bsd-legal-r1",
     "third-party/Puddle.LICENSE.txt": "go-puddle-legal-r1"
   },
-  "artifacts": ["center-runtime-r79", "center-worker-r76"]
+  "artifacts": [
+    "center-runtime-r79",
+    "center-worker-r76"
+  ]
 }

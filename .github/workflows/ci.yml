@@ -61,23 +61,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-26.04, windows-2025]
     runs-on: ${{ matrix.os }}
-    # Source (ubuntu-latest) on proof dispatches: 11m59s before #127; after #127 11m34s (passed) and cancelled at the 15m cap after 15m14s (Verify the Go center 4m15s -> 5m35s/7m32s);
+    # Source (ubuntu-26.04) on proof dispatches: 11m59s before #127; after #127 11m34s (passed) and cancelled at the 15m cap after 15m14s (Verify the Go center 4m15s -> 5m35s/7m32s);
     # 14m42s on proof dispatch 41835733994, the last before the proof deployment stopped running it.
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
-          cache: ${{ matrix.os == 'ubuntu-latest' && 'npm' || '' }}
+          cache: ${{ matrix.os == 'ubuntu-26.04' && 'npm' || '' }}
           package-manager-cache: false
       - run: npm ci --ignore-scripts
       - run: npm run check
@@ -89,7 +92,7 @@ jobs:
         run: |
           dotnet restore Cloud.slnx --locked-mode
           dotnet build Cloud.slnx -c Release --no-restore
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.4"
           cache-dependency-path: |
@@ -101,7 +104,7 @@ jobs:
       - run: node tooling/project.ts licence-evaluated
       - name: Retain evaluated licence and source provenance
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: licence-evidence-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -116,14 +119,14 @@ jobs:
       github.event_name != 'push'
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
       && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -136,11 +139,14 @@ jobs:
           curl --fail --silent --show-error --location https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz --output "$RUNNER_TEMP/actionlint.tar.gz"
           echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
-          "$RUNNER_TEMP/actionlint" -color
+          "$RUNNER_TEMP/actionlint" -config-file eng/actionlint.yaml -color
       - name: Scan Git history for secrets
-        run: docker run --rm --network none -v "$PWD:/repo:ro" zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact=100 --no-banner
+        run: docker run --rm --network none -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact=100 --no-banner
       # GOV.09: the hosted architecture gate runs only after the secret scan above succeeded (RP-09), in this same job.
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Build the solution for the architecture gate
@@ -157,10 +163,10 @@ jobs:
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request' && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -174,7 +180,7 @@ jobs:
       github.event_name != 'push'
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
       && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -192,20 +198,23 @@ jobs:
           - language: actions
             build-mode: none
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         if: matrix.language == 'csharp'
         with:
           global-json-file: global.json
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: matrix.language == 'go'
         with:
           go-version: "1.27.4"
           cache-dependency-path: center/go.sum
-      - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -225,7 +234,7 @@ jobs:
           go mod download
           go build ./...
           go test -count=1 -run '^$' ./...
-      - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:${{ matrix.language }}
 
@@ -239,27 +248,30 @@ jobs:
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
       && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
       && needs.source.result == 'success' && needs.quality.result == 'success'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
       # CLOUD.84 S41(3): the candidate publishes the Hello probe and the migrator with the SDK of global.json; the deploy jobs have no .NET step.
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run candidate
       - id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cloud-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/candidate
@@ -274,7 +286,7 @@ jobs:
       && !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'deku2026')
       && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.proof == 'deploy')
     needs: [source, quality, dependency-review, codeql, candidate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:
       - name: Require all applicable checks
@@ -296,7 +308,7 @@ jobs:
     name: Require authenticated bootstrap authority evidence
     if: >-
       false && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     # User decision 2026-11-13: external bootstrap is deferred, not an AF06 development gate.
     # Keep this entry disabled until a future reviewed enablement; no bootstrap is consumed by this merge.
@@ -308,11 +320,11 @@ jobs:
       gate-digest: ${{ steps.gate.outputs.gate-digest }}
       gate-challenge: ${{ steps.gate.outputs.gate-challenge }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
@@ -326,25 +338,35 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && needs.ctr06-security-bridge-authority.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     permissions:
       contents: read
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      # Only the immutable 8e5 source is installed with its preserved historical tool pair.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - name: Capture historical source installer
+        run: echo "ARCFORGES_CTR06_HISTORICAL_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.4"
           cache: false
@@ -356,7 +378,7 @@ jobs:
           curl --fail --silent --show-error --location https://go.dev/dl/go1.27.4.linux-amd64.tar.gz -o "$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz"
           node tooling/ctr06-security-bridge-producer.ts linux "$RUNNER_TEMP/ctr06-source" "$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz" "$(command -v go)" "$RUNNER_TEMP/ctr06-linux"
       - id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctr06-security-linux-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ctr06-linux/sealed
@@ -370,22 +392,22 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && needs.ctr06-security-bridge-authority.result == 'success'
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 25
     permissions:
       contents: read
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.4"
           cache: false
@@ -404,7 +426,7 @@ jobs:
           node tooling/ctr06-security-bridge-producer.ts windows $source $archive (Get-Command go.exe).Source $output
           if ($LASTEXITCODE -ne 0) { throw 'Native bridge construction failed' }
       - id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctr06-security-windows-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ctr06-windows/sealed
@@ -421,34 +443,37 @@ jobs:
       && needs.ctr06-security-bridge-authority.result == 'success'
       && needs.ctr06-security-bridge-linux.result == 'success'
       && needs.ctr06-security-bridge-windows.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     permissions:
       contents: read
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.4"
           cache: false
       - run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.ctr06-security-bridge-linux.outputs.artifact-id }}
           path: ${{ runner.temp }}/ctr06-linux
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.ctr06-security-bridge-windows.outputs.artifact-id }}
           path: ${{ runner.temp }}/ctr06-windows
@@ -459,7 +484,7 @@ jobs:
           curl --fail --silent --show-error --location https://go.dev/dl/go1.27.4.linux-amd64.tar.gz -o "$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz"
           node tooling/ctr06-security-bridge-seal.ts "$RUNNER_TEMP/ctr06-source" "$RUNNER_TEMP/ctr06-linux" "$RUNNER_TEMP/ctr06-windows" "$RUNNER_TEMP/go1.27.4.linux-amd64.tar.gz" "$(command -v go)" "$RUNNER_TEMP/ctr06-seal"
       - id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctr06-security-sealed-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ctr06-seal/sealed
@@ -477,21 +502,21 @@ jobs:
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && needs.ctr06-security-bridge-authority.result == 'success'
       && needs.ctr06-security-bridge-seal.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     # Issuance belongs to the independent broker, never to a bootstrap job token.
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.ctr06-security-bridge-seal.outputs.artifact-id }}
           path: ${{ runner.temp }}/ctr06-sealed
@@ -506,7 +531,7 @@ jobs:
     name: Check immutable self-hosted bridge assets
     # Contradictory event predicates make this historical asset job unreachable during phase 1.
     if: github.event_name == 'push' && github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -514,7 +539,7 @@ jobs:
       linux-present: ${{ steps.state.outputs.linux_present }}
       windows-present: ${{ steps.state.outputs.windows_present }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: state
@@ -529,22 +554,22 @@ jobs:
     if: >-
       !cancelled() && needs.ctr06-bridge-assets-state.result == 'success'
       && needs.ctr06-bridge-assets-state.outputs.linux-present == 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: 8e5f6e26aa97b123d9f60b91f780364a094e74cd
           path: bridge-source
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.3"
           cache: false
@@ -561,7 +586,7 @@ jobs:
           python eng/verification/ctr06_bridge_bundle.py build linux "$GITHUB_WORKSPACE/bridge-source" "$RUNNER_TEMP/ctr06-linux/arcforges-center" "$RUNNER_TEMP/ctr06-linux/arcforges-ctr06-bridge-8e5-linux-amd64.zip"
           cp "$RUNNER_TEMP/ctr06-release/cloud-0.1.0-ci.615.1.tar.gz" "$RUNNER_TEMP/ctr06-linux/cloud-0.1.0-ci.615.1.tar.gz"
       - id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctr06-bridge-linux-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -577,22 +602,22 @@ jobs:
     if: >-
       !cancelled() && needs.ctr06-bridge-assets-state.result == 'success'
       && needs.ctr06-bridge-assets-state.outputs.windows-present == 'false'
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 15
     permissions:
       contents: read
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: 8e5f6e26aa97b123d9f60b91f780364a094e74cd
           path: bridge-source
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.3"
           cache-dependency-path: bridge-source/center/go.sum
@@ -625,7 +650,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Native bridge seal failed' }
           } finally { Pop-Location }
       - id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ctr06-bridge-windows-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ctr06-windows/arcforges-ctr06-bridge-8e5-windows-amd64.zip
@@ -643,7 +668,7 @@ jobs:
       && (needs.ctr06-bridge-assets-state.outputs.windows-present == 'true' || needs.ctr06-bridge-windows-asset.result == 'success')
     needs:
       [candidate, ctr06-bridge-assets-state, ctr06-bridge-linux-asset, ctr06-bridge-windows-asset]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     environment: cloudflare
     concurrency:
@@ -653,21 +678,21 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.candidate.outputs.artifact-id }}
           path: artifacts/candidate
           merge-multiple: true
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.ctr06-bridge-assets-state.outputs.linux-present == 'false'
         with:
           artifact-ids: ${{ needs.ctr06-bridge-linux-asset.outputs.artifact-id }}
@@ -678,7 +703,7 @@ jobs:
         run: |
           python eng/verification/ctr06_bridge_bundle.py verify linux "$GITHUB_WORKSPACE/artifacts/ctr06-linux/arcforges-ctr06-bridge-8e5-linux-amd64.zip"
           node tooling/project.ts verify-bridge-asset linux
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.ctr06-bridge-assets-state.outputs.windows-present == 'false'
         with:
           artifact-ids: ${{ needs.ctr06-bridge-windows-asset.outputs.artifact-id }}
@@ -731,7 +756,7 @@ jobs:
           gh release create "cloud-${VERSION}" "${assets[@]}" --target "$GITHUB_SHA" --title "Cloud ${VERSION}" --prerelease --generate-notes
       - name: Preserve deployment evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cloudflare-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -746,18 +771,18 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
       && inputs.proof != 'none' && inputs.proof != 'deploy'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     environment: cloudflare
     concurrency:
       group: cloudflare-proof
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -786,7 +811,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
       && inputs.proof == 'deploy'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -802,10 +827,10 @@ jobs:
       artifact-id: ${{ steps.gate.outputs.artifact-id }}
       artifact-digest: ${{ steps.gate.outputs.artifact-digest }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
@@ -823,7 +848,7 @@ jobs:
       && inputs.proof == 'deploy' && needs.proof-gate.result == 'success'
       && needs.proof-access.result == 'success'
     needs: [proof-gate, proof-access]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     environment: cloudflare
     concurrency:
@@ -839,11 +864,11 @@ jobs:
       ARCFORGES_CANDIDATE_RUN_NUMBER: ${{ needs.proof-gate.outputs.run-number }}
       ARCFORGES_CANDIDATE_RUN_ATTEMPT: ${{ needs.proof-gate.outputs.run-attempt }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
@@ -889,7 +914,7 @@ jobs:
           PROOF_BOOTSTRAP_EXPIRES_AT: ${{ inputs.bootstrap_expires_at }}
       - name: Preserve proof deployment evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: proof-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |

@@ -108,7 +108,7 @@ export async function sealSecurityBridge(
   const input = actualBridgeProducer(root, source);
   // The checked-in active admission must bind this exact bootstrap producer closure.
   releaseProfile(root);
-  assert.equal(process.version, "v24.21.0");
+  assert.equal(process.version, "v26.13.1");
   assert.equal(path.basename(go), "go");
   const sealCompiler = driver("verify-compiler", {
     platform: "linux",

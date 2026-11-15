@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Authentication of the authority collector is necessary but is not evidence of complete authority.
 import assert from "node:assert/strict";
-import { createHash, createPublicKey, verify, type JsonWebKey } from "node:crypto";
+import { createHash, createPublicKey, verify, type webcrypto } from "node:crypto";
 import { object, parseDocument } from "./provenance.ts";
+
+type JsonWebKey = webcrypto.JsonWebKey;
 
 const issuer = "https://token.actions.githubusercontent.com";
 const jwksUrl = `${issuer}/.well-known/jwks`;

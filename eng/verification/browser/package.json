@@ -10,12 +10,12 @@
     "url": "https://github.com/ArcForges/Cloud.git"
   },
   "engines": {
-    "node": ">=24.21.0 <25",
-    "npm": ">=11.19.0 <12"
+    "node": ">=26.13.1 <27",
+    "npm": ">=12.2.2 <13"
   },
-  "packageManager": "npm@11.19.0",
+  "packageManager": "npm@12.2.2",
   "dependencies": {
-    "playwright-core": "1.63.0"
+    "playwright-core": "1.65.1"
   },
   "arcforges": {
     "licenceBoundary": "AGPL"

@@ -4,10 +4,17 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const root = path.resolve(import.meta.dirname, "..");
 export const candidateDir = path.join(root, "artifacts", "candidate");
 export const wrangler = path.join(root, "node_modules", "wrangler", "bin", "wrangler.js");
+
+export function toolArguments(command: string, args: readonly string[]): string[] {
+  return command === process.execPath && args[0] === wrangler
+    ? ["--import", pathToFileURL(path.join(root, "tooling/wrangler-init.ts")).href, ...args]
+    : [...args];
+}
 
 export function gitEnvironment(): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
@@ -15,7 +22,7 @@ export function gitEnvironment(): NodeJS.ProcessEnv {
 
 export async function run(command: string, args: string[], capture = false): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(command, toolArguments(command, args), {
       cwd: root,
       windowsHide: true,
       stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit",

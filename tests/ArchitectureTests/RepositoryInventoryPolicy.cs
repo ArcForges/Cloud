@@ -175,7 +175,7 @@ internal static class NamingWiring
         }
 
         var locked = lockfile.RootElement.GetProperty("dependencies");
-        bool lockedVersion = locked.TryGetProperty("net10.0", out var framework)
+        bool lockedVersion = locked.TryGetProperty("net11.0", out var framework)
             && framework.TryGetProperty("ArcForges.Contracts.Validation", out var entry)
             && entry.TryGetProperty("type", out var type) && type.GetString() == "Direct"
             && entry.TryGetProperty("resolved", out var resolved) && resolved.GetString() == version;

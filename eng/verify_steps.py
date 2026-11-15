@@ -166,7 +166,7 @@ ACTIONLINT = (
     "echo \"$sum  $t.part\" | sha256sum --check --quiet; mv \"$t.part\" \"$t\"; fi; "
     "echo \"$sum  $t\" | sha256sum --check --quiet; "
     "mkdir -p \"$d/actionlint-$v\"; tar -xzf \"$t\" -C \"$d/actionlint-$v\" actionlint; "
-    "\"$d/actionlint-$v/actionlint\" -color"
+    "\"$d/actionlint-$v/actionlint\" -config-file eng/actionlint.yaml -color"
 )
 
 # ci.yml `candidate`, from the clean checkout CI builds it from; the image tag is removed after the verified build. The
@@ -241,6 +241,8 @@ def linux(step_id: str, cmd: str, timeout: int, *, center_go: bool = False,
 
 
 STEPS = [
+    win("win-toolchain", ["python", "eng/check_toolchain.py"], 60),
+    win("win-toolchain-tests", ["python", "-m", "unittest", "discover", "-s", "eng", "-p", "test_toolchain.py"], 60),
     # ci.yml source (windows-latest)
     win("win-npm-ci", pwsh(f"node (node -p \"{_BUNDLED_NPM}\") ci --ignore-scripts"), 300),
     win("win-restore", ["dotnet", "restore", "Cloud.slnx", "--locked-mode"], 600),
@@ -256,6 +258,8 @@ STEPS = [
     linux("clone-identity", "set -e; git config remote.origin.url https://github.com/ArcForges/Cloud.git; "
         "git checkout -q -B arcforges-verify {sha}; git update-ref refs/remotes/origin/main {base}", 60),
     linux("fresh-intermediates", FRESH_INTERMEDIATES, 60),
+    linux("linux-toolchain", "python eng/check_toolchain.py", 60),
+    linux("linux-toolchain-tests", "python -m unittest discover -s eng -p test_toolchain.py", 60),
     linux("npm-ci", "npm ci --ignore-scripts", 300),
     # Reuse this host's pinned 615.1 carrier when available; otherwise fetch
     # that one durable carrier, verify it and seal the Linux asset.

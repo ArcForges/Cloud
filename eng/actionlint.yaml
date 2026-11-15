@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Official hosted label added after actionlint 1.7.12's built-in runner inventory.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

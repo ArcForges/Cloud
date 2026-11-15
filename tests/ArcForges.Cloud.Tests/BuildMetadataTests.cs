@@ -41,7 +41,7 @@ public sealed class BuildMetadataTests
         foreach (var project in assemblies)
         {
             var name = Path.GetFileName(project);
-            using var stream = File.OpenRead(Path.Combine(root, project, "bin/Release/net10.0", name + ".dll"));
+            using var stream = File.OpenRead(Path.Combine(root, project, "bin/Release/net11.0", name + ".dll"));
             using var pe = new PEReader(stream);
             var reader = pe.GetMetadataReader();
             var actual = new Dictionary<string, string?>();

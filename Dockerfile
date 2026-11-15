@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-FROM mcr.microsoft.com/dotnet/sdk:10.0.403-noble-aot@sha256:c45158dabdcffc8409ef46c9431c16b36d9419405b51fd29261fa8a6af3f516f AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0.100-resolute-aot@sha256:f3264ae0bf11e2062b9650e0822d20c999320ac1685fe3acf4b7c17d0881af85 AS build
 WORKDIR /source
 # Official Go archive is pinned and verified; no toolchain auto-download or mutable base tag.
 RUN curl --fail --silent --show-error --location https://go.dev/dl/go1.27.4.linux-amd64.tar.gz -o /tmp/go.tar.gz \
@@ -32,7 +32,7 @@ RUN go mod download && go mod verify && identity=github.com/ArcForges/Cloud/cent
     -ldflags="-s -w -X $identity.appVersion=${APP_VERSION} -X $identity.sourceCommit=${SOURCE_COMMIT} -X $identity.sourceDirty=${SOURCE_DIRTY} -X $identity.buildKind=${BUILD_KIND} -X $identity.buildID=${BUILD_ID} -X $identity.pipelineRun=${PIPELINE_RUN} -X $identity.sourceEpoch=${SOURCE_EPOCH}" \
     -o /out/arcforges-center ./cmd/arcforges-center && test -x /out/arcforges-center
 
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0.14-noble-chiseled@sha256:4309626281bfe550c0f6bb4242c435cd5cdabed1d05a5bc5843f659336f53296
+FROM mcr.microsoft.com/dotnet/runtime-deps:11.0.0-resolute-chiseled@sha256:24534e1f18024d3f8026061537fa21ba424f46cc0cdab4297c5528937b1ae960
 ARG SOURCE_REVISION=local
 LABEL org.opencontainers.image.source="https://github.com/ArcForges/Cloud" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \

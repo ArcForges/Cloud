@@ -56,9 +56,9 @@ FUZZ_TARGETS = (
 )
 FUZZ_TIME = "10s"
 TEST_TIMEOUT = "10m"
-# PostgreSQL 18.4 (the official Alpine image), pinned by digest: the integration server of the Linux leg and the two servers of
+# PostgreSQL 18.7 (the official Alpine 3.24 image), pinned by digest: the integration server of the Linux leg and the two servers of
 # the restore drill.
-POSTGRES_IMAGE = "postgres:18-alpine@sha256:1b1689b20d16a014a3d195653381cf2caa75a41a92d93b255a9d6ea29fd353aa"
+POSTGRES_IMAGE = "postgres:18.7-alpine3.24@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015"
 
 
 def say(message: str) -> None:

@@ -90,6 +90,25 @@ export function run(
     stdio: [input ? "pipe" : "ignore", capture ? "pipe" : "inherit", "inherit"],
   }) as Buffer;
 }
+
+function historicalNpm(source: string, args: string[], capture = false): Buffer {
+  const selected = process.env.ARCFORGES_CTR06_HISTORICAL_NODE;
+  assert(selected && path.isAbsolute(selected), "Select the preserved Node for the frozen 8e5 source");
+  const node = realpathSync(selected);
+  assert(lstatSync(node).isFile());
+  assert.equal(run(node, ["--version"], source, true).toString("utf8").trim(), "v24.21.0");
+  const npm = path.resolve(path.dirname(node), "../lib/node_modules/npm/bin/npm-cli.js");
+  assert(lstatSync(npm).isFile());
+  const result = execFileSync(node, [npm, ...args], {
+    cwd: source,
+    windowsHide: true,
+    timeout: 600000,
+    maxBuffer: 256 * 1024 * 1024,
+    env: { ...childEnvironment(), PATH: path.dirname(node) + path.delimiter + process.env.PATH },
+    stdio: ["ignore", capture ? "pipe" : "inherit", "inherit"],
+  }) as Buffer;
+  return result;
+}
 export function driver(operation: string, input: unknown) {
   return JSON.parse(
     run(
@@ -210,7 +229,7 @@ export function verifyToolAssemblies(
   identity: ReturnType<typeof actualBridgeProducer>["identity"],
 ) {
   const sdk = run("dotnet", ["--version"], root, true).toString("utf8").trim();
-  assert.equal(sdk, "10.0.403");
+  assert.equal(sdk, "11.0.100");
   const inspect = path.join(work, "metadata-verifier");
   mkdirSync(inspect, { mode: 0o700 });
   copyFileSync(
@@ -219,11 +238,11 @@ export function verifyToolAssemblies(
   );
   writeFileSync(
     path.join(inspect, "Verifier.csproj"),
-    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup></Project>\n',
+    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net11.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup></Project>\n',
   );
   writeFileSync(
     path.join(inspect, "global.json"),
-    '{"sdk":{"version":"10.0.403","rollForward":"disable"}}\n',
+    '{"sdk":{"version":"11.0.100","rollForward":"disable"}}\n',
   );
   writeFileSync(
     path.join(inspect, "NuGet.Config"),
@@ -247,7 +266,7 @@ export function verifyToolAssemblies(
   return JSON.parse(
     run(
       "dotnet",
-      [path.join(inspect, "bin/Release/net10.0/Verifier.dll"), tool, expected],
+      [path.join(inspect, "bin/Release/net11.0/Verifier.dll"), tool, expected],
       inspect,
       true,
     ).toString("utf8"),
@@ -270,7 +289,7 @@ export async function buildSecurityBridge(
   const input = actualBridgeProducer(root, source);
   // The checked-in active admission must bind this exact bootstrap producer closure.
   releaseProfile(root);
-  assert.equal(process.version, "v24.21.0", "Select the pinned Node release");
+  assert.equal(process.version, "v26.13.1", "Select the pinned Node release");
   const output = outputDirectory(outputName);
   const work = path.join(output, "work");
   const sealed = path.join(output, "sealed");
@@ -340,11 +359,11 @@ export async function buildSecurityBridge(
   const toolContext = path.join(work, "tool-context");
   const toolInputs = driver("tool-context", { source, destination: toolContext });
   assert.equal(
-    run("npm", ["--version"], source, true).toString("utf8").trim(),
+    historicalNpm(source, ["--version"], true).toString("utf8").trim(),
     "11.19.0",
     "Select the pinned npm release",
   );
-  run("npm", ["ci", "--ignore-scripts"], source);
+  historicalNpm(source, ["ci", "--ignore-scripts"]);
   const legal = await securityBridgeLegal(source, root);
   stageSecurityBridgeNotices(source, legal);
   const image = `arcforges-ctr06-security-bridge:ci.${input.producer.runNumber}.${input.producer.runAttempt}`;
