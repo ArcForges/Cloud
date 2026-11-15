@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "5ac9a8f90108994ae7ab00fafa46c07e00e804d5",
+  "sourceCommit": "e66c610e27d5ad0ba13a6487fb0a7b1b5d4d7f5d",
   "manifests": ["package.json"],
   "inputs": {
     ".dockerignore": "bfa1fca35e292e1e790bcf1b92a6654722b9c8af04fd77304cc7307eb5eca7fe",
@@ -213,7 +213,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
     "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
     "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-    "eng/provenance/files.json": "a0de086c0c29b637172794d4ad7fa3cc6ace28f9adea7cfd6214eea246382888",
+    "eng/provenance/files.json": "14d663d6e8cf4311ca5b643f8086cb193daa2012b4bcd5388ed9d5afe96d05fa",
     "eng/provenance/records/arcnotes-build-identity-r2.json": "b8d0e4fc09bc66860ff6202658b00d1f9921e297d30a82d4be6a92786eadbcc4",
     "eng/provenance/records/arcnotes-build-identity-r3.json": "f7f829023166eacbd9bb765ea12150f37985a0e6bbc84414a2af210117ae0503",
     "eng/provenance/records/canonical-agpl-legal-r1.json": "98987bcce473aca114958dfe3d64880a72c87bb6b6e89ad9fcae84ce290c24ae",
@@ -556,13 +556,15 @@
     "tooling/wrangler-init.ts": "69f6301e63db59f25a53b6f0d6ac017bbcc762018251c7df9818dfac9cc4af72",
     "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
     "tools/ArcForges.Cloud.Generation/packages.lock.json": "a15c5517ab3c25a0e2448b69618fa9df7596e4794f1fc07ac1e7968aa91b5d01",
-    "wrangler.json": "914002252c6cda3d644f1ff9557d4edf3eee9d6f69fc2ba169f89e8d546f79e2"
+    "wrangler.json": "914002252c6cda3d644f1ff9557d4edf3eee9d6f69fc2ba169f89e8d546f79e2",
+    "eng/v2-migration/preflight.py": "98aea553e0399fed2462d4f3b7251016465313db6350e44874610b5e66646483",
+    "eng/v2-migration/test_preflight.py": "5e1f5adf49862e8200dbf04ff472236287c21df9761dfe879b3763e7ae11b7d7"
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Existing independent source/licence admission retained; author compatibility and exact-input update",
-    "date": "2026-11-15",
-    "rationale": "Existing source/licence admission retained; author compatibility and exact-input successor at 5ac9a8f90108994ae7ab00fafa46c07e00e804d5. Direct dev-only unenv2.0.0-rc.24 is the exact Wrangler/preset-required defineEnv API; the global stable-v1 override and obsolete owned import hook were removed, along with four orphan lock entries. No other locked package entry changed. Windows MCP39448: install without peer warnings, clean npm ci --ignore-scripts, both existing unenv tests, typecheck and real production/proof Wrangler dry-runs returned0. MCP38204: the original production-bundle C# test passed1/1 with0skip; MCP39704: affected C# guards passed17/17; MCP32792: proof-gate passed25/25 with0skip and its format check returned0. Fresh production output is160896bytes and byte-identical to the preceding reviewed Worker; all27 prior input hashes and four generator package identities remain equal, so its closed membership is retained without claiming a new metafile. Original licences, legal material, native controls and frozen8e5 facts are unchanged. No fresh independent review, final full native success, publication or deployment is asserted. The three protected workflow slices only advance previously authorized CI selector hashes; their mutation/negative guards remain unchanged. R5 permits only the exact new receipt path, exact public provenance keys and two existing immutable public digests. The new receipt supersedesr4; r1-r4, r133 and every committed historical record retain original bytes.",
+    "reviewer": "Final-head independent review by OpenAI Codex /root/base_review is required; existing source and licence admissions retained.",
+    "date": "2026-11-16",
+    "rationale": "AFV2-BASE-01 adds only two original AGPL Python standard-library inventory/test inputs. No package, lockfile, compiler, runtime artifact, upstream source/licence changes. The sole pre-existing input hash update is eng/provenance/files.json, whose diff only classifies the three new tooling/docs files and this new receipt. The read-only preflight uses fixed SQL in a repeatable-read/read-only transaction, aggregate metadata output and fixed diagnostics; its tests use the existing pinned disposable PostgreSQL context. Eight actual H-22 PostgreSQL fixture tests passed at fdc1b282 (same Python bytes as e66c610e). This input-only successor preserves the complete existing package coordinate/integrity map and all historical receipts. Final full native profiles and independent delta review remain required; no publication, deployment, schema11 authority or migration is claimed.",
     "inputs": {
       ".dockerignore": "bfa1fca35e292e1e790bcf1b92a6654722b9c8af04fd77304cc7307eb5eca7fe",
       ".github/workflows/ci.yml": "5bfd0199d8c419bbd6b3fa1088cafb97cf554d3d42cfac08d78d02c42dad3d6c",
@@ -773,7 +775,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
       "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
       "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-      "eng/provenance/files.json": "a0de086c0c29b637172794d4ad7fa3cc6ace28f9adea7cfd6214eea246382888",
+      "eng/provenance/files.json": "14d663d6e8cf4311ca5b643f8086cb193daa2012b4bcd5388ed9d5afe96d05fa",
       "eng/provenance/records/arcnotes-build-identity-r2.json": "b8d0e4fc09bc66860ff6202658b00d1f9921e297d30a82d4be6a92786eadbcc4",
       "eng/provenance/records/arcnotes-build-identity-r3.json": "f7f829023166eacbd9bb765ea12150f37985a0e6bbc84414a2af210117ae0503",
       "eng/provenance/records/canonical-agpl-legal-r1.json": "98987bcce473aca114958dfe3d64880a72c87bb6b6e89ad9fcae84ce290c24ae",
@@ -1116,7 +1118,9 @@
       "tooling/wrangler-init.ts": "69f6301e63db59f25a53b6f0d6ac017bbcc762018251c7df9818dfac9cc4af72",
       "tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj": "88a4497f1265ccaab31aca22096479c5155b0e827f5fe35edd8030469a67ef97",
       "tools/ArcForges.Cloud.Generation/packages.lock.json": "a15c5517ab3c25a0e2448b69618fa9df7596e4794f1fc07ac1e7968aa91b5d01",
-      "wrangler.json": "914002252c6cda3d644f1ff9557d4edf3eee9d6f69fc2ba169f89e8d546f79e2"
+      "wrangler.json": "914002252c6cda3d644f1ff9557d4edf3eee9d6f69fc2ba169f89e8d546f79e2",
+      "eng/v2-migration/preflight.py": "98aea553e0399fed2462d4f3b7251016465313db6350e44874610b5e66646483",
+      "eng/v2-migration/test_preflight.py": "5e1f5adf49862e8200dbf04ff472236287c21df9761dfe879b3763e7ae11b7d7"
     },
     "checks": [
       "locked-restore",
@@ -1127,7 +1131,7 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "The two owned product executables and Worker boundaries are preserved. The selected compiler/tool routes and source/licence records are admitted; final Native AOT candidate and any full native status must be reported only from their actual execution. No deployment activation.",
+    "runtimeAssessment": "Read-only operator tooling and explicit disposable tests add no shipped runtime dependency. Existing native/runtime admission is unchanged; all original full checks remain mandatory.",
     "maintenance": "The complete NuGet, root and isolated-browser npm, Go selected graphs and original legal evidence are retained. Exact fixed-commit and upstream metadata facts remain explicit. Current user scope requires no additional transitive-version or untagged-Go approval work."
   },
   "closure": {
@@ -1941,7 +1945,7 @@
   "buildToolPrereleases": {
     "unenv": "2.0.0-rc.24"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/afv2-env-01-r5.json",
+  "reviewRecord": "eng/policy/dependency-reviews/afv2-base-01-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

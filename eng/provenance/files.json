@@ -801,6 +801,7 @@
     "eng/policy/dependency-reviews/af-ctr-06-r7.json",
     "eng/policy/dependency-reviews/af-ctr-06-r8.json",
     "eng/policy/dependency-reviews/af-ctr-06-r9.json",
+    "eng/policy/dependency-reviews/afv2-base-01-r1.json",
     "eng/policy/dependency-reviews/afv2-env-01-r1.json",
     "eng/policy/dependency-reviews/afv2-env-01-r2.json",
     "eng/policy/dependency-reviews/afv2-env-01-r3.json",
