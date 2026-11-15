@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "contracts-native-tools-afv2-env-01-r1",
+  "kind": "source",
+  "sourceRepository": "https://github.com/ArcForges/Contracts",
+  "sourceCommit": "0b9114435bd4677c256714b864b8cb8f970c2d57",
+  "sourcePaths": [
+    "eng/native_toolchain.py",
+    "eng/native-toolchain.json",
+    "tests/tooling/test_native_toolchain.py"
+  ],
+  "licence": {
+    "spdx": "Apache-2.0",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "finding": "Contracts original Apache tool-controller source is reused verbatim; GNU sources and generated compatibility patch remain separate external tool-cache material with their own terms."
+      }
+    ],
+    "scope": "Separate build-controller implementation, selector and tests. No GNU implementation is copied into Cloud source or product packages.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright ArcForges contributors. Apache-2.0."
+  ],
+  "targets": [
+    {
+      "path": "eng/native_toolchain.py",
+      "sha256": "3496595ef25b20304896015199739005ac8192714e29e764a17d5184edfdca84",
+      "normalization": "lf"
+    },
+    {
+      "path": "eng/native-toolchain.json",
+      "sha256": "bf019c3aadd5e2e1fa6170ce52a463ce3b751f86b3458a17cd93a7fce8ea1eaa",
+      "normalization": "lf"
+    },
+    {
+      "path": "tests/tooling/test_native_toolchain.py",
+      "sha256": "926c185797ec0867399e751dc52c3eb116e14c8db08d35f6724cf227848e4200",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Improve",
+  "verification": {
+    "kind": "byte-match-and-owner-adaptation",
+    "command": "Compare exact source Git objects and target LF hashes; review the test-only owner integration and check selected native routes and unchanged existing Go/AOT coverage.",
+    "expected": "Controller and selector match Contracts0b911443; its offline Windows test is adapted from go_bindings to the Cloud center environment. GNU tool sources, patch and licences remain external.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Contracts native tool-controller source, selector and tests: copyright ArcForges contributors, Apache-2.0. LLVM and GNU tools execute separately with full original sources and licences retained in their tool cache.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/ContractsGo.LICENSE.txt"
+    ],
+    "distribution": "Source/tooling only; no GNU program implementation is shipped in Cloud product artifacts.",
+    "reason": "Preserve the original Apache source terms and explicit external-tool boundary."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud build tooling maintainer",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "supersedes": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Independent consumer source and licence review",
+    "reviewedOn": "2026-11-15",
+    "decision": "approved",
+    "rationale": "Independent source, original licence, exact target/profile hash and immutable historical-input review passed at source 8e104f48063eaf7d01f32d316536aa8201f9870f. Contracts0b native controller/selector, Web829cf Miniflare bridge, original .NET11 source297acf legal documents and the23module runtime legal closure were checked against original bytes. This registers the completed source/licence review. It does not assert a full native status, a successful final container build, a Cloud Containers runtime run, publication or deployment. The user narrowed completion to the necessary .NET/C#, Go and TypeScript upgrades with existing compilation/tests; no additional transitive-version or untagged-Go qualification is requested.",
+    "baselineCommit": "8e104f48063eaf7d01f32d316536aa8201f9870f",
+    "reconciliation": false
+  }
+}

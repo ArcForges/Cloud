@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "web-miniflare-compat-afv2-env-01-r1",
+  "kind": "source",
+  "sourceRepository": "https://github.com/ArcForges/Web",
+  "sourceCommit": "829cf665f52e595b767c0a209815096f448912af",
+  "sourcePaths": [
+    "tooling/wrangler-init.ts"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Original Web AGPL-3.0-only terms; the exact stable-Miniflare V4 API bridge is adapted into the same-licence Cloud preloader."
+      }
+    ],
+    "scope": "Build/development invocation compatibility only; no copied adapter implementation is emitted into the production Worker.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright ArcForges contributors. AGPL-3.0-only."
+  ],
+  "targets": [
+    {
+      "path": "tooling/wrangler-init.ts",
+      "sha256": "98a5513bbf4fd012d15a7996fce7f9adb26de3ff515d2865b84a876f380d43ea",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Improve",
+  "verification": {
+    "kind": "owner-adaptation",
+    "command": "Review Web829cf665 exact Miniflare V4 bridge and Cloud preloader integration; typecheck and actual Cloud nodejs_compat Wrangler output.",
+    "expected": "Exact Miniflare4 guard and only its two missing V5 API aliases; original Cloud unenv adapter and BLAKE3 ordering remain intact. Vendor package bytes are unchanged.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Miniflare V4 invocation compatibility bridge adapted from ArcForges Web829cf665f52e595b767c0a209815096f448912af; copyright ArcForges contributors, AGPL-3.0-only.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "LICENSE"
+    ],
+    "distribution": "Build/development source only; absent from the emitted Worker.",
+    "reason": "Preserve exact source identity, authorship and compatible original terms."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud build tooling maintainer",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "supersedes": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Independent consumer source and licence review",
+    "reviewedOn": "2026-11-15",
+    "decision": "approved",
+    "rationale": "Independent source, original licence, exact target/profile hash and immutable historical-input review passed at source 8e104f48063eaf7d01f32d316536aa8201f9870f. Contracts0b native controller/selector, Web829cf Miniflare bridge, original .NET11 source297acf legal documents and the23module runtime legal closure were checked against original bytes. This registers the completed source/licence review. It does not assert a full native status, a successful final container build, a Cloud Containers runtime run, publication or deployment. The user narrowed completion to the necessary .NET/C#, Go and TypeScript upgrades with existing compilation/tests; no additional transitive-version or untagged-Go qualification is requested.",
+    "baselineCommit": "8e104f48063eaf7d01f32d316536aa8201f9870f",
+    "reconciliation": false
+  }
+}
