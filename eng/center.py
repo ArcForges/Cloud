@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import importlib.util
+from functools import lru_cache
 import json
 import os
 from pathlib import Path
@@ -97,14 +99,25 @@ def go(*args: str, cwd: Path = CENTER, capture: bool = False, env: dict[str, str
     return result.stdout if capture else ""
 
 
+@lru_cache(maxsize=1)
+def native_toolchain():
+    # This module is also loaded by file path from the bridge controls. Resolve
+    # its reviewed sibling explicitly, without depending on sys.path or PATH.
+    spec = importlib.util.spec_from_file_location("arcforges_cloud_native_toolchain", ROOT / "eng/native_toolchain.py")
+    if spec is None or spec.loader is None:
+        raise SystemExit("[center] the owned native tool controller is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def go_environment(base: dict[str, str] | None = None) -> dict[str, str]:
     """Current Linux race/cgo uses the same verified compiler and BFD route as CI."""
     selected = dict(ENV if base is None else base)
     if WINDOWS:
         selected["CGO_ENABLED"] = "0"
         return selected
-    from native_toolchain import aot_environment
-    return aot_environment(selected)
+    return native_toolchain().aot_environment(selected)
 
 
 def digest(path: Path) -> str:

@@ -386,7 +386,10 @@ class CenterGoSelectionTest(unittest.TestCase):
                 self.assertNotIn("ARCFORGES_CENTER_GO", center.ENV)
                 self.assertNotIn("ARCFORGES_CTR06_BRIDGE_GO", center.ENV)
                 self.assertEqual(os.environ.get("PATH", ""), before_path)
-                with mock.patch.object(center.subprocess, "run",
+                # This case owns Go executable/parent-environment selection;
+                # native compiler admission has its separate guard tests.
+                with mock.patch.object(center, "go_environment", return_value=center.ENV), \
+                        mock.patch.object(center.subprocess, "run",
                                        return_value=types.SimpleNamespace(returncode=0, stdout="ok\n")) as run:
                     center.go("go", "version", capture=True)
                     center.go("gofmt", "-l", ".", capture=True)
