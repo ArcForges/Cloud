@@ -100,6 +100,11 @@ jobs:
             center/go.sum
             center/tools/go.sum
       # The same entry point as both verification legs: the race detector and fuzzing on Linux, the native build on both.
+      - name: Select the pinned Linux cgo toolchain
+        if: runner.os == 'Linux'
+        run: python eng/native_toolchain.py install
+      - name: Verify native tool selection guards
+        run: python -m unittest discover -s tests/tooling -p test_native_toolchain.py
       - name: Verify the Go center
         run: python eng/center.py check
       - run: node tooling/project.ts licence-evaluated
@@ -233,8 +238,9 @@ jobs:
         run: |
           cd center
           go mod download
-          go build ./...
-          go test -count=1 -run '^$' ./...
+          python ../eng/native_toolchain.py install
+          python ../eng/native_toolchain.py run -- go build ./...
+          python ../eng/native_toolchain.py run -- go test -count=1 -run '^$' ./...
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:${{ matrix.language }}

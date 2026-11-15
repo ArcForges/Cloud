@@ -90,11 +90,21 @@ def selected_center_tool(name: str) -> str:
 
 def go(*args: str, cwd: Path = CENTER, capture: bool = False, env: dict[str, str] | None = None) -> str:
     argv = (selected_center_tool(args[0]), *args[1:])
-    result = subprocess.run(argv, cwd=cwd, env=env or ENV, text=True, encoding="utf-8",
+    result = subprocess.run(argv, cwd=cwd, env=go_environment(env or ENV), text=True, encoding="utf-8",
                             stdout=subprocess.PIPE if capture else None)
     if result.returncode != 0:
         raise SystemExit(f"[center] failed ({result.returncode}): {' '.join(args)}")
     return result.stdout if capture else ""
+
+
+def go_environment(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Current Linux race/cgo uses the same verified compiler and BFD route as CI."""
+    selected = dict(ENV if base is None else base)
+    if WINDOWS:
+        selected["CGO_ENABLED"] = "0"
+        return selected
+    from native_toolchain import aot_environment
+    return aot_environment(selected)
 
 
 def digest(path: Path) -> str:

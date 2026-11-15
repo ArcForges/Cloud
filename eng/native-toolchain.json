@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux-amd64",
+  "status": "ready",
+  "pendingReason": null,
+  "llvm": {
+    "version": "23.1.5",
+    "sourceCommit": "392dfff97d29b59d77e5cac6d4b6ef2585fe7117",
+    "archive": {
+      "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.5/LLVM-23.1.5-Linux-X64.tar.xz",
+      "sha256": "f72edb0b36580ece7f52e23858f00c18fad4e87395ea7ad05d7e55c39f8fc78a",
+      "size": 2014093084,
+      "root": "LLVM-23.1.5-Linux-X64"
+    },
+    "binaries": {
+      "bin/clang-23": "2033aa32d783adec2a3d30a5d9229b60d9a7594ad73e19e87c3fd2b5ed21a9c2",
+      "bin/llvm-objcopy": "5039c9e1564f86a04a27a3f27559585613c6c2a8adf63954845849d3938cf922"
+    },
+    "licences": [
+      {
+        "path": "licences/LLVM-LICENSE.TXT",
+        "url": "https://raw.githubusercontent.com/llvm/llvm-project/392dfff97d29b59d77e5cac6d4b6ef2585fe7117/llvm/LICENSE.TXT",
+        "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+      },
+      {
+        "path": "licences/CLANG-LICENSE.TXT",
+        "url": "https://raw.githubusercontent.com/llvm/llvm-project/392dfff97d29b59d77e5cac6d4b6ef2585fe7117/clang/LICENSE.TXT",
+        "sha256": "ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47"
+      },
+      {
+        "path": "licences/COMPILER-RT-LICENSE.TXT",
+        "url": "https://raw.githubusercontent.com/llvm/llvm-project/392dfff97d29b59d77e5cac6d4b6ef2585fe7117/compiler-rt/LICENSE.TXT",
+        "sha256": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d"
+      }
+    ]
+  },
+  "binutils": {
+    "version": "2.47",
+    "observedVersion": "2.47.20260726",
+    "sourceCommit": "6ce87bbc521cf46eaee9a1f7ef61cee2cdfb3e32",
+    "tag": "binutils-2_47",
+    "archive": {
+      "url": "https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz",
+      "sha256": "154ab23b60070e8f27013c22977f1129425d67d1e8acd6e13010e617811e4cff",
+      "size": 29034716,
+      "root": "binutils-2.47"
+    },
+    "signature": {
+      "url": "https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz.sig",
+      "sha256": "9fa42a8770ff1fdb3059a6d5c7b7030899acee58b343364bc42b6facfa35ce65",
+      "signer": "3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F",
+      "sourceAnnouncement": "https://sourceware.org/pipermail/binutils/2026-July/150449.html"
+    },
+    "patch": {
+      "mode": "external-build-tool-byte-edits-v1",
+      "reviewedCompatibilityPatchSha256": "b71b4b0de05c9428b2c48c02d7109e3cccc8eb52a6408ad371cb8408bc450229",
+      "licence": "GPL-3.0-or-later; external GNU tool and generated context patch, not Contracts implementation",
+      "files": [
+        {
+          "path": "ld/ldlang.c",
+          "beforeSha256": "c4c7fc300b329baec32aa9783ac6024066a56d94e32b25881c03b2979c49cb63",
+          "afterSha256": "3eb908a8d326b3e605713d8b16759c6802bf204c38f7b5c6acba9d276a2a145a",
+          "edits": [
+            {
+              "offset": 260748,
+              "length": 24,
+              "insert": ""
+            },
+            {
+              "offset": 2220,
+              "length": 26,
+              "insert": ""
+            }
+          ]
+        },
+        {
+          "path": "ld/mri.c",
+          "beforeSha256": "bd88bd23fd5d59dbf5b4edb4732d017cedb364db7d2fcc87cffbac68794d7e1a",
+          "afterSha256": "c34ea5048032750b463aa7a4636e85c6f111f1031742119e91b792db2bd48c21",
+          "edits": [
+            {
+              "offset": 7304,
+              "length": 25,
+              "insert": ""
+            },
+            {
+              "offset": 7300,
+              "length": 0,
+              "insert": " ATTRIBUTE_UNUSED"
+            },
+            {
+              "offset": 1416,
+              "length": 45,
+              "insert": ""
+            }
+          ]
+        }
+      ]
+    },
+    "configureArguments": [],
+    "makeTargets": ["all-binutils", "all-gas", "all-ld"],
+    "installTargets": ["install-binutils", "install-gas", "install-ld"],
+    "licences": [
+      {
+        "path": "COPYING",
+        "sha256": "231f7edcc7352d7734a96eef0b8030f77982678c516876fcb81e25b32d68564c"
+      },
+      {
+        "path": "COPYING.LIB",
+        "sha256": "56bdea73b6145ef6ac5259b3da390b981d840c24cb03b8e1cbc678de7ecfa18d"
+      },
+      {
+        "path": "COPYING3",
+        "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+      },
+      {
+        "path": "COPYING3.LIB",
+        "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c"
+      }
+    ]
+  }
+}

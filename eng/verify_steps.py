@@ -131,6 +131,7 @@ FINGERPRINT = {
         "python": "python --version",
         "docker": "docker version --format '{{.Server.Version}}'",
         "git": "git --version",
+        "native-tools": "python eng/native_toolchain.py check",
     },
 }
 
@@ -243,6 +244,7 @@ def linux(step_id: str, cmd: str, timeout: int, *, center_go: bool = False,
 STEPS = [
     win("win-toolchain", ["python", "eng/check_toolchain.py"], 60),
     win("win-toolchain-tests", ["python", "-m", "unittest", "discover", "-s", "eng", "-p", "test_toolchain.py"], 60),
+    win("win-native-tool-tests", ["python", "-m", "unittest", "discover", "-s", "tests/tooling", "-p", "test_native_toolchain.py"], 60),
     # ci.yml source (windows-latest)
     win("win-npm-ci", pwsh(f"node (node -p \"{_BUNDLED_NPM}\") ci --ignore-scripts"), 300),
     win("win-restore", ["dotnet", "restore", "Cloud.slnx", "--locked-mode"], 600),
@@ -260,6 +262,7 @@ STEPS = [
     linux("fresh-intermediates", FRESH_INTERMEDIATES, 60),
     linux("linux-toolchain", "python eng/check_toolchain.py", 60),
     linux("linux-toolchain-tests", "python -m unittest discover -s eng -p test_toolchain.py", 60),
+    linux("linux-native-tool-tests", "python -m unittest discover -s tests/tooling -p test_native_toolchain.py", 60),
     linux("npm-ci", "npm ci --ignore-scripts", 300),
     # Reuse this host's pinned 615.1 carrier when available; otherwise fetch
     # that one durable carrier, verify it and seal the Linux asset.

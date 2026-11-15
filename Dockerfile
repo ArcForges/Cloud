@@ -1,5 +1,26 @@
 # SPDX-License-Identifier: AGPL-3.0-only
+FROM python:3.15.2-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS native-tools
+# Distro packages bootstrap the separate tools; every product compilation selects
+# the archive-verified LLVM and source-verified GNU releases below.
+RUN apt-get update && apt-get install --no-install-recommends -y build-essential ca-certificates zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /source
+COPY eng/native_toolchain.py eng/native-toolchain.json ./eng/
+RUN python eng/native_toolchain.py install --destination /opt/arcforges-native-tools \
+    && cd /opt/arcforges-native-tools \
+    && find llvm-23.1.5 binutils-2.47 -type f -print0 | sort -z | xargs -0 sha256sum > installed.sha256
+
 FROM mcr.microsoft.com/dotnet/sdk:11.0.100-resolute-aot@sha256:f3264ae0bf11e2062b9650e0822d20c999320ac1685fe3acf4b7c17d0881af85 AS build
+COPY --from=native-tools /opt/arcforges-native-tools/llvm-23.1.5/ /opt/arcforges-native-tools/llvm-23.1.5/
+COPY --from=native-tools /opt/arcforges-native-tools/binutils-2.47/ /opt/arcforges-native-tools/binutils-2.47/
+COPY --from=native-tools /opt/arcforges-native-tools/installed.sha256 /opt/arcforges-native-tools/installed.sha256
+ENV PATH="/opt/arcforges-native-tools/llvm-23.1.5/bin:/opt/arcforges-native-tools/binutils-2.47/bin:${PATH}" CC=clang CXX=clang++
+RUN cd /opt/arcforges-native-tools && sha256sum --check --quiet installed.sha256 \
+    && test "$(readlink -f llvm-23.1.5/bin/clang)" = /opt/arcforges-native-tools/llvm-23.1.5/bin/clang-23 \
+    && test "$(readlink -f llvm-23.1.5/bin/clang++)" = /opt/arcforges-native-tools/llvm-23.1.5/bin/clang-23 \
+    && test "$(clang -print-prog-name=ld.bfd)" = /opt/arcforges-native-tools/binutils-2.47/bin/ld.bfd \
+    && cmp binutils-2.47/bin/ld binutils-2.47/bin/ld.bfd \
+    && clang --version && ld.bfd --version && llvm-objcopy --version
 WORKDIR /source
 # Official Go archive is pinned and verified; no toolchain auto-download or mutable base tag.
 RUN curl --fail --silent --show-error --location https://go.dev/dl/go1.27.4.linux-amd64.tar.gz -o /tmp/go.tar.gz \
@@ -20,6 +41,7 @@ ARG BUILD_ID
 ARG PIPELINE_RUN
 ARG SOURCE_EPOCH
 RUN test -n "$SOURCE_REVISION" && dotnet publish src/ArcForges.Cloud -c Release -r linux-x64 --no-restore \
+    -p:CppCompilerAndLinker=clang -p:CppLibCreator=ar -p:LinkerFlavor=bfd -p:ObjCopyName=llvm-objcopy \
     -p:CloudSourceArchive=true -p:SourceRevisionId="$SOURCE_COMMIT" -p:ArcForgesSourceCommit="$SOURCE_COMMIT" \
     -p:CloudSourceDirty="$SOURCE_DIRTY" -p:Version="$APP_VERSION" -p:ArcForgesBuildKind="$BUILD_KIND" \
     -p:ArcForgesBuildId="$BUILD_ID" -p:ArcForgesPipelineRun="$PIPELINE_RUN" -p:ArcForgesSourceDateEpoch="$SOURCE_EPOCH" \
