@@ -194,8 +194,8 @@ internal static class NamingWiring
 /// </summary>
 internal static class CiWiring
 {
-    private const string GitleaksPin = "zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f";
-    private const string DotnetPin = "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68";
+    private const string GitleaksPin = "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f";
+    private const string DotnetPin = "actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73";
 
     public static IReadOnlyList<string> Check(string workflow, string packageJson)
     {

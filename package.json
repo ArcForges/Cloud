@@ -67,7 +67,7 @@
     "typescript": "7.0.2",
     "wrangler": "4.162.0",
     "blake3-wasm": "3.0.0",
-    "unenv": "1.10.0"
+    "unenv": "2.0.0-rc.24"
   },
   "overrides": {
     "@c4312/blake3-internal": "3.0.0",
@@ -91,7 +91,6 @@
     "supports-color": "11.0.0",
     "undici": "8.12.4",
     "undici-types": "8.12.4",
-    "unenv": "1.10.0",
     "workerd": "1.20261114.1",
     "ws": "8.23.0",
     "youch": "4.1.1"

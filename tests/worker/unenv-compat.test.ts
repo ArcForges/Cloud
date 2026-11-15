@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defineEnv } from "../../tooling/unenv-compat.ts";
 
-test("native aliases and removals from the current preset survive stable environment merging", () => {
+test("native aliases and removals from the current preset survive environment merging", () => {
   const { env } = defineEnv({
     npmShims: true,
     presets: [
@@ -15,7 +15,7 @@ test("native aliases and removals from the current preset survive stable environ
   assert.equal(env.alias.debug, "debug");
   assert.equal(env.external.filter((name) => name === "node:crypto").length, 1);
   assert.equal(Object.hasOwn(env.inject, "process"), false);
-  assert.equal(env.polyfill.includes("unenv/runtime/polyfill/process"), false);
+  assert.equal(env.polyfill.includes("unenv/polyfill/process"), false);
 });
 
 test("unknown environment configuration fails instead of silently changing compatibility", () => {
