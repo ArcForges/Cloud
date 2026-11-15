@@ -93,7 +93,10 @@ export function run(
 
 function historicalNpm(source: string, args: string[], capture = false): Buffer {
   const selected = process.env.ARCFORGES_CTR06_HISTORICAL_NODE;
-  assert(selected && path.isAbsolute(selected), "Select the preserved Node for the frozen 8e5 source");
+  assert(
+    selected && path.isAbsolute(selected),
+    "Select the preserved Node for the frozen 8e5 source",
+  );
   const node = realpathSync(selected);
   assert(lstatSync(node).isFile());
   assert.equal(run(node, ["--version"], source, true).toString("utf8").trim(), "v24.21.0");

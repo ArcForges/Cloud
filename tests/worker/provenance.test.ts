@@ -700,6 +700,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/afv2-env-01-r1.json",
     "eng/policy/dependency-reviews/afv2-env-01-r2.json",
     "eng/policy/dependency-reviews/afv2-env-01-r3.json",
+    "eng/policy/dependency-reviews/afv2-env-01-r4.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
