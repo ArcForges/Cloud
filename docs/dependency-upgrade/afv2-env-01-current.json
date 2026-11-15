@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "task": "AFV2-ENV-01",
   "repository": "Cloud",
-  "sourceBaseline": "8e104f48063eaf7d01f32d316536aa8201f9870f",
+  "sourceBaseline": "307ddd7375e6d162e784b538fdd0c6fbdaf6b972",
   "observedOn": "2026-11-15",
   "reviewState": "source-and-licence-reviewed; actual compilation and existing test results recorded separately",
   "inputs": {
@@ -37,7 +37,8 @@
     "gnuActualBanner": "2.47.20260726",
     "nativeSelector": "eng/native-toolchain.json",
     "currentNativeRoute": "LLVM clang/clang++, GNU ld.bfd/ld/ar/as and LLVM llvm-objcopy; source and archive receipts checked before child tools. Windows Go remains CGO_ENABLED=0. Docker copies only verified installed tool prefixes into its SDK stage.",
-    "historicalNode": "24.21.0/npm11.19.0, explicit frozen8e5 reproduction only"
+    "historicalNode": "24.21.0/npm11.19.0, explicit frozen8e5 reproduction only",
+    "ciNpmSelection": "Every current CI Node entry installs npm12.2.2 into that actual Node installation and verifies its absolute CLI before consumers; the frozen Node24 installer is retained."
   },
   "nuget": [
     {
@@ -15804,7 +15805,8 @@
   "authorEvidence": [
     "Windows locked restore/Release build0warnings0errors; both Go module tidy/verify and allcenterGo tests passed.",
     "Windows typecheck, toolchain refusal/layout tests,2unenv adapter cases, affected bridge/OIDC tests and actual nodejs_compat Wrangler production dry-run passed.",
-    "H22 actual SDK11/Node26/npm12/Python3.15 preflight and4toolchain tests passed at34fa; network-none SDK container accepts all8verifiednative tools with no missing shared libraries."
+    "H22 actual SDK11/Node26/npm12/Python3.15 preflight and4toolchain tests passed at34fa; network-none SDK container accepts all8verifiednative tools with no missing shared libraries.",
+    "The unchanged25bridge-unit cases passed on native Linux after the explicit file-loader fix:24passes and1existing optional offline-native-bundle fixture skip; this is author diagnostic evidence, not a final native status."
   ],
   "acceptance": "Independent source/licence review completed. Author compilation and existing test evidence is recorded separately and faithfully; no final native success status, merged PR, publication or deployment is asserted here.",
   "summary": {
