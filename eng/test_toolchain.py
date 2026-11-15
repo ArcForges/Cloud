@@ -4,10 +4,28 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from check_toolchain import exact, sdk_root
+from check_toolchain import bundled_npm, exact, sdk_root
 
 
 class ToolchainSelection(unittest.TestCase):
+    def test_bundled_npm_uses_each_official_layout_and_rejects_missing_bundle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for system, binary, entry in (
+                ("nt", "node.exe", "node_modules/npm/bin/npm-cli.js"),
+                ("posix", "bin/node", "lib/node_modules/npm/bin/npm-cli.js"),
+            ):
+                install = root / system
+                executable = install / binary
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.touch()
+                with self.assertRaises(ValueError):
+                    bundled_npm(executable, system)
+                npm = install / entry
+                npm.parent.mkdir(parents=True)
+                npm.touch()
+                self.assertEqual(bundled_npm(executable, system), npm)
+
     def test_cli_selection_is_exact_among_patch_and_preview_sdks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

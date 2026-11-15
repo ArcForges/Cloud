@@ -32,6 +32,14 @@ def sdk_root(lines: str, version: str) -> Path:
     return roots[0].resolve(strict=True)
 
 
+def bundled_npm(executable: Path, system: str) -> Path:
+    root = executable.parent if system == "nt" else executable.parent.parent
+    npm = root / ("node_modules/npm/bin/npm-cli.js" if system == "nt" else "lib/node_modules/npm/bin/npm-cli.js")
+    if not npm.is_file() or not npm.resolve().is_relative_to(root.resolve()):
+        raise ValueError("Selected Node does not contain its pinned npm")
+    return npm.resolve()
+
+
 def check(tools: list[str]) -> dict:
     report = {"schemaVersion": 1, "repository": "Cloud", "tools": {}, "inputs": {}}
     if "python" in tools:
@@ -59,9 +67,7 @@ def check(tools: list[str]) -> dict:
         version = (ROOT / ".node-version").read_text().strip()
         exact(invoke(["node", "--version"]), "v" + version, "Node")
         executable = Path(invoke(["node", "-p", "process.execPath"])).resolve()
-        npm = executable.parent / "node_modules/npm/bin/npm-cli.js"
-        if not npm.is_file():
-            raise ValueError("Selected Node does not contain its pinned npm")
+        npm = bundled_npm(executable, os.name)
         npm_version = invoke([str(executable), str(npm), "--version"])
         exact("npm@" + npm_version, json.loads((ROOT / "package.json").read_text())["packageManager"], "bundled npm")
         report["tools"]["node"] = {"version": version, "path": str(executable), "npm": npm_version, "npmPath": str(npm)}

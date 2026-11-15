@@ -143,7 +143,7 @@ FINGERPRINT = {
 # environment) locks the implicit restores of `dotnet run`/`dotnet publish` in check:plans, check:generated and the candidate's
 # tool publish, as the hosted jobs' explicit `--locked-mode` restores do.
 ENV = {"DOTNET_NOLOGO": "true", "DOTNET_CLI_TELEMETRY_OPTOUT": "true", "WRANGLER_SEND_METRICS": "false",
-       "MSBUILDDISABLENODEREUSE": "1", "RestoreLockedMode": "true"}
+       "MSBUILDDISABLENODEREUSE": "1", "RestoreLockedMode": "true", "PYTHONDONTWRITEBYTECODE": "1"}
 
 # ci.yml's secret scan (same pinned image digest, redaction and config), over the commits since the merge base, without network and with
 # a read-only mount of the verification clone.
