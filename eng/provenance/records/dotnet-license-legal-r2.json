@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "dotnet-license-legal-r2",
+  "kind": "legal-document",
+  "sourceRepository": "https://github.com/dotnet/dotnet",
+  "sourceCommit": "297acf930fb0f5c07fd4e51d78e521b4ad2e5d1f",
+  "sourcePaths": [
+    "LICENSE.TXT"
+  ],
+  "licence": {
+    "spdx": "MIT",
+    "category": "permissive",
+    "evidence": [
+      {
+        "path": "LICENSE.TXT",
+        "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+        "finding": "Exact .NET 11.0.0 source selected by the restored ILCompiler package repository identity; original complete legal text retained."
+      },
+      {
+        "path": "LICENSE.TXT",
+        "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+        "finding": "Exact .NET 11.0.0 source selected by the restored ILCompiler package repository identity; original complete legal text retained."
+      }
+    ],
+    "scope": "Microsoft and .NET Foundation copyright and all separately named upstream notices are retained verbatim. The MIT declaration describes the notice compilation/source grant; each listed component retains its own terms.",
+    "copyingPermission": "Preserve the complete original legal text verbatim under its stated reproduction/attribution terms. This admits only legal documents, not differently licensed implementation."
+  },
+  "attribution": [
+    "Microsoft and .NET Foundation copyright and all separately named upstream notices are retained verbatim. The MIT declaration describes the notice compilation/source grant; each listed component retains its own terms."
+  ],
+  "targets": [
+    {
+      "path": "third-party/DotNet.LICENSE.txt",
+      "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Copy",
+  "verification": {
+    "kind": "byte-match",
+    "command": "Compare complete recorded source and target bytes, allowing only declared LF normalization; run the owning source and actual candidate gates.",
+    "expected": "All exact target hashes and complete legal obligations match the reviewed sources.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Microsoft and .NET Foundation copyright and all separately named upstream notices are retained verbatim. The MIT declaration describes the notice compilation/source grant; each listed component retains its own terms.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "third-party/DotNet.LICENSE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Microsoft and .NET Foundation copyright and all separately named upstream notices are retained verbatim. The MIT declaration describes the notice compilation/source grant; each listed component retains its own terms."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Independent consumer source and licence review",
+    "reviewedOn": "2026-11-15",
+    "decision": "approved",
+    "rationale": "Independent source, original licence, exact target/profile hash and immutable historical-input review passed at source 8e104f48063eaf7d01f32d316536aa8201f9870f. Contracts0b native controller/selector, Web829cf Miniflare bridge, original .NET11 source297acf legal documents and the23module runtime legal closure were checked against original bytes. This registers the completed source/licence review. It does not assert a full native status, a successful final container build, a Cloud Containers runtime run, publication or deployment. The user narrowed completion to the necessary .NET/C#, Go and TypeScript upgrades with existing compilation/tests; no additional transitive-version or untagged-Go qualification is requested.",
+    "baselineCommit": "8e104f48063eaf7d01f32d316536aa8201f9870f",
+    "reconciliation": false
+  },
+  "supersedes": "dotnet-license-legal-r1"
+}

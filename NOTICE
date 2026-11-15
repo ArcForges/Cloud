@@ -20,6 +20,12 @@ No old implementation or generated contract source is incorporated.
 build/test tools retain their respective licenses. See the locked package
 metadata and the official .NET container base images for third-party notices.
 
+The native build controller and selector reuse Apache-2.0 Contracts tooling;
+see eng/provenance/NOTICE.txt for its exact source identity and retained terms.
+LLVM and GNU build programs run separately. Their original source, generated
+compatibility patch and full terms stay in the external tool cache; these
+programs and their implementation are absent from the final Cloud image.
+
 Full applicable legal texts are retained in third-party/ and the published
 legal-notices.json. The Native AOT image carries its relevant texts and source
 receipt under /app/notices; the immutable base retains /usr/share/doc notices.

@@ -27,7 +27,7 @@ internal sealed class PolicyCase : IDisposable
     {
         Directory.CreateDirectory(root);
         string global = Path.Combine(root, "global.json");
-        File.WriteAllText(global, "{\"sdk\":{\"version\":\"10.0.401\"}}");
+        File.WriteAllText(global, "{\"sdk\":{\"version\":\"11.0.100\"}}");
         toolchain.Add("global.json", CloudRepository.LfSha256(File.ReadAllText(global)));
         Add("test", ProjectRole.Test, "namespace FixtureTests; public class Contracts { [Xunit.Fact] public void Verify() {} }", production: false);
     }
@@ -237,7 +237,7 @@ internal sealed class PolicyCase : IDisposable
             ["version"] = 1,
             ["dependencies"] = new Dictionary<string, object>
             {
-                ["net10.0"] = packages.ToDictionary(package => package.Key, package => new Dictionary<string, string> { ["type"] = "Direct", ["resolved"] = package.Value }),
+                ["net11.0"] = packages.ToDictionary(package => package.Key, package => new Dictionary<string, string> { ["type"] = "Direct", ["resolved"] = package.Value }),
             },
         }));
         foreach (string package in packages.Keys)
@@ -245,7 +245,7 @@ internal sealed class PolicyCase : IDisposable
             licences.TryAdd(package, "MIT");
         }
 
-        Projects.Add(new ProjectFacts(new ProjectClassification(path, role, owner, module, production), "net10.0", "Library", license, boundary,
+        Projects.Add(new ProjectFacts(new ProjectClassification(path, role, owner, module, production), "net11.0", "Library", license, boundary,
             references ?? [], [name + ".cs"], [], new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["ManagePackageVersionsCentrally"] = "true",

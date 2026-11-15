@@ -4,9 +4,9 @@ import { test } from "node:test";
 import { dockerBuildNetwork, verifyToolchain } from "../../tooling/project.ts";
 
 test("toolchain pins reject a different Node or npm patch", async () => {
-  await verifyToolchain("v24.21.0", "11.19.0");
-  await assert.rejects(verifyToolchain("v24.21.1", "11.19.0"), /pinned Node/);
-  await assert.rejects(verifyToolchain("v24.21.0", "11.19.1"), /pinned npm/);
+  await verifyToolchain("v26.13.1", "12.2.2");
+  await assert.rejects(verifyToolchain("v26.13.2", "12.2.2"), /pinned Node/);
+  await assert.rejects(verifyToolchain("v26.13.1", "12.2.3"), /pinned npm/);
 });
 
 test("the host build network is a local-only option that hosted CI refuses", () => {

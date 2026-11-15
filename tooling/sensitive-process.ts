@@ -3,7 +3,7 @@
 // captured only up to a fixed bound for internal public-metadata validation; stderr is always discarded.
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { root } from "./process.ts";
+import { root, toolArguments } from "./process.ts";
 
 type Stage =
   | "candidate"
@@ -90,7 +90,7 @@ export async function runSensitive(
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, [...args], {
+      child = spawn(command, toolArguments(command, args), {
         cwd: root,
         windowsHide: true,
         // The protected job runs on Linux. Its own process group also contains subprocesses that inherit its pipes.

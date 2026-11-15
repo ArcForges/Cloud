@@ -59,11 +59,19 @@ def main() -> None:
     env = environment()
     env.update({"GOTOOLCHAIN": "local", "GOWORK": "off", "GOTELEMETRY": "off",
                 "PYTHONDONTWRITEBYTECODE": "1"})
+    if platform == "linux":
+        # The producer runs current tooling; npm only installs the immutable
+        # 8e5 source with its separately preserved historical Node/npm pair.
+        historical = selected_file(os.environ.get("ARCFORGES_CTR06_HISTORICAL_NODE") or
+                                   str(Path.home() / ".local/node/bin/node"), "historical 8e5 Node")
+        if run([str(historical), "--version"], ROOT, env, True) != "v24.21.0":
+            raise ValueError("the frozen 8e5 source requires preserved Node 24.21.0")
+        env["ARCFORGES_CTR06_HISTORICAL_NODE"] = str(historical)
     # Windows resolves a bare executable using the parent's PATH before its child
     # environment is installed. Resolve the actual Node selection explicitly.
     node = selected_file(shutil.which("node", path=env.get("PATH")), "native Node executable")
-    if run([str(node), "--version"], ROOT, env, True) != "v24.21.0":
-        raise ValueError("the security bridge requires native Node 24.21.0")
+    if run([str(node), "--version"], ROOT, env, True) != "v26.13.1":
+        raise ValueError("the security bridge requires native Node 26.13.1")
     head = run(["git", "rev-parse", "HEAD"], ROOT, env, True)
     if len(head) != 40 or any(c not in "0123456789abcdef" for c in head):
         raise ValueError("invalid verified HEAD")

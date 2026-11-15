@@ -14,10 +14,16 @@ npm run candidate
 ```
 
 The Go center (`center/`) uses the Go release pinned in `center/toolchain.json` with `GOTOOLCHAIN=local` and read-only modules.
+Linux race/cgo and the image's Native AOT compilation select LLVM and GNU tools from `eng/native-toolchain.json`.
+Provision the separate tools once with `python eng/native_toolchain.py install`; normal checks verify the existing
+installation and never install it implicitly. `ARCFORGES_TOOLCHAIN_ROOT` may name an existing private tool root.
+The image builds the same selected tools in a pinned Python stage and copies only their verified installed prefixes
+into the SDK stage. Original GNU source, generated context patch and full legal terms remain in the tool cache;
+the final product image copies only the two owned executables and their legal bundle.
 `python eng/center.py check` runs every Go control of the host's leg: module integrity and tidiness, dependency admission
 (`center/dependencies.json`), `gofmt -s`, `go vet`, staticcheck, the tests (with the race detector on Linux), the generated
 Worker table's drift, the fuzz targets (Linux), govulncheck and a native build that is started as a self-hosted center
-([engineering controls](docs/engineering-controls.md)). On Linux it also starts a PostgreSQL container (`postgres:18-alpine`
+([engineering controls](docs/engineering-controls.md)). On Linux it also starts a PostgreSQL container (`postgres:18.7-alpine3.24`
 pinned by digest in `eng/center.py`; Docker Engine required) for the store's integration tests and the logical-backup
 restore drill ([PostgreSQL store](docs/postgres-store.md)). To run the store tests yourself, point
 `ARCFORGES_TEST_POSTGRES_URL` at a disposable server's superuser URL (each test creates and drops its own database and

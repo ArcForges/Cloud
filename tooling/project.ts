@@ -6,7 +6,16 @@ import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promi
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { candidateDir, readJson, root, run, sha256, wrangler, writeJson } from "./process.ts";
+import {
+  candidateDir,
+  readJson,
+  root,
+  run,
+  sha256,
+  toolArguments,
+  wrangler,
+  writeJson,
+} from "./process.ts";
 import { probeProject, runProbe, waitForHealth } from "./protocol.ts";
 import { centerSurfaces } from "../worker/ingress/routes.ts";
 import { pageRoutes, surfaceRoutes } from "../worker/tables/center-tables.generated.ts";
@@ -423,7 +432,7 @@ async function testWorker(candidate: Candidate) {
   await writeJson(path.join(testDir, "wrangler.json"), config);
   const child = spawn(
     process.execPath,
-    [
+    toolArguments(process.execPath, [
       wrangler,
       "dev",
       "--local",
@@ -431,7 +440,7 @@ async function testWorker(candidate: Candidate) {
       path.join(testDir, "wrangler.json"),
       "--persist-to",
       path.join(testDir, "state", workerName),
-    ],
+    ]),
     {
       cwd: root,
       detached: true,
@@ -736,6 +745,7 @@ async function main() {
     return;
   }
   if (process.argv[2] === "toolchain") {
+    await run("python", ["eng/check_toolchain.py"]);
     assert(process.env.npm_execpath, "Run this check through npm run check.");
     await verifyToolchain(
       process.version,

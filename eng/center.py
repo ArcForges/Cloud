@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import importlib.util
+from functools import lru_cache
 import json
 import os
 from pathlib import Path
@@ -56,9 +58,9 @@ FUZZ_TARGETS = (
 )
 FUZZ_TIME = "10s"
 TEST_TIMEOUT = "10m"
-# PostgreSQL 18.4 (the official Alpine image), pinned by digest: the integration server of the Linux leg and the two servers of
+# PostgreSQL 18.7 (the official Alpine 3.24 image), pinned by digest: the integration server of the Linux leg and the two servers of
 # the restore drill.
-POSTGRES_IMAGE = "postgres:18-alpine@sha256:1b1689b20d16a014a3d195653381cf2caa75a41a92d93b255a9d6ea29fd353aa"
+POSTGRES_IMAGE = "postgres:18.7-alpine3.24@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015"
 
 
 def say(message: str) -> None:
@@ -90,11 +92,32 @@ def selected_center_tool(name: str) -> str:
 
 def go(*args: str, cwd: Path = CENTER, capture: bool = False, env: dict[str, str] | None = None) -> str:
     argv = (selected_center_tool(args[0]), *args[1:])
-    result = subprocess.run(argv, cwd=cwd, env=env or ENV, text=True, encoding="utf-8",
+    result = subprocess.run(argv, cwd=cwd, env=go_environment(env or ENV), text=True, encoding="utf-8",
                             stdout=subprocess.PIPE if capture else None)
     if result.returncode != 0:
         raise SystemExit(f"[center] failed ({result.returncode}): {' '.join(args)}")
     return result.stdout if capture else ""
+
+
+@lru_cache(maxsize=1)
+def native_toolchain():
+    # This module is also loaded by file path from the bridge controls. Resolve
+    # its reviewed sibling explicitly, without depending on sys.path or PATH.
+    spec = importlib.util.spec_from_file_location("arcforges_cloud_native_toolchain", ROOT / "eng/native_toolchain.py")
+    if spec is None or spec.loader is None:
+        raise SystemExit("[center] the owned native tool controller is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def go_environment(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Current Linux race/cgo uses the same verified compiler and BFD route as CI."""
+    selected = dict(ENV if base is None else base)
+    if WINDOWS:
+        selected["CGO_ENABLED"] = "0"
+        return selected
+    return native_toolchain().aot_environment(selected)
 
 
 def digest(path: Path) -> str:

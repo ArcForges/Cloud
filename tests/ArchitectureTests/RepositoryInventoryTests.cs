@@ -175,7 +175,7 @@ public sealed class RepositoryInventoryTests
         """;
 
     private const string Lock = """
-        { "version": 2, "dependencies": { "net10.0": { "ArcForges.Contracts.Validation": { "type": "Direct", "requested": "[1.0.0-ci.205.1, )", "resolved": "1.0.0-ci.205.1" } } } }
+        { "version": 2, "dependencies": { "net11.0": { "ArcForges.Contracts.Validation": { "type": "Direct", "requested": "[1.0.0-ci.205.1, )", "resolved": "1.0.0-ci.205.1" } } } }
         """;
 
     [Fact]
@@ -245,8 +245,8 @@ public sealed class RepositoryInventoryTests
             steps:
               - run: npm ci --ignore-scripts
               - name: Scan Git history for secrets
-                run: docker run --rm --network none -v "$PWD:/repo:ro" zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact=100 --no-banner
-              - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+                run: docker run --rm --network none -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact=100 --no-banner
+              - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
                 with:
                   global-json-file: global.json
               - name: Build
@@ -291,7 +291,7 @@ public sealed class RepositoryInventoryTests
     {
         string workflow = defect switch
         {
-            "missing-setup" => Workflow.Replace("actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68", "actions/setup-dotnet@v6", StringComparison.Ordinal),
+            "missing-setup" => Workflow.Replace("actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73", "actions/setup-dotnet@v6", StringComparison.Ordinal),
             "missing-restore" => Workflow.Replace("dotnet restore Cloud.slnx --locked-mode", "dotnet restore Cloud.slnx", StringComparison.Ordinal),
             "missing-build" => Workflow.Replace("dotnet build Cloud.slnx -c Release --no-restore", "dotnet build", StringComparison.Ordinal),
             "missing-policy" => Workflow.Replace("npm run policy", "npm run lint", StringComparison.Ordinal),

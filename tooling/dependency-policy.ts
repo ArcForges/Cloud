@@ -482,6 +482,8 @@ export function auditDependencies(root: string) {
     "package.json",
     "package-lock.json",
     ".node-version",
+    ".python-version",
+    "native-toolchain.json",
     ".java-version",
     ".npmrc",
     "NuGet.Config",
@@ -502,7 +504,7 @@ export function auditDependencies(root: string) {
   for (const file of files) {
     if (
       inputNames.has(path.basename(file)) ||
-      /\.(?:csproj|esproj|props|targets)$/u.test(file) ||
+      /\.(?:csproj|esproj|props|targets|py)$/u.test(file) ||
       file.endsWith("packages.lock.json")
     )
       assert(

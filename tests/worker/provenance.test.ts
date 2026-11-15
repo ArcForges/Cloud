@@ -504,7 +504,7 @@ function gitleaksConfig(text: string): { extend: string[]; allowlists: Allowlist
   };
   const extend: string[] = [];
   const allowlists: Allowlist[] = [];
-  let table: "none" | "extend" | "allowlist" = "none";
+  let table: string = "none";
   const lines = text.split("\n");
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index] ?? "";
@@ -606,7 +606,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       `const key = "${sampleNonce}";`,
     ),
   );
-  // AF-CTR-03: one block per file (the policy, the receipts af-ctr-03-r1 to af-ctr-03-r21, af-ctr-04-r1 to af-ctr-04-r13, af-ctr-05-r1 to af-ctr-05-r4, af-ctr-05-r6, af-ctr-05-r7, af-ctr-05-r8, af-ctr-05-r9, af-ctr-05-r10, af-ctr-05-r11, af-ctr-05-r12, af-ctr-05-r13, af-ctr-05-r14, af-ctr-05-r15, af-ctr-05-r16, af-ctr-05-r17, af-ctr-05-r18 af-ctr-06-r1 to af-ctr-06-r30, and af-ctr-06-bridge-r1), each row one exact
+  // One block per exact reviewed policy/receipt file below, each row one exact
   // key-and-digest line of an immutable record named in the inputs maps.
   // The digests are computed here from the records, so this file holds no digest literal.
   const records = [
@@ -697,6 +697,11 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/af-ctr-06-r28.json",
     "eng/policy/dependency-reviews/af-ctr-06-r29.json",
     "eng/policy/dependency-reviews/af-ctr-06-r30.json",
+    "eng/policy/dependency-reviews/afv2-env-01-r1.json",
+    "eng/policy/dependency-reviews/afv2-env-01-r2.json",
+    "eng/policy/dependency-reviews/afv2-env-01-r3.json",
+    "eng/policy/dependency-reviews/afv2-env-01-r4.json",
+    "eng/policy/dependency-reviews/afv2-env-01-r5.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -707,13 +712,15 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     assert.ok(block);
     assert.match(
       String(block.description),
-      file.includes("af-ctr-06-")
-        ? /^AF-CTR-06: /u
-        : file.includes("af-ctr-05-")
-          ? /^AF-CTR-05: /u
-          : file.includes("af-ctr-04-")
-            ? /^AF-CTR-04: /u
-            : /^AF-CTR-03: /u,
+      file.includes("afv2-env-01-")
+        ? /^AFV2-ENV-01: /u
+        : file.includes("af-ctr-06-")
+          ? /^AF-CTR-06: /u
+          : file.includes("af-ctr-05-")
+            ? /^AF-CTR-05: /u
+            : file.includes("af-ctr-04-")
+              ? /^AF-CTR-04: /u
+              : /^AF-CTR-03: /u,
     );
     assert.equal(block.regexTarget, "line");
     assert.deepEqual(block.paths, [`^${regexText(file)}$`]);

@@ -112,6 +112,8 @@
 !package-lock.json
 !eng/
 !eng/version-sources.json
+!eng/native_toolchain.py
+!eng/native-toolchain.json
 
 !center/
 !center/go.mod

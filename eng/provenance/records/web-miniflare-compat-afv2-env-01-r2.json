@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "web-miniflare-compat-afv2-env-01-r2",
+  "kind": "source",
+  "sourceRepository": "https://github.com/ArcForges/Web",
+  "sourceCommit": "829cf665f52e595b767c0a209815096f448912af",
+  "sourcePaths": [
+    "tooling/wrangler-init.ts"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Original Web AGPL-3.0-only terms; the exact stable-Miniflare V4 API bridge is adapted into the same-licence Cloud preloader."
+      }
+    ],
+    "scope": "Build/development invocation compatibility only; no copied adapter implementation is emitted into the production Worker.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright ArcForges contributors. AGPL-3.0-only."
+  ],
+  "targets": [
+    {
+      "path": "tooling/wrangler-init.ts",
+      "sha256": "69f6301e63db59f25a53b6f0d6ac017bbcc762018251c7df9818dfac9cc4af72",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Improve",
+  "verification": {
+    "kind": "owner-adaptation",
+    "command": "Review Web829cf665 exact Miniflare V4 bridge and Cloud preloader integration; typecheck and actual Cloud nodejs_compat Wrangler output.",
+    "expected": "Exact Miniflare4 guard and its two missing API aliases, plus awaited BLAKE3 initialization, remain unchanged. Only the obsolete Cloud-owned unenv-v1 import rewrite was removed; Wrangler resolves its declared unenv-v2 API. Vendor bytes remain unchanged.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Miniflare V4 invocation compatibility bridge adapted from ArcForges Web829cf665f52e595b767c0a209815096f448912af; copyright ArcForges contributors, AGPL-3.0-only.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "LICENSE"
+    ],
+    "distribution": "Build/development source only; absent from the emitted Worker.",
+    "reason": "Preserve exact source identity, authorship and compatible original terms."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud build tooling maintainer",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "supersedes": "web-miniflare-compat-afv2-env-01-r1",
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "Existing independent source/licence approval retained; author compatibility and exact-target update",
+    "reviewedOn": "2026-11-15",
+    "decision": "approved",
+    "rationale": "Append-only owner-adaptation successor. Original Web829cf665 source, AGPL terms, attribution and the reused BLAKE3/Miniflare bridge are unchanged. Only the obsolete Cloud-owned unenv-v1 hook was removed to allow the actual declared v2 API. Windows MCP39448: install without peer warnings, clean npm ci --ignore-scripts, both existing unenv tests, typecheck and real production/proof Wrangler dry-runs returned0. MCP38204: the original production-bundle C# test passed1/1 with0skip; MCP39704: affected C# guards passed17/17; MCP32792: proof-gate passed25/25 with0skip and its format check returned0. Prior independent source/licence approval is retained; no new independent review or final full native result is claimed.",
+    "baselineCommit": "5ac9a8f90108994ae7ab00fafa46c07e00e804d5",
+    "reconciliation": false
+  }
+}

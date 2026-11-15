@@ -60,6 +60,7 @@ interface ReleaseProfile {
   image: {
     baseImage: string;
     buildImage: string;
+    toolImage?: string;
     inputs: Record<string, string>;
     baseLegal: Record<string, string>;
     legalFiles: string[];
@@ -125,6 +126,7 @@ export function releaseProfile(owner: string) {
   object(
     image,
     "baseImage buildImage inputs baseLegal legalFiles" +
+      (image.toolImage === undefined ? "" : " toolImage") +
       (image.executables === undefined ? "" : " executables"),
   );
   if (image.executables !== undefined)
@@ -198,7 +200,11 @@ export function releaseProfile(owner: string) {
     .filter((line) => line.startsWith("FROM "));
   assert.deepEqual(
     from,
-    [`FROM ${text(image.buildImage)} AS build`, `FROM ${text(image.baseImage)}`],
+    [
+      ...(image.toolImage === undefined ? [] : [`FROM ${text(image.toolImage)} AS native-tools`]),
+      `FROM ${text(image.buildImage)} AS build`,
+      `FROM ${text(image.baseImage)}`,
+    ],
     "Changed image producer/base",
   );
   for (const [name, expected] of Object.entries(object(image.baseLegal))) {

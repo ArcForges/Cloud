@@ -324,7 +324,7 @@ test("an isolated package is admitted by directory and its locked packages join 
   assert(!Object.keys(lock.packages).some((key) => key.includes("playwright")));
   // The admitted closure holds it, with the bytes and the licence of the lock.
   const entry = baseline.closure[`${isolatedDirectory}/node_modules/playwright-core`];
-  assert.equal(entry?.version, "1.63.0");
+  assert.equal(entry?.version, "1.65.1");
   assert.equal(entry?.integrity, files.lock.packages["node_modules/playwright-core"]?.integrity);
   assert.equal(entry?.license, "Apache-2.0");
   validateClosure(baseline, { ...lock.packages, ...packages });
