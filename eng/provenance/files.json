@@ -804,6 +804,7 @@
     "eng/policy/dependency-reviews/afv2-env-01-r1.json",
     "eng/policy/dependency-reviews/afv2-env-01-r2.json",
     "eng/policy/dependency-reviews/afv2-env-01-r3.json",
+    "eng/policy/dependency-reviews/afv2-env-01-r4.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r1.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r2.json",
     "eng/policy/dependency-reviews/cloud-01-r1.json",
@@ -909,6 +910,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r130.json",
     "eng/provenance/artifact-profiles/cloud-release-r131.json",
     "eng/provenance/artifact-profiles/cloud-release-r132.json",
+    "eng/provenance/artifact-profiles/cloud-release-r133.json",
     "eng/provenance/artifact-profiles/cloud-release-r14.json",
     "eng/provenance/artifact-profiles/cloud-release-r15.json",
     "eng/provenance/artifact-profiles/cloud-release-r16.json",
@@ -1009,6 +1011,7 @@
     "eng/provenance/records/canonical-agpl-legal-r1.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r1.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r2.json",
+    "eng/provenance/records/center-runtime-afv2-env-01-r3.json",
     "eng/provenance/records/center-runtime-r1.json",
     "eng/provenance/records/center-runtime-r10.json",
     "eng/provenance/records/center-runtime-r11.json",
@@ -1089,6 +1092,7 @@
     "eng/provenance/records/center-runtime-r9.json",
     "eng/provenance/records/center-worker-afv2-env-01-r1.json",
     "eng/provenance/records/center-worker-afv2-env-01-r2.json",
+    "eng/provenance/records/center-worker-afv2-env-01-r3.json",
     "eng/provenance/records/center-worker-r1.json",
     "eng/provenance/records/center-worker-r10.json",
     "eng/provenance/records/center-worker-r11.json",
@@ -2107,5 +2111,5 @@
     "tests/tooling/test_native_toolchain.py": "contracts-native-tools-afv2-env-01-r1",
     "tooling/wrangler-init.ts": "web-miniflare-compat-afv2-env-01-r1"
   },
-  "artifacts": ["center-runtime-afv2-env-01-r2", "center-worker-afv2-env-01-r2"]
+  "artifacts": ["center-runtime-afv2-env-01-r3", "center-worker-afv2-env-01-r3"]
 }
