@@ -6,7 +6,7 @@
 //   node eng/verification/browser/acceptance.ts --real-authenticator          (AR-23, with the owner at the keyboard)
 //   node eng/verification/browser/acceptance.ts --operator-grant              (the operations page, after an acceptance run)
 //
-// The browser is the Playwright Chromium revision 1243 that playwright-core 1.63.0 names, started by its explicit executable
+// The browser is the Playwright Chromium revision 1255 that playwright-core 1.65.1 names, started by its explicit executable
 // path; nothing is downloaded. The authenticator is Chromium's virtual authenticator, which is MOCKED hardware in a real browser;
 // only --real-authenticator reaches Windows Hello. The first run uses the bootstrap token file that proof-bootstrap.ts wrote and
 // saves the owner's credential in a user-only file; later runs sign in with it. --operator-grant signs in with that credential

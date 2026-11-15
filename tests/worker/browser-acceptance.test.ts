@@ -168,7 +168,7 @@ function scenario(
         write: (line) => stdout.push(line),
         writeError: (line) => stderr.push(line),
         exists: () => true,
-        read: () => JSON.stringify({ browsers: [{ name: "chromium", revision: "1243" }] }),
+        read: () => JSON.stringify({ browsers: [{ name: "chromium", revision: "1255" }] }),
         writeReport: (file, text) => reports.push({ file, text }),
         ...over,
       });
@@ -444,7 +444,7 @@ test("the run does not start without the pinned browser, a token or credential, 
   );
   assert.equal(debug.launches.length, 0);
   assert.match(debug.stderr.join("\n"), /DEBUG/u);
-  // The browser is missing, or is not revision 1243.
+  // The browser is missing, or is not revision 1255.
   const missing = scenario();
   assert.equal(await missing.run([], { exists: (file) => !file.endsWith("chrome.exe") }), 2);
   assert.match(missing.stderr.join("\n"), /not installed/u);
@@ -453,7 +453,7 @@ test("the run does not start without the pinned browser, a token or credential, 
     await other.run(["--chromium", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"]),
     2,
   );
-  assert.match(other.stderr.join("\n"), /chromium-1243/u);
+  assert.match(other.stderr.join("\n"), /chromium-1255/u);
   assert.equal(other.launches.length, 0);
   const manifest = scenario();
   assert.equal(
@@ -573,7 +573,7 @@ test("the arguments have safe defaults and refuse what could drive the wrong pla
   assert.equal(options.baseUrl, "https://proof.arcforges.com/api");
   assert.equal(
     options.chromium,
-    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\chrome.exe",
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1255\\chrome-win64\\chrome.exe",
   );
   assert.equal(options.headed, false);
   assert.equal(options.realAuthenticator, false);
@@ -624,20 +624,20 @@ test("the arguments have safe defaults and refuse what could drive the wrong pla
 // ---------------------------------------------------------------------------------------------------------------------------
 // The pinned browser
 
-test("only Playwright's chromium-1243 is launched, by an explicit path", () => {
+test("only Playwright's chromium-1255 is launched, by an explicit path", () => {
   const win =
-    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\chrome.exe";
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1255\\chrome-win64\\chrome.exe";
   assert.equal(chromiumPathProblem(win), undefined);
   assert.equal(
-    chromiumPathProblem("/home/u/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"),
+    chromiumPathProblem("/home/u/.cache/ms-playwright/chromium-1255/chrome-linux64/chrome"),
     undefined,
   );
   for (const bad of [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1248\\chrome-win64\\chrome.exe",
-    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1243\\chrome-win64\\chrome.exe",
-    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome-win64\\msedge.exe",
-    "C:\\x\\chromium-12430\\chrome.exe",
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1255\\chrome-win64\\chrome.exe",
+    "C:\\Users\\tester\\AppData\\Local\\ms-playwright\\chromium-1255\\chrome-win64\\msedge.exe",
+    "C:\\x\\chromium-12550\\chrome.exe",
     "",
   ])
     assert(chromiumPathProblem(bad) !== undefined, bad);
@@ -660,11 +660,11 @@ test("only Playwright's chromium-1243 is launched, by an explicit path", () => {
   );
   assert.equal(
     defaultChromiumPath({}, "linux", "/home/u"),
-    "/home/u/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome",
+    "/home/u/.cache/ms-playwright/chromium-1255/chrome-linux64/chrome",
   );
-  assert.equal(manifestProblem({ browsers: [{ name: "chromium", revision: "1243" }] }), undefined);
+  assert.equal(manifestProblem({ browsers: [{ name: "chromium", revision: "1255" }] }), undefined);
   assert(manifestProblem({ browsers: [{ name: "chromium", revision: "1248" }] }) !== undefined);
-  assert(manifestProblem({ browsers: [{ name: "firefox", revision: "1243" }] }) !== undefined);
+  assert(manifestProblem({ browsers: [{ name: "firefox", revision: "1255" }] }) !== undefined);
   assert(manifestProblem(null) !== undefined);
   const problems = preflight(win, "C:\\pkg", () => false);
   assert.equal(problems.length, 2, "the browser and playwright-core are both missing");
@@ -673,7 +673,7 @@ test("only Playwright's chromium-1243 is launched, by an explicit path", () => {
       win,
       "C:\\pkg",
       () => true,
-      () => JSON.stringify({ browsers: [{ name: "chromium", revision: "1243" }] }),
+      () => JSON.stringify({ browsers: [{ name: "chromium", revision: "1255" }] }),
     ),
     [],
   );
@@ -918,7 +918,7 @@ test("playwright-core lives in its own package with an exact lockfile that the r
     workspaces?: unknown;
     private: boolean;
   };
-  assert.deepEqual(manifest.dependencies, { "playwright-core": "1.63.0" });
+  assert.deepEqual(manifest.dependencies, { "playwright-core": "1.65.1" });
   assert.equal(manifest.devDependencies, undefined);
   assert.equal(manifest.workspaces, undefined);
   assert.equal(manifest.private, true);
@@ -943,10 +943,10 @@ test("playwright-core lives in its own package with an exact lockfile that the r
   assert.equal(lock.lockfileVersion, 3);
   assert.deepEqual(Object.keys(lock.packages).sort(), ["", "node_modules/playwright-core"]);
   const entry = lock.packages["node_modules/playwright-core"];
-  assert.equal(entry?.version, "1.63.0");
+  assert.equal(entry?.version, "1.65.1");
   assert.equal(
     entry?.resolved,
-    "https://registry.npmjs.org/playwright-core/-/playwright-core-1.63.0.tgz",
+    "https://registry.npmjs.org/playwright-core/-/playwright-core-1.65.1.tgz",
   );
   assert.match(entry?.integrity ?? "", /^sha512-[A-Za-z0-9+/]{86}==$/u);
   assert.equal(entry?.license, "Apache-2.0");
@@ -974,17 +974,17 @@ test("playwright-core lives in its own package with an exact lockfile that the r
   assert(!readFileSync(path.join(root, "Dockerfile"), "utf8").includes("playwright"));
 });
 
-test("the pinned release names chromium-1243, the browser the Windows host has", () => {
+test("the pinned release names exactly chromium-1255 without installing a browser", () => {
   assert.equal(
     path.basename(path.dirname(path.dirname(defaultChromiumPath({}, "linux", "/h")))),
-    "chromium-1243",
+    "chromium-1255",
   );
   const sources = readdirSync(browserDirectory)
     .filter((file) => file.endsWith(".ts"))
     .map((file) => readFileSync(path.join(browserDirectory, file), "utf8"))
     .join("\n");
-  assert(sources.includes('requiredChromiumRevision = "1243"'));
-  assert(sources.includes('requiredPlaywrightCore = "1.63.0"'));
+  assert(sources.includes('requiredChromiumRevision = "1255"'));
+  assert(sources.includes('requiredPlaywrightCore = "1.65.1"'));
 });
 
 test("tracing, screenshots, videos, HAR files and downloads are never switched on", () => {

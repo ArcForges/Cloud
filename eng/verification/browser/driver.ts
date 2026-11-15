@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The browser the acceptance flow drives (AF-CTR-03 A2): a small interface the flow is written against, the guard that only the
-// Playwright Chromium revision 1243 is launched (always by an explicit executablePath; browsers are never downloaded), and the
+// Playwright Chromium revision 1255 is launched (always by an explicit executablePath; browsers are never downloaded), and the
 // adapter to playwright-core. playwright-core is imported by name at run time from this package's own node_modules, so the root
 // project (which never installs it) does not need its types; the adapter's shapes are the subset below, and the flow is tested
 // against fakes of this interface.
@@ -11,10 +11,10 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { type Transport, type VirtualCredential, withoutTransport } from "./credentials.ts";
 
-/** The Playwright release's browser revision the proof environment's Windows host has installed (playwright-core 1.63.0). */
-export const requiredChromiumRevision = "1243";
-export const requiredChromiumVersion = "153.0.8010.12";
-export const requiredPlaywrightCore = "1.63.0";
+/** The Chromium revision required by the pinned playwright-core 1.65.1 release; installation remains explicit local opt-in. */
+export const requiredChromiumRevision = "1255";
+export const requiredChromiumVersion = "159.0.8154.6";
+export const requiredPlaywrightCore = "1.65.1";
 
 export interface Navigation {
   status: number;
@@ -295,7 +295,7 @@ export function browsersDirectory(
   );
 }
 
-/** The default executable of Chromium revision 1243 in that directory. */
+/** The default executable of Chromium revision 1255 in that directory. */
 export function defaultChromiumPath(
   environment: Record<string, string | undefined>,
   platform: NodeJS.Platform,
@@ -332,7 +332,7 @@ export function chromiumPathProblem(executablePath: string): string | undefined 
   return undefined;
 }
 
-/** Whether a playwright-core browser manifest names chromium revision 1243 (undefined when it does). */
+/** Whether a playwright-core browser manifest names chromium revision 1255 (undefined when it does). */
 export function manifestProblem(manifest: unknown): string | undefined {
   const browsers = (manifest as { browsers?: unknown } | null)?.browsers;
   if (!Array.isArray(browsers)) return "The Playwright browser manifest is unreadable.";
@@ -377,7 +377,7 @@ export function preflight(
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// The playwright-core adapter. The shapes are the subset of playwright-core 1.63.0 this file uses.
+// The playwright-core adapter. The shapes are the subset of playwright-core 1.65.1 this file uses.
 
 export interface PwResponse {
   status(): number;

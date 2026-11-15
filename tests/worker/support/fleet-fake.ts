@@ -428,7 +428,7 @@ export class FleetBrowser implements Browser {
   }
 
   version(): string {
-    return "153.0.8010.12";
+    return "159.0.8154.6";
   }
 
   async newTab(): Promise<Tab> {

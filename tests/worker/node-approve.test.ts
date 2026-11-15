@@ -291,7 +291,7 @@ async function nodeRun(
       write: (line) => stdout.push(line),
       writeError: (line) => stderr.push(line),
       exists: () => true,
-      read: () => JSON.stringify({ browsers: [{ name: "chromium", revision: "1243" }] }),
+      read: () => JSON.stringify({ browsers: [{ name: "chromium", revision: "1255" }] }),
       writeReport: (_file, text) => reports.push(text),
       handshake: () => ({
         list: visible,
