@@ -146,6 +146,7 @@ CREATE TRIGGER lifecycle_operation_guard BEFORE UPDATE OR DELETE ON identity.lif
 FOR EACH ROW EXECUTE FUNCTION identity.guard_lifecycle_operation();
 
 ALTER TABLE identity.auth_flow ADD COLUMN lifecycle_operation_id uuid REFERENCES identity.lifecycle_operation(operation_id);
+CREATE INDEX auth_flow_lifecycle_operation ON identity.auth_flow (lifecycle_operation_id) WHERE lifecycle_operation_id IS NOT NULL;
 ALTER TABLE identity.auth_flow ADD COLUMN account_auth_epoch bigint;
 ALTER TABLE identity.auth_flow ADD COLUMN account_recovery_generation bigint;
 ALTER TABLE identity.auth_flow ADD COLUMN delivery_state smallint NOT NULL DEFAULT 0 CHECK (delivery_state IN (0,1,2,3));
