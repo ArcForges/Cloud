@@ -629,6 +629,7 @@
     "center/internal/store/migrate/integration_test.go",
     "center/internal/store/migrate/management.go",
     "center/internal/store/migrate/management_integration_test.go",
+    "center/internal/store/migrate/management_inventory_test.go",
     "center/internal/store/migrate/migrate.go",
     "center/internal/store/migrate/migrate_test.go",
     "center/internal/store/migrate/mobile_schema_test.go",
@@ -1015,6 +1016,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r99.json",
     "eng/provenance/files.json",
     "eng/provenance/records/afv2-center-01-management-storage-r1.json",
+    "eng/provenance/records/afv2-center-01-management-storage-r2.json",
     "eng/provenance/records/arcnotes-build-identity-r1.json",
     "eng/provenance/records/arcnotes-build-identity-r2.json",
     "eng/provenance/records/arcnotes-build-identity-r3.json",
@@ -2127,7 +2129,7 @@
     "eng/native-toolchain.json": "contracts-native-tools-afv2-env-01-r1",
     "tests/tooling/test_native_toolchain.py": "contracts-native-tools-afv2-env-01-r1",
     "tooling/wrangler-init.ts": "web-miniflare-compat-afv2-env-01-r2",
-    "center/internal/schema/migrations/0012_management_storage.sql": "afv2-center-01-management-storage-r1"
+    "center/internal/schema/migrations/0012_management_storage.sql": "afv2-center-01-management-storage-r2"
   },
   "artifacts": [
     "center-runtime-afv2-env-01-r4",

@@ -174,7 +174,7 @@ DECLARE i management.command_identity%ROWTYPE;
 BEGIN
  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'routing observations are retained' USING ERRCODE='23000'; END IF;
  IF TG_OP='INSERT' THEN
-  SELECT * INTO STRICT i FROM management.command_identity WHERE account_id=NEW.account_id AND command_id=NEW.command_id FOR SHARE;
+  SELECT * INTO STRICT i FROM management.command_identity WHERE account_id=NEW.account_id AND command_id=NEW.command_id;
   IF i.namespace<>3 OR i.method<>NEW.method OR i.node_owner_epoch<>NEW.node_owner_epoch OR i.intent_sha256<>NEW.request_sha256 THEN
    RAISE EXCEPTION 'routing identity mismatch' USING ERRCODE='23000'; END IF;
   PERFORM 1 FROM management.node_protocol p JOIN fleet.node n

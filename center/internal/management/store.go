@@ -77,7 +77,7 @@ func (s *Store) Reserve(ctx context.Context, identity Identity, lease Lease) (re
 		var method string
 		var replayUntil time.Time
 		e = tx.QueryRow(ctx, `SELECT namespace,enrollment_id,node_id,node_owner_epoch,method,intent_sha256,replay_until
- FROM management.command_identity WHERE account_id=$1 AND command_id=$2 FOR UPDATE`, identity.Account, identity.Command).
+ FROM management.command_identity WHERE account_id=$1 AND command_id=$2`, identity.Account, identity.Command).
 			Scan(&namespace, &enrollment, &node, &epoch, &method, &digest, &replayUntil)
 		if e != nil {
 			return e

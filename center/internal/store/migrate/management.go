@@ -165,6 +165,9 @@ func guardManagement(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Opt
 	if a.source != 11 || a.backup == nil {
 		return ErrManagementTransitionRequired
 	}
+	if _, err := tx.Exec(ctx, "SET LOCAL search_path=pg_catalog; SET LOCAL TIME ZONE 'UTC'"); err != nil {
+		return ErrManagementTransitionRequired
+	}
 	// Drain all legacy application writers, not just receipt writers. The
 	// trusted owner/superuser boundary is retained from the existing migrator.
 	tables, err := ctr06RequiredTables()

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "afv2-center-01-management-storage-r2",
+  "kind": "source",
+  "sourceRepository": "https://github.com/ArcForges/ArcForges-Design",
+  "sourceCommit": "493022fbf643b484665b2713c9eb8670f2fb2234",
+  "sourcePaths": [
+    "docs/data/cloud-store.sql",
+    "docs/data/cloud-store.md",
+    "docs/contracts/proto/arcforges/sandbox/v2/platform.proto"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Root reviewed the exact original Design source grant on 2026-11-16. Management-only DDL adaptation remains inside the same AGPL project boundary; no account-lifecycle or commerce implementation copied."
+      }
+    ],
+    "scope": "Management PostgreSQL DDL and original owner guards only. Immutable applied0001..0011 and their legal terms remain intact.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright ArcForges contributors. AGPL-3.0-only. Adapted management storage specification from ArcForges-Design493022fb; full licence and corresponding source remain available."
+  ],
+  "targets": [
+    {
+      "path": "center/internal/schema/migrations/0012_management_storage.sql",
+      "sha256": "1d60c43cc932012722f0ba4c744022ddbad41d7a482ba2d4de8b8b9f1e0faccb",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Improve",
+  "verification": {
+    "kind": "source-adaptation-and-real-postgresql",
+    "command": "Compare Design493022fb Git objects; run the real PostgreSQL fresh/valid11 migration, grants, tombstone and restore fixtures through the direct migrator. A refused unqualified schema10 path is negative evidence, never an upgrade pass.",
+    "expected": "Management shape matches Design; identity, uncertainty, delivery and final results are SQL-enforced. Source/artifact/backup/target identities remain explicit.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Management PostgreSQL specification adapted from ArcForges-Design493022fb. Copyright ArcForges contributors. AGPL-3.0-only; full licence and corresponding source accompany applicable distribution.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "LICENSE"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Preserve the original same-project AGPL source terms and attribution."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Center storage maintainer",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "supersedes": "afv2-center-01-management-storage-r1",
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "OpenAI Codex root under maintainer implementation authorization",
+    "reviewedOn": "2026-11-16",
+    "decision": "approved",
+    "rationale": "Coordinator source-grant review on 2026-11-16 retains the exact Design493 AGPL source/licence grant. The real H-22 PostgreSQL failure showed that locking an immutable insert-only identity with FOR SHARE incorrectly demands UPDATE privileges. This bounded successor removes only that unnecessary identity-row lock; protocol/node/hub locks and immutable identity/final-result SQL guards remain. Runtime grants are not broadened. Independent final implementation review and native verification remain required.",
+    "baselineCommit": "5eaa7fafcc79838ffd3c9a86d825cf8cb6bee947",
+    "reconciliation": false
+  }
+}

@@ -5,6 +5,7 @@ package migrate
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -29,6 +30,89 @@ func managementRuntime(t *testing.T, owner *pgx.Conn, url, group string) (*manag
 	}
 	runtimeURL := pgtest.WithUser(t, url, login, password)
 	return management.New(store.New(pgtest.Pool(t, runtimeURL, 4))), pgtest.Connect(t, runtimeURL)
+}
+
+func TestManagementOpenOldWriterAndMembershipPathRefuse(t *testing.T) {
+	for _, mode := range []string{"open-session", "noinherit-membership"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			url, name := pgtest.Database(t)
+			owner := pgtest.Connect(t, url)
+			group := name + "_runtime"
+			build := centerBuild(t)
+			if _, err := Apply(ctx, owner, build[:11], Options{Runner: "isolated-schema11-fixture", RuntimeRole: group}); err != nil {
+				t.Fatal(err)
+			}
+			var writer *pgx.Conn
+			if mode == "open-session" {
+				password := pgtest.Secret()
+				login := group + "_a"
+				if _, err := owner.Exec(ctx, "ALTER ROLE "+pgx.Identifier{login}.Sanitize()+" LOGIN PASSWORD '"+password+"'; GRANT "+pgx.Identifier{group}.Sanitize()+" TO "+pgx.Identifier{login}.Sanitize()); err != nil {
+					t.Fatal(store.Sanitize("enable isolated old writer", err))
+				}
+				writer = pgtest.Connect(t, pgtest.WithUser(t, url, login, password))
+			} else {
+				extra := name + "_outsider"
+				if _, err := owner.Exec(ctx, "CREATE ROLE "+pgx.Identifier{extra}.Sanitize()+" NOLOGIN NOINHERIT; GRANT "+pgx.Identifier{group}.Sanitize()+" TO "+pgx.Identifier{extra}.Sanitize()+" WITH INHERIT FALSE"); err != nil {
+					t.Fatal(store.Sanitize("create isolated membership path", err))
+				}
+			}
+			dir := t.TempDir()
+			result, err := ApplyManagement(ctx, owner, build, Options{Runner: "isolated-native-fixture", RuntimeRole: group}, managementConfig(url, name, group), filepath.Join(dir, "source.dump"), filepath.Join(dir, "source.json"))
+			if !errors.Is(err, ErrManagementTransitionRequired) || result.Version == 12 {
+				t.Fatalf("unsafe writer was not refused: %v", err)
+			}
+			var version int
+			var write bool
+			if err := owner.QueryRow(ctx, "SELECT (SELECT max(version) FROM platform.schema_migration),has_table_privilege($1,'fleet.routed_call','INSERT')", group).Scan(&version, &write); err != nil || version != 11 || !write {
+				t.Fatal("failed transition changed old role or schema")
+			}
+			if _, err := os.Stat(filepath.Join(dir, "source.dump")); err != nil {
+				t.Fatal("failed transition lost its verified backup")
+			}
+			if writer != nil {
+				if err := writer.Close(ctx); err != nil {
+					t.Fatal("old writer did not close")
+				}
+			}
+		})
+	}
+}
+
+func TestManagementMigrationFaultRollsBackFloorRolesAndSchema(t *testing.T) {
+	ctx := context.Background()
+	url, name := pgtest.Database(t)
+	owner := pgtest.Connect(t, url)
+	group := name + "_runtime"
+	build := centerBuild(t)
+	if _, err := Apply(ctx, owner, build[:11], Options{Runner: "isolated-schema11-fixture", RuntimeRole: group}); err != nil {
+		t.Fatal(err)
+	}
+	f := seedNamespaceFixture(t, owner)
+	if err := insertNamespace(ctx, owner, f, platform.NewID(), false, 1, 1, false); err != nil {
+		t.Fatal(store.Sanitize("seed unresolved historical input", err))
+	}
+	fault := append([]Migration(nil), build...)
+	fault[11].SQL += "\nSELECT 1/0;\n"
+	digest := sha256.Sum256([]byte(fault[11].SQL))
+	fault[11].SHA256 = hex.EncodeToString(digest[:])
+	dir := t.TempDir()
+	_, err := ApplyManagement(ctx, owner, fault, Options{Runner: "isolated-injected-SQL-fault", RuntimeRole: group}, managementConfig(url, name, group), filepath.Join(dir, "source.dump"), filepath.Join(dir, "source.json"))
+	var failure *Failure
+	if !errors.As(err, &failure) || failure.SQLState != "22012" {
+		t.Fatalf("expected actual PostgreSQL transaction fault: %v", err)
+	}
+	var version, identities, roles int
+	var noManagement bool
+	var role string
+	if err := owner.QueryRow(ctx, `SELECT (SELECT max(version) FROM platform.schema_migration),(SELECT count(*) FROM fleet.routed_call),
+ (SELECT count(*) FROM pg_roles WHERE rolname LIKE $1),to_regnamespace('management') IS NULL,
+ (SELECT runtime_role::text FROM platform.ctr06_runtime_floor)`, name+"%_v2_%").Scan(&version, &identities, &roles, &noManagement, &role); err != nil || version != 11 || identities != 1 || roles != 0 || !noManagement || role != group {
+		t.Fatal("failed SQL did not roll back the floor, roles, schema and retained identity together")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "source.dump")); err != nil {
+		t.Fatal("fault recovery lost the source backup")
+	}
 }
 
 func managementConfig(url, name, group string) config.Migration {
