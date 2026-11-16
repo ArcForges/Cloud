@@ -706,6 +706,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/afv2-base-01-r2.json",
     "eng/policy/dependency-reviews/afv2-center-01-r1.json",
     "eng/policy/dependency-reviews/afv2-center-01-r2.json",
+    "eng/policy/dependency-reviews/afv2-center-01-r3.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -744,7 +745,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       "eng/policy/dependency-reviews/af-ctr-05-r19.json",
       "eng/policy/dependency-reviews/af-ctr-06-r31.json",
       "eng/policy/dependency-reviews/af-ctr-06-bridge-r2.json",
-      "eng/policy/dependency-reviews/afv2-center-01-r3.json",
+      "eng/policy/dependency-reviews/afv2-center-01-r4.json",
     ])
       assert.ok(!exempt.test(other), other);
     // Positive control: the rows match exactly the lines that name the two records, and every row matches one.

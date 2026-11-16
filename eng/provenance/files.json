@@ -819,6 +819,7 @@
     "eng/policy/dependency-reviews/afv2-base-01-r2.json",
     "eng/policy/dependency-reviews/afv2-center-01-r1.json",
     "eng/policy/dependency-reviews/afv2-center-01-r2.json",
+    "eng/policy/dependency-reviews/afv2-center-01-r3.json",
     "eng/policy/dependency-reviews/afv2-env-01-r1.json",
     "eng/policy/dependency-reviews/afv2-env-01-r2.json",
     "eng/policy/dependency-reviews/afv2-env-01-r3.json",
@@ -933,6 +934,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r134.json",
     "eng/provenance/artifact-profiles/cloud-release-r135.json",
     "eng/provenance/artifact-profiles/cloud-release-r136.json",
+    "eng/provenance/artifact-profiles/cloud-release-r137.json",
     "eng/provenance/artifact-profiles/cloud-release-r14.json",
     "eng/provenance/artifact-profiles/cloud-release-r15.json",
     "eng/provenance/artifact-profiles/cloud-release-r16.json",
@@ -1037,6 +1039,7 @@
     "eng/provenance/records/canonical-agpl-legal-r1.json",
     "eng/provenance/records/center-runtime-afv2-center-01-r1.json",
     "eng/provenance/records/center-runtime-afv2-center-01-r2.json",
+    "eng/provenance/records/center-runtime-afv2-center-01-r3.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r1.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r2.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r3.json",
@@ -1121,6 +1124,7 @@
     "eng/provenance/records/center-runtime-r9.json",
     "eng/provenance/records/center-worker-afv2-center-01-r1.json",
     "eng/provenance/records/center-worker-afv2-center-01-r2.json",
+    "eng/provenance/records/center-worker-afv2-center-01-r3.json",
     "eng/provenance/records/center-worker-afv2-env-01-r1.json",
     "eng/provenance/records/center-worker-afv2-env-01-r2.json",
     "eng/provenance/records/center-worker-afv2-env-01-r3.json",
@@ -2149,5 +2153,5 @@
     "tooling/wrangler-init.ts": "web-miniflare-compat-afv2-env-01-r2",
     "center/internal/schema/migrations/0012_management_storage.sql": "afv2-center-01-management-storage-r4"
   },
-  "artifacts": ["center-runtime-afv2-center-01-r2", "center-worker-afv2-center-01-r2"]
+  "artifacts": ["center-runtime-afv2-center-01-r3", "center-worker-afv2-center-01-r3"]
 }
