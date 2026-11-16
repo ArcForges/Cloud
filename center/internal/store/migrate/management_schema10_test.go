@@ -7,15 +7,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/bridgeproof"
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/store"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestManagementSchema10FiniteMaintenancePreservesHistory(t *testing.T) {
@@ -160,18 +163,19 @@ func TestManagementSchema10BackupRestoresIntoANewTargetGeneration(t *testing.T) 
 }
 
 func TestManagementSchema10RestoreFailureKeepsQuarantineAndCannotBeAdopted(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
 	build := centerBuild(t)
-	if _, err := Apply(ctx, owner, build[:10], Options{Runner: "actual-schema10-rejected-history-source", RuntimeRole: group}); err != nil {
+	if _, err := Apply(ctx, owner, build[:10], Options{Runner: "actual-schema10-restore-fault-source", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
-	// Supplied inconsistent old selection history is not a credential or a fake
-	// producer proof. Its exact bytes remain in the preserved failed target.
-	if _, err := owner.Exec(ctx, `INSERT INTO platform.runtime_credential(slot,login_role,rotated_at,rotated_by) VALUES('a','unknown_generation_a',now(),'historical inconsistent input')`); err != nil {
-		t.Fatal(store.Sanitize("seed inconsistent historical selection", err))
+	// Valid supplied selection history passes the unchanged source qualification.
+	// Only the new target is altered after the real restore child commits.
+	if _, err := owner.Exec(ctx, `INSERT INTO platform.runtime_credential(slot,login_role,rotated_at,rotated_by) VALUES('a',$1,now(),'historical valid input')`, group+"_a"); err != nil {
+		t.Fatal(store.Sanitize("seed valid historical selection", err))
 	}
 	dir := t.TempDir()
 	archive, metadata := filepath.Join(dir, "source.dump"), filepath.Join(dir, "source.json")
@@ -183,17 +187,75 @@ func TestManagementSchema10RestoreFailureKeepsQuarantineAndCannotBeAdopted(t *te
 	t.Cleanup(func() { pgtest.Drop(t, target) })
 	cfg := managementConfig(pgtest.WithDatabase(t, url, target), target, target+"_runtime")
 	cfg.Maintenance = url
-	if _, err := RestoreLogical(ctx, cfg, archive, captured.ArchiveSHA256, metadata, captured.MetadataSHA256, "actual-schema10-rejected-history-target"); err == nil || !strings.Contains(err.Error(), "UNKNOWN and quarantined") {
+	// Interpose only at the owned native child boundary. Every tool invocation
+	// delegates to the already checked real pg_restore. A marker is emitted only
+	// after its actual target transaction returned success, never as a substitute
+	// for restoring an archive. The product has no fault or override parameter.
+	realRestore, err := ctr06NativeTool("pg_restore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolDir := t.TempDir()
+	committed, proceed := filepath.Join(toolDir, "committed"), filepath.Join(toolDir, "proceed")
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	wrapper := "#!/bin/sh\n" + quote(realRestore) + " \"$@\"\nresult=$?\n[ \"$result\" -eq 0 ] || exit \"$result\"\n" +
+		"for arg do\n if [ \"$arg\" = " + quote("--dbname="+target) + " ]; then\n" +
+		"  : > " + quote(committed) + "\n  remaining=300\n  while [ ! -f " + quote(proceed) + " ] && [ \"$remaining\" -gt 0 ]; do\n    sleep 0.1\n    remaining=$((remaining-1))\n  done\n" +
+		"  [ -f " + quote(proceed) + " ] || exit 1\n fi\ndone\n"
+	if err := os.WriteFile(filepath.Join(toolDir, "pg_restore"), []byte(wrapper), 0o700); err != nil {
+		t.Fatal("write owned restore-child wrapper")
+	}
+	t.Setenv("PATH", toolDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	faultDone := make(chan error, 1)
+	go func() {
+		var faultErr error
+		defer func() {
+			if err := os.WriteFile(proceed, nil, 0o600); err != nil && faultErr == nil {
+				faultErr = errors.New("release owned restore child")
+			}
+			faultDone <- faultErr
+		}()
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if _, err := os.Stat(committed); err == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				faultErr = errors.New("real target restore did not reach the controlled child boundary")
+				return
+			case <-ticker.C:
+			}
+		}
+		owned, err := pgx.Connect(ctx, cfg.URL)
+		if err != nil {
+			faultErr = store.Sanitize("connect owned restore-fault target", err)
+			return
+		}
+		defer owned.Close(context.Background())
+		if _, err := owned.Exec(ctx, "ALTER TABLE fleet.routed_call DISABLE TRIGGER routed_call_guarded"); err != nil {
+			faultErr = store.Sanitize("apply owned target catalogue fault", err)
+		}
+	}()
+	_, restoreErr := RestoreLogical(ctx, cfg, archive, captured.ArchiveSHA256, metadata, captured.MetadataSHA256, "actual-schema10-target-only-fault")
+	cancel()
+	if err := <-faultDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreErr; err == nil || !strings.Contains(err.Error(), "UNKNOWN and quarantined") {
 		t.Fatalf("failed expansion did not preserve unknown quarantine: %v", err)
 	}
+	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	destination := pgtest.Connect(t, cfg.URL)
 	var version, history int
 	var marker string
 	var occupied bool
 	if err := destination.QueryRow(ctx, `SELECT (SELECT max(version) FROM platform.schema_migration),
- (SELECT count(*) FROM platform.runtime_credential WHERE login_role='unknown_generation_a'),
+ (SELECT count(*) FROM platform.runtime_credential WHERE login_role=$2),
  coalesce(shobj_description(d.oid,'pg_database'),''),EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$1)
- FROM pg_database d WHERE d.datname=current_database()`, cfg.RuntimeRole).Scan(&version, &history, &marker, &occupied); err != nil || version != 10 || history != 1 || marker != ctr06RestoreIsolationMarker || occupied {
+ FROM pg_database d WHERE d.datname=current_database()`, cfg.RuntimeRole, group+"_a").Scan(&version, &history, &marker, &occupied); err != nil || version != 10 || history != 1 || marker != ctr06RestoreIsolationMarker || occupied {
 		t.Fatal("failed expansion leaked a floor/role or discarded the source snapshot")
 	}
 	if _, err := Apply(ctx, destination, build, Options{Runner: "ordinary-cannot-adopt", RuntimeRole: cfg.RuntimeRole}); !errors.Is(err, ErrCTR06RetirementUnproven) {
