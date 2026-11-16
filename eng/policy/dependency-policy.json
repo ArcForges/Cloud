@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "31525fc8c1ae3114e7a5883a5d08a1e450498c63",
+  "sourceCommit": "49a2dad21aa2675db9b454d1a38d5fe83a2bd53e",
   "manifests": ["package.json"],
   "inputs": {
     ".dockerignore": "2e6cacafd55390ad89b423b752e690f21fc37f4a0c61611100e65d9a3e9a0e43",
     ".github/workflows/ci.yml": "5bfd0199d8c419bbd6b3fa1088cafb97cf554d3d42cfac08d78d02c42dad3d6c",
     ".gitignore": "3f4b2e7b8f7c7f0e7b1bc4888d5ab5855f4d11639669e534d8cd5f5b02ef00e0",
-    ".gitleaks.toml": "e0d91292a6b88fadaca1b5b4860c4a9ad099a4a91c3101cf372fd91252d48126",
+    ".gitleaks.toml": "fc4a2e662a9663504fec6223f61a85eea7d81e5dca5325c346df56f7629f9206",
     ".node-version": "5c293036fc0a61ad76e15d85f454c3c7cec157e181e035b69f95058a2c239144",
     ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
     ".python-version": "673e2ba07f95bfcfe0a543258b8e267954e403d1f466481c546f467f86b31d46",
@@ -106,7 +106,7 @@
     "docs/dependency-upgrade/afv2-env-01-current.json": "2b8e684802cf52aca4c3c26ea2ea516fd51d1fa3f5a75ad00fc6aa128d84cf74",
     "docs/deployment.md": "f04208329156fe52ab9a7b807884fc0c50871b5b64b808f0c20028a7f3ddd65d",
     "docs/engineering-controls.md": "a55b10de5f185c358d049062673905f9a42fa89692b030d1bac7434962c020c0",
-    "docs/postgres-store.md": "404302f4e233cf67ac402d63982f6517cb196b2d8cd59c31345e034120c9b6c3",
+    "docs/postgres-store.md": "71cf3381c0487c103db111638aa580a73a18ff8ee7e03d5c98d48c076c71d91e",
     "eng/actionlint.yaml": "d4e5cfe59b30d0e76a9ca635908652345230760807291154674714bddad46c87",
     "eng/center.py": "6a631df54242d6c58ce3a1c59c7cb7a69d20cc86c4e69f13bf3270ed65cb1020",
     "eng/check_toolchain.py": "1d1314d2af3f658ff44ff8a9169c023dc5d75d68c2024031d5186597250f90ff",
@@ -232,7 +232,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
     "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
     "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-    "eng/provenance/files.json": "4b72e9d43bf1da325e53f9a5ccc02bed3ec5080e800ae81bc37a2313dba83371",
+    "eng/provenance/files.json": "3e27e69ae720122a48ea6a2fed002cce2875799e171accab55e0304563129d38",
     "eng/provenance/records/afv2-center-01-management-storage-r1.json": "0ec5d5aadbedb3c1dd54741f2e1df4711852a9b8b42acbb5246a42401548215f",
     "eng/provenance/records/afv2-center-01-management-storage-r2.json": "5f9910beb89d51add566f63af9822011250bd5b374fd9214ff09acfeb62d4ea6",
     "eng/provenance/records/afv2-center-01-management-storage-r3.json": "84a30e4eea501632e65292e9d441449ae8bbd440287b2607ebbdfc1859d010b8",
@@ -553,7 +553,7 @@
     "tests/worker/docker-context.test.ts": "62fb772c1289047f396ec0be6c8c1a37f7bcff45edd99f332d59f72694e60914",
     "tests/worker/postgres-deploy.test.ts": "72c191704a5e7dfb7b5a0fc87c4035f3859eaa9693f628f61cfec58879b2f41c",
     "tests/worker/proof-gate.test.ts": "debc5ba809a67252ebf373a37817e9d6799bb29a88ba344e328b582c46573a63",
-    "tests/worker/provenance.test.ts": "5d61eb0aabd08ff55d8156b9e97c165379f90b5f548dad6406979e371e359e68",
+    "tests/worker/provenance.test.ts": "8601491cdf360c60c653698f772152b87455237edb3924c7071b4237338a0e94",
     "tests/worker/release-provenance.test.ts": "e3e8f48298284845c74c561d9a34a0847cc415e04d121aa128c6f871c7e227e3",
     "tests/worker/support/ctr06-bootstrap-mock.ts": "aa369367046fa25269231b36b814ecef4cb68533398b355c74b2919b55a546e1",
     "tests/worker/support/ctr06-bootstrap-production-driver.ts": "9f8ca433063dd3f1715862a8691119095ecafb8b05115b6941b1e3cb0ee3cf64",
@@ -593,14 +593,14 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "Maintainer-authorized dependency/source admission; final independent review pending",
+    "reviewer": "Maintainer-authorized documentation/input admission; final independent review pending",
     "date": "2026-11-17",
-    "rationale": "AFV2-ID-01 source and artifact-input successor at 31525fc8c1ae3114e7a5883a5d08a1e450498c63. Account recovery, account security/recovery epochs, bounded account export and operation-bound deletion, finite schema12-to13 role rotation, and quarantined schema13 restore are original Cloud AGPL-3.0-only implementation. The schema13 migration was independently authored from requirements; no new copied Design DDL is admitted. Retain every previous image input name and explicitly bind every actual Docker-carried Go/C# and embedded asset, including the real native-generated schema13 catalogue inventory. The changed generated identity routing input is bound to the actual locked Wrangler dry-run output and its complete parsed/emitted/import/export closure. All package versions, coordinates, integrity, compiler and base pins, complete original legal terms, historical bridge identities and immutable predecessor records remain unchanged. Author packaging checks establish this source/artifact input closure only. Final exact-head required native profiles, independent review and ordinary delivery evidence remain required; no publication, deployment or production activation is asserted.",
+    "rationale": "AFV2-ID-01 documentation-formatting input successor at 49a2dad21aa2675db9b454d1a38d5fe83a2bd53e. Apply the repository's required Prettier layout to docs/postgres-store.md after the exact9483 Linux profile reported that formatting failure. No source code, SQL, schema oracle, package version, dependency coordinate, artifact input or functional behavior changes. Retain all586 existing admitted input names and the complete131-package coordinate/integrity map. Update only the formatted document and this successor's provenance inventory, exact-path public-digest scan block and closed positive/refusal pin inputs. Preserve used r1, R138 and both current runtime/Worker records byte-for-byte. Every existing R138 image468, Worker27, bridge8 and security-bridge36 input hash still matches; the formatted document is outside all four artifact/producer closures. The active artifact bindings and deterministic NOTICE remain unchanged. Final exact-head required profiles and independent review remain required; no new runtime, publication, deployment or production activation result is asserted.",
     "inputs": {
       ".dockerignore": "2e6cacafd55390ad89b423b752e690f21fc37f4a0c61611100e65d9a3e9a0e43",
       ".github/workflows/ci.yml": "5bfd0199d8c419bbd6b3fa1088cafb97cf554d3d42cfac08d78d02c42dad3d6c",
       ".gitignore": "3f4b2e7b8f7c7f0e7b1bc4888d5ab5855f4d11639669e534d8cd5f5b02ef00e0",
-      ".gitleaks.toml": "e0d91292a6b88fadaca1b5b4860c4a9ad099a4a91c3101cf372fd91252d48126",
+      ".gitleaks.toml": "fc4a2e662a9663504fec6223f61a85eea7d81e5dca5325c346df56f7629f9206",
       ".node-version": "5c293036fc0a61ad76e15d85f454c3c7cec157e181e035b69f95058a2c239144",
       ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
       ".python-version": "673e2ba07f95bfcfe0a543258b8e267954e403d1f466481c546f467f86b31d46",
@@ -699,7 +699,7 @@
       "docs/dependency-upgrade/afv2-env-01-current.json": "2b8e684802cf52aca4c3c26ea2ea516fd51d1fa3f5a75ad00fc6aa128d84cf74",
       "docs/deployment.md": "f04208329156fe52ab9a7b807884fc0c50871b5b64b808f0c20028a7f3ddd65d",
       "docs/engineering-controls.md": "a55b10de5f185c358d049062673905f9a42fa89692b030d1bac7434962c020c0",
-      "docs/postgres-store.md": "404302f4e233cf67ac402d63982f6517cb196b2d8cd59c31345e034120c9b6c3",
+      "docs/postgres-store.md": "71cf3381c0487c103db111638aa580a73a18ff8ee7e03d5c98d48c076c71d91e",
       "eng/actionlint.yaml": "d4e5cfe59b30d0e76a9ca635908652345230760807291154674714bddad46c87",
       "eng/center.py": "6a631df54242d6c58ce3a1c59c7cb7a69d20cc86c4e69f13bf3270ed65cb1020",
       "eng/check_toolchain.py": "1d1314d2af3f658ff44ff8a9169c023dc5d75d68c2024031d5186597250f90ff",
@@ -825,7 +825,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
       "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
       "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-      "eng/provenance/files.json": "4b72e9d43bf1da325e53f9a5ccc02bed3ec5080e800ae81bc37a2313dba83371",
+      "eng/provenance/files.json": "3e27e69ae720122a48ea6a2fed002cce2875799e171accab55e0304563129d38",
       "eng/provenance/records/afv2-center-01-management-storage-r1.json": "0ec5d5aadbedb3c1dd54741f2e1df4711852a9b8b42acbb5246a42401548215f",
       "eng/provenance/records/afv2-center-01-management-storage-r2.json": "5f9910beb89d51add566f63af9822011250bd5b374fd9214ff09acfeb62d4ea6",
       "eng/provenance/records/afv2-center-01-management-storage-r3.json": "84a30e4eea501632e65292e9d441449ae8bbd440287b2607ebbdfc1859d010b8",
@@ -1146,7 +1146,7 @@
       "tests/worker/docker-context.test.ts": "62fb772c1289047f396ec0be6c8c1a37f7bcff45edd99f332d59f72694e60914",
       "tests/worker/postgres-deploy.test.ts": "72c191704a5e7dfb7b5a0fc87c4035f3859eaa9693f628f61cfec58879b2f41c",
       "tests/worker/proof-gate.test.ts": "debc5ba809a67252ebf373a37817e9d6799bb29a88ba344e328b582c46573a63",
-      "tests/worker/provenance.test.ts": "5d61eb0aabd08ff55d8156b9e97c165379f90b5f548dad6406979e371e359e68",
+      "tests/worker/provenance.test.ts": "8601491cdf360c60c653698f772152b87455237edb3924c7071b4237338a0e94",
       "tests/worker/release-provenance.test.ts": "e3e8f48298284845c74c561d9a34a0847cc415e04d121aa128c6f871c7e227e3",
       "tests/worker/support/ctr06-bootstrap-mock.ts": "aa369367046fa25269231b36b814ecef4cb68533398b355c74b2919b55a546e1",
       "tests/worker/support/ctr06-bootstrap-production-driver.ts": "9f8ca433063dd3f1715862a8691119095ecafb8b05115b6941b1e3cb0ee3cf64",
@@ -1193,8 +1193,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "The existing Go/PostgreSQL and retained Native AOT/Worker runtime boundaries remain. Account lifecycle and schema13 add source behavior and data safeguards within those admitted capabilities. Preserve actual native migration/restore, protocol, security and class-compilation gates without a new dependency, runtime framework, publication channel or activation authority.",
-    "maintenance": "Retain the complete 131-package root/isolated npm coordinate and integrity map, every NuGet/Go lock, accepted ENV compiler/tool/base pin, existing dependency class and original legal/SBOM evidence. This is an input-bound owner-module successor; it performs no upgrade or new dependency admission."
+    "runtimeAssessment": "Documentation layout and input-bound receipt changes only. All actual runtime, native, SQL and recovery behavior, Worker bytes, artifact closure, original legal terms and existing validation thresholds remain unchanged. The successor does not add or upgrade a dependency or admit a new capability.",
+    "maintenance": "Retain the accepted toolchains and every NuGet/Go/npm lock, complete131-package coordinate/integrity map, dependency class, existing legal/SBOM evidence, active R138 artifacts and historical receipt. This successor binds the minimal documentation-formatting correction and its normal source gates."
   },
   "closure": {
     "node_modules/@arcforges/ai-internal": {
@@ -2007,7 +2007,7 @@
   "buildToolPrereleases": {
     "unenv": "2.0.0-rc.24"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/afv2-id-01-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/afv2-id-01-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",

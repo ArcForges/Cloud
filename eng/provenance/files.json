@@ -850,6 +850,7 @@
     "eng/policy/dependency-reviews/afv2-env-01-r4.json",
     "eng/policy/dependency-reviews/afv2-env-01-r5.json",
     "eng/policy/dependency-reviews/afv2-id-01-r1.json",
+    "eng/policy/dependency-reviews/afv2-id-01-r2.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r1.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r2.json",
     "eng/policy/dependency-reviews/cloud-01-r1.json",
