@@ -26,7 +26,7 @@ func TestManagementSchema10FiniteMaintenancePreservesHistory(t *testing.T) {
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	if _, err := Apply(ctx, owner, build[:10], Options{Runner: "actual-schema10-fixture", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestManagementSchema10LaterFaultKeepsCommittedFloorAndCanResume(t *testing.
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	if _, err := Apply(ctx, owner, build[:10], Options{Runner: "actual-schema10-fixture", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestManagementSchema10BackupRestoresIntoANewTargetGeneration(t *testing.T) 
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	if _, err := Apply(ctx, owner, build[:10], Options{Runner: "actual-schema10-restore-source", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestManagementSchema10RestoreFailureKeepsQuarantineAndCannotBeAdopted(t *te
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	if _, err := Apply(ctx, owner, build[:10], Options{Runner: "actual-schema10-restore-fault-source", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}

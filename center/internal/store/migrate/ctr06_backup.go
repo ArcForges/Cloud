@@ -577,7 +577,7 @@ func ctr06VerifyRestoredData(ctx context.Context, conn *pgx.Conn, meta ctr06Back
 		return "", errors.New("the restored table data could not be checked")
 	}
 	for i := range data {
-		if data[i].Name == "platform.ctr06_runtime_floor" || data[i].Name == "platform.ctr06_restore_admission" || (len(build) == 12 && data[i].Name == "management.cutover_receipt") {
+		if data[i].Name == "platform.ctr06_runtime_floor" || data[i].Name == "platform.ctr06_restore_admission" || (len(build) >= 12 && data[i].Name == "management.cutover_receipt") {
 			continue
 		}
 		if data[i] != meta.Tables[i] {

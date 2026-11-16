@@ -26,10 +26,12 @@ func restoreManagementSchema10(ctx context.Context, conn *pgx.Conn, cfg config.M
 		}
 	}()
 	build, err := Load(schema.Migrations())
-	if err != nil || len(build) != 12 || build[11].Name != "0012_management_storage.sql" {
+	if err != nil || len(build) < 12 || build[11].Name != "0012_management_storage.sql" {
 		return report, ErrManagementTransitionRequired
 	}
-	options := Options{Runner: runner, RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout, localRestore: c}
+	build = build[:12]
+	schemas, grants := schema.AtVersion(12)
+	options := Options{Runner: runner, RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout, localRestore: c, Schemas: schemas, Grants: grants}
 	options.defaults()
 	if err := lock(ctx, conn, options); err != nil {
 		return report, err

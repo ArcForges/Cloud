@@ -23,10 +23,12 @@ func backupDefinition(version int) (inventory, catalogue string, err error) {
 		return ctr06Schema11Inventory, ctr06Schema11CatalogueSHA, nil
 	case 12:
 		build, err := Load(schema.Migrations())
-		if err != nil || len(build) != 12 || build[11].SHA256 != managementSchema12MigrationSHA {
+		if err != nil || len(build) < 12 || build[11].SHA256 != managementSchema12MigrationSHA {
 			return "", "", errors.New("schema12 backup catalogue qualification does not match this migration build")
 		}
 		return managementSchema12Inventory, managementSchema12CatalogueSHA, nil
+	case 13:
+		return lifecycleBackupDefinition()
 	default:
 		return "", "", errors.New("unsupported logical backup schema")
 	}

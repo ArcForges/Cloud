@@ -39,7 +39,7 @@ func TestManagementOpenOldWriterAndMembershipPathRefuse(t *testing.T) {
 			url, name := pgtest.Database(t)
 			owner := pgtest.Connect(t, url)
 			group := name + "_runtime"
-			build := centerBuild(t)
+			build := managementBuild(t)
 			if _, err := Apply(ctx, owner, build[:11], Options{Runner: "isolated-schema11-fixture", RuntimeRole: group}); err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +84,7 @@ func TestManagementMigrationFaultRollsBackFloorRolesAndSchema(t *testing.T) {
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	if _, err := Apply(ctx, owner, build[:11], Options{Runner: "isolated-schema11-fixture", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestManagementFreshStorageAndSQLGuards(t *testing.T) {
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	result, err := Apply(ctx, owner, build, Options{Runner: "isolated-native-fixture", RuntimeRole: group})
 	if err != nil || result.Version != 12 || result.State != StateCurrent {
 		t.Fatalf("fresh management migration: %v", err)
@@ -234,7 +234,7 @@ func TestManagementOldBridgeCannotQualifySchema10(t *testing.T) {
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	if _, err := Apply(ctx, owner, build[:10], Options{Runner: "isolated-schema10-fixture", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestManagementValid11PreservesLegacyUnknownAndFencesItsWriters(t *testing.T
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	if _, err := Apply(ctx, owner, build[:11], Options{Runner: "isolated-schema11-fixture", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func TestManagementBackupRestoreRetainsUnknownAndRenewsTargetAdmission(t *testin
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	build := centerBuild(t)
+	build := managementBuild(t)
 	if _, err := Apply(ctx, owner, build, Options{Runner: "isolated-schema12-backup-source", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestManagementIncompleteBackupRefusesBeforeCreatingADestination(t *testing.
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	if _, err := Apply(ctx, owner, centerBuild(t), Options{Runner: "isolated-schema12-negative-source", RuntimeRole: group}); err != nil {
+	if _, err := Apply(ctx, owner, managementBuild(t), Options{Runner: "isolated-schema12-negative-source", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
