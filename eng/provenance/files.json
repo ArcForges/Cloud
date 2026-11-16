@@ -1017,6 +1017,7 @@
     "eng/provenance/files.json",
     "eng/provenance/records/afv2-center-01-management-storage-r1.json",
     "eng/provenance/records/afv2-center-01-management-storage-r2.json",
+    "eng/provenance/records/afv2-center-01-management-storage-r3.json",
     "eng/provenance/records/arcnotes-build-identity-r1.json",
     "eng/provenance/records/arcnotes-build-identity-r2.json",
     "eng/provenance/records/arcnotes-build-identity-r3.json",
@@ -2129,7 +2130,7 @@
     "eng/native-toolchain.json": "contracts-native-tools-afv2-env-01-r1",
     "tests/tooling/test_native_toolchain.py": "contracts-native-tools-afv2-env-01-r1",
     "tooling/wrangler-init.ts": "web-miniflare-compat-afv2-env-01-r2",
-    "center/internal/schema/migrations/0012_management_storage.sql": "afv2-center-01-management-storage-r2"
+    "center/internal/schema/migrations/0012_management_storage.sql": "afv2-center-01-management-storage-r3"
   },
   "artifacts": [
     "center-runtime-afv2-env-01-r4",

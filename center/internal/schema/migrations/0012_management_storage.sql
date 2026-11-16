@@ -201,9 +201,9 @@ BEGIN
   PERFORM 1 FROM fleet.hub_lease h WHERE h.singleton AND h.fence=NEW.hub_fence AND h.expires_at>clock_timestamp() FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'current hub lease required' USING ERRCODE='55000'; END IF;
   IF NEW.state<>7 THEN
-   PERFORM 1 FROM management.command_identity i JOIN management.node_protocol p USING(enrollment_id,node_id,account_id)
+   PERFORM 1 FROM management.command_identity identity_row JOIN management.node_protocol p USING(enrollment_id,node_id,account_id)
     JOIN fleet.node n ON (n.enrollment_id,n.node_id,n.user_id)=(p.enrollment_id,p.node_id,p.account_id)
-    WHERE i.account_id=NEW.account_id AND i.command_id=NEW.command_id AND p.revoked_at IS NULL
+    WHERE identity_row.account_id=NEW.account_id AND identity_row.command_id=NEW.command_id AND p.revoked_at IS NULL
     AND n.revoked_at IS NULL AND n.connection_id=NEW.channel_epoch FOR SHARE OF p,n;
    IF NOT FOUND THEN RAISE EXCEPTION 'current Node protocol required' USING ERRCODE='55000'; END IF;
   END IF;
