@@ -305,7 +305,7 @@ type RestoreReport struct {
 	RestoreReceipt     string `json:"restoreReceipt"`
 }
 
-// RestoreLogical admits only a supported 0011 backup with its protected
+// RestoreLogical admits only a supported 0011/0012 backup with its protected
 // same-snapshot metadata. The original archive is never modified, and a
 // destination is created only after the complete preflight checks succeed.
 func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expected, metadataPath, metadataDigest, runner string) (report RestoreReport, finalErr error) {
@@ -328,11 +328,20 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 	if err != nil || strings.TrimPrefix(maintenanceURL.Path, "/") == cfg.Database {
 		return report, errors.New("a distinct maintenance database and fresh destination are required")
 	}
-	build, err := loadCTR06Build()
-	if err != nil || len(build) != 11 || build[10].Name != "0011_fleet_routed_files.sql" {
+	build, err := Load(schema.Migrations())
+	if err != nil || len(build) < 11 || build[10].Name != "0011_fleet_routed_files.sql" {
 		return report, errors.New("the supported migration build is unavailable")
 	}
 	metadata, err := ctr06ReadMetadata(metadataPath, metadataDigest)
+	if err != nil {
+		return report, err
+	}
+	version := metadata.SourceSchemaVersion
+	if (version != 11 && version != 12) || version > len(build) {
+		return report, errors.New("unsupported backup schema")
+	}
+	build = build[:version]
+	inventory, _, err := backupDefinition(version)
 	if err != nil {
 		return report, err
 	}
@@ -369,12 +378,19 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 	if err != nil || ctr06SHA(raw) != metadata.ArchiveTOCSHA256 {
 		return report, errors.New("the backup inventory does not match its trusted metadata")
 	}
-	if err := ctr06ArchiveInventory(raw, metadata.LargeObjects); err != nil {
+	if err := ctr06ArchiveInventoryFor(raw, inventory, metadata.LargeObjects); err != nil {
 		return report, err
 	}
-	selected, err := restoreList(raw, ctr06Schemas())
+	restoreSchemas, _ := schema.AtVersion(version)
+	selected, err := restoreList(raw, restoreSchemas)
 	if err != nil {
 		return report, err
+	}
+	if version == 12 {
+		selected, err = managementRestoreList(selected)
+		if err != nil {
+			return report, err
+		}
 	}
 	sequences, err := ctr06ArchiveFacts(ctx, tool, childEnv, archive, build)
 	if err != nil || !reflect.DeepEqual(sequences, metadata.Sequences) {
@@ -397,10 +413,16 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 		return report, errors.New("the destination recovery identity could not be established")
 	}
 	defer capability.destroy()
+	if version == 12 {
+		capability.managementArtifact, err = managementArtifact(runner, build[11])
+		if err != nil {
+			return report, err
+		}
+	}
 	options := Options{Runner: runner, RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout, localRestore: capability}
 	initial, err := Apply(ctx, conn, build, options)
 	if err != nil || initial.State != StateCurrent || initial.Grants != "" {
-		return report, errors.New("the fresh destination 0011 admission outcome is UNKNOWN; preserve it for investigation")
+		return report, errors.New("the fresh destination admission outcome is UNKNOWN; preserve it for investigation")
 	}
 	if err := checkRestoreIsolation(ctx, conn, cfg.RuntimeRole); err != nil {
 		return report, err

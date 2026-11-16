@@ -159,6 +159,12 @@ func guardManagement(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Opt
 		return ErrManagementTransitionRequired
 	}
 	if a.source == 0 {
+		if c := options.localRestore; c != nil {
+			if !c.active || c.conn != conn || requireCTR06RestoreIsolation(ctx, tx) != nil {
+				return ErrManagementTransitionRequired
+			}
+			return nil
+		}
 		_, _, err := readyCTR06Admission(ctx, tx, options.RuntimeRole)
 		return err
 	}
@@ -217,6 +223,9 @@ func guardManagement(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Opt
 }
 
 func recordManagement(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Options) error {
+	if options.localRestore != nil {
+		return nil
+	} // Source readiness is never copied; final target proof is atomic with restore admission.
 	a := options.management
 	if a == nil || !a.active || a.conn != conn {
 		return ErrManagementTransitionRequired

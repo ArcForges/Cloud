@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -124,13 +125,19 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if _, err := tx.Exec(ctx, "SET LOCAL search_path=pg_catalog; SET LOCAL TIME ZONE 'UTC'"); err != nil {
 		return report, errors.New("the source snapshot settings could not be established")
 	}
-	build, err := loadCTR06Build()
-	if err != nil || len(build) != 11 {
+	build, err := Load(schema.Migrations())
+	if err != nil || len(build) < 11 {
 		return report, errors.New("the supported migration catalogue is unavailable")
 	}
 	applied, exists, err := ReadApplied(ctx, tx)
-	if err != nil || !exists || len(applied) != 11 {
-		return report, errors.New("only a supported complete 0011 source can be captured")
+	if err != nil || !exists || (len(applied) != 11 && len(applied) != 12) || len(applied) > len(build) {
+		return report, errors.New("only a supported complete 0011 or 0012 source can be captured")
+	}
+	version := len(applied)
+	build = build[:version]
+	inventory, expectedCatalogue, err := backupDefinition(version)
+	if err != nil {
+		return report, err
 	}
 	comparison := Compare(build, applied)
 	if len(comparison.Pending) != 0 || len(comparison.Problems) != 0 {
@@ -145,7 +152,10 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if err := tx.QueryRow(ctx, "SELECT system_identifier::text,current_setting('server_version_num')::int FROM pg_catalog.pg_control_system()").Scan(&sourceCluster, &serverVersion); err != nil || !ctr06ClusterID.MatchString(sourceCluster) || serverVersion/10000 != TestedMajor {
 		return report, errors.New("the source cluster identity or PostgreSQL major is unsupported")
 	}
-	tables, err := ctr06RequiredTables()
+	if version == 12 && requireManagementReady(ctx, tx) != nil {
+		return report, ErrManagementTransitionRequired
+	}
+	tables, err := ctr06RequiredTablesFrom(inventory)
 	if err != nil {
 		return report, err
 	}
@@ -176,7 +186,7 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, err
 	}
 	catalogue, err := ctr06CatalogueSHA(ctx, tx)
-	if err != nil || catalogue != ctr06Schema11CatalogueSHA {
+	if err != nil || catalogue != expectedCatalogue {
 		return report, errors.New("the source schema definitions are not the supported catalogue")
 	}
 	data, err := ctr06SnapshotData(ctx, tx, tables)
@@ -217,10 +227,11 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if err != nil {
 		return report, err
 	}
-	if err := ctr06ArchiveInventory(raw, objects); err != nil {
+	if err := ctr06ArchiveInventoryFor(raw, inventory, objects); err != nil {
 		return report, err
 	}
-	if _, err := restoreList(raw, ctr06Schemas()); err != nil {
+	backupSchemas, _ := schema.AtVersion(version)
+	if _, err := restoreList(raw, backupSchemas); err != nil {
 		return report, err
 	}
 	archiveSequence, err := ctr06ArchiveFacts(ctx, restore, childEnv, archive, build)
@@ -247,7 +258,7 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	}
 	meta := ctr06BackupMetadata{Version: ctr06BackupMetadataVersion, Procedure: "checked-full-pg-dump-exported-snapshot-v1",
 		ArchiveLength: info.Size(), ArchiveSHA256: hex.EncodeToString(digester.Sum(nil)), ArchiveTOCSHA256: ctr06SHA(raw),
-		SourceCluster: sourceCluster, SourceSnapshot: snapshot, SourceRuntimeRole: sourceRole, SourceServerMajor: serverVersion / 10000, SourceSchemaVersion: 11,
+		SourceCluster: sourceCluster, SourceSnapshot: snapshot, SourceRuntimeRole: sourceRole, SourceServerMajor: serverVersion / 10000, SourceSchemaVersion: version,
 		SourceMigrations: migrations, SourceCatalogueSHA256: catalogue, Tables: data, Sequences: sequences, LargeObjects: objects}
 	if err := ctr06ValidateMetadata(meta, build); err != nil {
 		return report, err
@@ -267,5 +278,5 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, err
 	}
 	return BackupCaptureReport{ArchiveSHA256: meta.ArchiveSHA256, ArchiveLength: meta.ArchiveLength,
-		MetadataSHA256: ctr06SHA(encoded), SchemaVersion: 11}, nil
+		MetadataSHA256: ctr06SHA(encoded), SchemaVersion: version}, nil
 }

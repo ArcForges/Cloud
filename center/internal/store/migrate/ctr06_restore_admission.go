@@ -20,14 +20,15 @@ import (
 // digest is bound to the target floor in 0011, but the digest is not authority
 // to complete a restore after this capability has been lost.
 type restoreCapability struct {
-	conn           *pgx.Conn
-	cluster        string
-	databaseOID    uint32
-	ownerOID       uint32
-	archiveSHA256  string
-	metadataSHA256 string
-	secret         [32]byte
-	active         bool
+	conn               *pgx.Conn
+	cluster            string
+	databaseOID        uint32
+	ownerOID           uint32
+	archiveSHA256      string
+	metadataSHA256     string
+	secret             [32]byte
+	active             bool
+	managementArtifact string
 }
 
 func newRestoreCapability(ctx context.Context, conn *pgx.Conn, archive, metadata string) (*restoreCapability, error) {
@@ -233,6 +234,11 @@ func finalizeCTR06Restore(ctx context.Context, conn *pgx.Conn, runtimeRole, sour
  WHERE singleton AND kind='restore' AND state='PENDING' AND capability_sha256=$2 AND receipt_sha256 IS NULL`, receipt, c.tokenDigest())
 		if err != nil || tag.RowsAffected() != 1 {
 			return ErrCTR06RetirementUnproven
+		}
+		if c.managementArtifact != "" {
+			if err := finishManagementRestore(ctx, tx, conn, runtimeRole, sourceRole, c); err != nil {
+				return err
+			}
 		}
 		var database string
 		if err := tx.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {

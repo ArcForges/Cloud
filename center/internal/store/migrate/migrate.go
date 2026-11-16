@@ -490,7 +490,7 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 		return result, Sanitize("read platform.schema_migration", err)
 	}
 	comparison := result.describe(build, applied, exists)
-	if len(applied) == 0 && len(build) == 12 && build[11].Name == "0012_management_storage.sql" && options.localRestore == nil {
+	if len(applied) == 0 && len(build) == 12 && build[11].Name == "0012_management_storage.sql" {
 		artifact, err := managementArtifact(options.Runner, build[11])
 		if err != nil {
 			return result, err

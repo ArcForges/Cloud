@@ -49,9 +49,24 @@ and the protected artifact path remain separate. H-03 production/destructive
 operator admission stays closed; no deployment switch is changed here.
 
 The existing schema11 backup and quarantined restore retain their exact supported
-0001–0011 prefix and fixed catalogue/inventory. V2 backup/restore qualification is
-still being implemented in this partial candidate; it is not reported as passed.
-Source readiness copied into another database never authorizes that destination.
+0001–0011 prefix and fixed catalogue/inventory. The same logical-backup commands
+also select the closed schema12 catalogue and object inventory, derived from the
+real H-22 fresh migration at `0aba947d`. Source archives cannot supply their own
+definition oracle. Capture checks every table, sequence and large object in its
+exported snapshot; restore rechecks them against the actual quarantined target.
+
+V2 restore excludes the source cutover receipt's data and preserves the target's
+native floor/admission. The private same-invocation restore capability completes
+the target-specific cutover and original restore admission atomically. Old
+protocols are revoked and channel presence is cleared before READY. Saved command
+and unknown/final outcome identities remain; old protocol authority cannot admit
+new work. Fresh enrollment/local authorization belongs to the later channel
+integration, and no Node owner epoch or native effect is invented here. Source
+readiness copied into another database never authorizes that destination.
+
+This candidate's new backup/restore code has compiled on Windows. Its native
+round-trip and failure fixtures still require the exact pushed source on H-22;
+source identity and compilation are not a restore pass.
 
 ## Targeted checks
 
