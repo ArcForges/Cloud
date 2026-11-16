@@ -7,7 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/ArcForges/Cloud/center/internal/mail"
+	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
 // The two messages the center sends, named by the line a failed delivery logs. The line carries the outcome word and nothing else.
@@ -109,6 +113,33 @@ func (s *Service) deliver(ctx context.Context, message mail.Message, failure str
 		sendContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryTimeout)
 		defer cancel()
 		s.observeDelivery(mail.Outcome(s.mailer.Send(sendContext, message)), failure)
+	})
+}
+
+// Delivery failure leaves no success claim and no authority. Requesting another
+// bounded recovery ceremony is the retry path; no raw mail/code is persisted.
+func (s *Service) deliverRecovery(ctx context.Context, flowID platform.ID, message mail.Message) {
+	if !s.deliveries.add() {
+		return
+	}
+	s.background(func() {
+		defer s.deliveries.done()
+		outcome := "failed"
+		defer func() {
+			_ = recover()
+			s.observeDelivery(outcome, "a recovery code could not be delivered")
+			state := int16(3)
+			if outcome == "sent" {
+				state = 2
+			}
+			_ = s.db.InTx(context.WithoutCancel(ctx), "record recovery mail outcome", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `UPDATE identity.auth_flow SET delivery_state=$2 WHERE flow_id=$1 AND consumed_at IS NULL`, flowID, state)
+				return err
+			})
+		}()
+		sendContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryTimeout)
+		defer cancel()
+		outcome = mail.Outcome(s.mailer.Send(sendContext, message))
 	})
 }
 
