@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-FROM python:3.15.2-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS native-tools
+FROM python:3.16.0a2-slim-trixie@sha256:b743a8ab2708d630f1c1c008ef5c99d4b635ec16bb2012284f731d9957a14a1c AS native-tools
 # Distro packages bootstrap the separate tools; every product compilation selects
 # the archive-verified LLVM and source-verified GNU releases below.
 RUN apt-get update && apt-get install --no-install-recommends -y build-essential ca-certificates zlib1g-dev \
