@@ -29,18 +29,28 @@ schema11; they are not evidence that old routing works after V2 expansion.
   then 0012 in the same invocation. No predecessor backup or old-writer set is
   invented: the receipt explicitly binds fixed fresh-state absence labels.
 - Valid schema11: `migrate management --archive <new absolute path> --metadata
-  <new absolute path>` first captures a real exported-snapshot logical backup.
+<new absolute path>` first captures a real exported-snapshot logical backup.
   Under the direct migration lock and full legacy table locks it rechecks data,
   catalogue, sequences and large objects, refuses surviving writer sessions or
   unknown privilege/membership paths, fences old roles and creates a new NOLOGIN
   runtime generation. The new floor, target-specific cutover receipt and 0012
   commit atomically. Normal credential provisioning follows; no secret is in the
-  receipt. Failures preserve the backup and require inspection before retry.
+  receipt. Use the returned `runtimeRole` with the existing protected
+  `admin rotate-runtime-credential` procedure; the retired generation is not
+  silently re-enabled. Failures preserve the backup and require inspection
+  before retry with distinct new output paths.
 - Existing schema10: this entry refuses before backup or SQL changes. The old
   `RequireCTR06SecurityBridge` hard stop remains. No published qualified V2
   successor has been admitted, and neither a supplied test key nor an executable
   self-hash can replace that prerequisite. This is negative evidence, never a
   successful schema10 upgrade.
+
+A revoked protocol cannot reserve a new identity or increase an operation's
+delivery count/change its channel. An existing UNKNOWN can still accept a definite
+final observation under the current hub with its original identity, owner epoch,
+digest, channel and delivery count. The transport must verify the observation;
+this database transition supplies no signature or delivery authority. Final
+outcomes remain immutable.
 
 The transition artifact digest binds actual executing bytes, the supplied build
 label and the exact 0012 hash. It is an identity receipt, not a publication
@@ -51,7 +61,7 @@ operator admission stays closed; no deployment switch is changed here.
 The existing schema11 backup and quarantined restore retain their exact supported
 0001–0011 prefix and fixed catalogue/inventory. The same logical-backup commands
 also select the closed schema12 catalogue and object inventory, derived from the
-real H-22 fresh migration at `0aba947d`. Source archives cannot supply their own
+real H-22 fresh migration at `c0d9a62c`. Source archives cannot supply their own
 definition oracle. Capture checks every table, sequence and large object in its
 exported snapshot; restore rechecks them against the actual quarantined target.
 
@@ -64,9 +74,9 @@ new work. Fresh enrollment/local authorization belongs to the later channel
 integration, and no Node owner epoch or native effect is invented here. Source
 readiness copied into another database never authorizes that destination.
 
-This candidate's new backup/restore code has compiled on Windows. Its native
-round-trip and failure fixtures still require the exact pushed source on H-22;
-source identity and compilation are not a restore pass.
+Exact native source, backup/restore results and remaining qualification blockers
+are recorded separately in Plan. Source identity or compilation alone is never
+a restore pass or production activation.
 
 ## Targeted checks
 

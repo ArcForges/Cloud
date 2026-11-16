@@ -45,19 +45,21 @@ commands:
   serve                            serve the public routes (the default); configured by ARCFORGES_CENTER_* (docs/center.md)
   migrate [apply|status|plan]      apply the PostgreSQL migrations (apply, the default), or report them without changing
                                    anything; configured by ARCFORGES_CENTER_MIGRATION_DATABASE_URL (docs/postgres-store.md)
+  migrate management --archive <new path> --metadata <new path>
+                                   expand a valid schema11 in checked offline maintenance; schema10 requires a qualified successor
   admin ensure-database            create the center's database if it does not exist
   admin backup-logical --archive <new path> --metadata <new path>
-                                   capture a checked full 0011 backup and its trusted snapshot metadata
+                                   capture a checked full 0011/0012 backup and its trusted snapshot metadata
   admin restore-logical-backup --archive <path> --sha256 <digest> --metadata <path> --metadata-sha256 <digest>
                                    restore a supported trusted backup to an explicitly named new, isolated database
   admin restore-legacy-logical-backup --archive <path> --sha256 <digest> --provenance <path> --provenance-sha256 <digest>
-                                   restore a provenance-attested schema-10 full backup through the verified local bridge
+                                   unavailable until a qualified security successor is admitted; the historical bridge is refused
   admin rotate-runtime-credential [--live-slot a|b]
                                    set a new runtime credential on the slot that is not the live one (named, or else the last
                                    promoted one) and write the runtime URL to ARCFORGES_CENTER_RUNTIME_SECRET_FILE
   admin confirm-runtime-credential --slot a|b
                                    record that the deployment carrying the slot's credential was promoted
-  admin prepare-ctr06-bridge       issue a distinct schema-10 bridge credential into the private runtime secret file
+  admin prepare-ctr06-bridge       unavailable until a qualified security successor is admitted
   admin revoke-sessions --account <uuid> | --all
                                    revoke every unrevoked session of one account, or of every account, whatever its scope
                                    (audited as identity.sessions.revoked_by_operator); prints the counts per scope

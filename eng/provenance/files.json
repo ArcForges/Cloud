@@ -2138,8 +2138,5 @@
     "tooling/wrangler-init.ts": "web-miniflare-compat-afv2-env-01-r2",
     "center/internal/schema/migrations/0012_management_storage.sql": "afv2-center-01-management-storage-r4"
   },
-  "artifacts": [
-    "center-runtime-afv2-env-01-r4",
-    "center-worker-afv2-env-01-r4"
-  ]
+  "artifacts": ["center-runtime-afv2-env-01-r4", "center-worker-afv2-env-01-r4"]
 }
