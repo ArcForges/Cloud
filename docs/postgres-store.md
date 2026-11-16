@@ -16,10 +16,10 @@ their credentials after this transition. Stop the old runtime and drain its conn
 - A genuinely fresh database uses `arcforges-center migrate apply`. Its private same-invocation admission reserves previously
   absent runtime roles and checks all seven application schemas before deriving account epochs.
 - An existing schema10 or11 first uses `arcforges-center migrate management --archive <new-absolute-path> --metadata
-  <new-absolute-path>`. That finite operation still ends at the exact qualified schema12. Use its returned `runtimeRole` as
+<new-absolute-path>`. That finite operation still ends at the exact qualified schema12. Use its returned `runtimeRole` as
   `ARCFORGES_CENTER_RUNTIME_ROLE` for the next operation. Preserve its actual backup and receipt.
 - An existing schema12 then uses `arcforges-center migrate lifecycle --archive <different-new-absolute-path> --metadata
-  <different-new-absolute-path>`. It captures and rechecks the complete source12 snapshot, refuses active old connections or
+<different-new-absolute-path>`. It captures and rechecks the complete source12 snapshot, refuses active old connections or
   unknown writer paths, fences all seven schemas, retires the old group and both slots, and creates a different runtime group
   and slot generation. Account epochs are derived only inside that write barrier. The schema12 cutover remains immutable;
   schema13 appends its own database/artifact/backup/writer receipt. A failed transaction leaves schema12 and its credentials
