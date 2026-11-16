@@ -372,7 +372,7 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 	if err := ctr06ArchiveInventory(raw, metadata.LargeObjects); err != nil {
 		return report, err
 	}
-	selected, err := restoreList(raw, schema.Schemas)
+	selected, err := restoreList(raw, ctr06Schemas())
 	if err != nil {
 		return report, err
 	}

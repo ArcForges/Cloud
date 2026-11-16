@@ -58,6 +58,8 @@ func loadCTR06Build() ([]Migration, error) {
 	return build[:11], nil
 }
 
+func ctr06Schemas() []string { schemas, _ := schema.AtVersion(11); return schemas }
+
 func managementArtifact(runner string, migration Migration) (string, error) {
 	path, err := os.Executable()
 	if err != nil {

@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/config"
-	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -221,7 +220,7 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if err := ctr06ArchiveInventory(raw, objects); err != nil {
 		return report, err
 	}
-	if _, err := restoreList(raw, schema.Schemas); err != nil {
+	if _, err := restoreList(raw, ctr06Schemas()); err != nil {
 		return report, err
 	}
 	archiveSequence, err := ctr06ArchiveFacts(ctx, restore, childEnv, archive, build)
