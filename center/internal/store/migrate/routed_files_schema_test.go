@@ -213,7 +213,8 @@ func TestMigration0011SharedCommandNamespace(t *testing.T) {
 	if err = insertNamespace(ctx, runtime, f, platform.NewID(), false, 1, 10, false); err != nil {
 		t.Fatal(store.Sanitize("old runtime writes with old grants", err))
 	}
-	if err = reconcile(ctx, owner, Options{RuntimeRole: bridgeRole, Schemas: schema.Schemas, Grants: schema.RuntimeGrants}); err != nil {
+	schemas11, grants11 := schemasAndGrantsAt(11)
+	if err = reconcile(ctx, owner, Options{RuntimeRole: bridgeRole, Schemas: schemas11, Grants: grants11}); err != nil {
 		t.Fatal(err)
 	}
 
