@@ -50,16 +50,7 @@ func TestManagementCLIUsesTheRealMigrationBoundary(t *testing.T) {
 			if strings.Contains(stdout.String(), url) || strings.Contains(stderr.String(), url) {
 				t.Fatal("CLI exposed a migration credential")
 			}
-			if version == 10 {
-				if code != exitFailure || stdout.Len() != 0 || !strings.Contains(stderr.String(), migrate.ErrManagementSuccessorUnqualified.Error()) {
-					t.Fatal("CLI claimed schema10 qualification")
-				}
-				var actual int
-				if owner.QueryRow(ctx, "SELECT max(version) FROM platform.schema_migration").Scan(&actual) != nil || actual != 10 {
-					t.Fatal("refused CLI changed schema10")
-				}
-				return
-			}
+
 			var result migrate.Result
 			if code != exitOK || stderr.Len() != 0 || json.Unmarshal(stdout.Bytes(), &result) != nil || result.Version != 12 || result.RuntimeRole == group || result.Grants != "reconciled" {
 				t.Fatalf("valid11 CLI result: code=%d", code)

@@ -614,7 +614,7 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 			return err
 		}
 		if migration.Version == 11 && migration.Name == "0011_fleet_routed_files.sql" {
-			if err := guardCTR06Schema(ctx, tx, conn, options.RuntimeRole, options.Runner, options.BridgeProof, options.localBridge); err != nil {
+			if err := guardCTR06Schema(ctx, tx, conn, options.RuntimeRole, options.Runner, options.BridgeProof, options.localBridge, options.management); err != nil {
 				return err
 			}
 		}
@@ -632,7 +632,7 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 			}
 		}
 		if migration.Version == 11 && migration.Name == "0011_fleet_routed_files.sql" {
-			if err := recordCTR06Floor(ctx, tx, conn, options.RuntimeRole, options.BridgeProof, options.localBridge, options.localRestore); err != nil {
+			if err := recordCTR06Floor(ctx, tx, conn, options.RuntimeRole, options.BridgeProof, options.localBridge, options.localRestore, options.management); err != nil {
 				return err
 			}
 		}

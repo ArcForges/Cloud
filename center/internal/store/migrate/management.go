@@ -12,8 +12,11 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"runtime"
+	"runtime/debug"
 	"strings"
 
+	"github.com/ArcForges/Cloud/center/internal/buildinfo"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/jackc/pgx/v5"
@@ -22,19 +25,25 @@ import (
 // ErrManagementTransitionRequired refuses a naked 0012 on an existing database.
 var ErrManagementTransitionRequired = errors.New("V2 storage requires a checked backup and same-invocation writer-fenced maintenance transition")
 
-// ErrManagementSuccessorUnqualified is deliberately not configurable. No V2
-// published successor has been admitted for the existing schema10 boundary.
-var ErrManagementSuccessorUnqualified = errors.New("schema10 V2 transition is unavailable until a published security successor is qualified; no migration was applied")
+// ErrManagementSuccessorUnqualified keeps the obsolete published bridge and
+// hosted proof from becoming a maintenance admission. This path accepts neither.
+var ErrManagementSuccessorUnqualified = errors.New("the obsolete bridge or publisher proof cannot qualify the finite V2 maintenance transition")
 
 type managementAdmission struct {
-	conn           *pgx.Conn
-	source         int
-	oldRole        string
-	backup         *ctr06BackupMetadata
-	backupDigest   string
-	artifactDigest string
-	retiredDigest  string
-	active         bool
+	conn             *pgx.Conn
+	source           int
+	oldRole          string
+	backup           *ctr06BackupMetadata
+	backupDigest     string
+	artifactDigest   string
+	retiredDigest    string
+	active           bool
+	databaseIdentity string
+	targetRole       string
+	executableDigest string
+	sourceLabel      string
+	legacyRoleOID    uint32
+	floorEstablished bool
 }
 
 func requireManagementReady(ctx context.Context, q Querier) error {
@@ -60,36 +69,59 @@ func loadCTR06Build() ([]Migration, error) {
 
 func ctr06Schemas() []string { schemas, _ := schema.AtVersion(11); return schemas }
 
+type managementArtifactIdentity struct{ Digest, Executable, Source string }
+
 func managementArtifact(runner string, migration Migration) (string, error) {
+	identity, err := readManagementArtifact(runner, migration)
+	return identity.Digest, err
+}
+
+func readManagementArtifact(runner string, migration Migration) (managementArtifactIdentity, error) {
 	path, err := os.Executable()
 	if err != nil {
-		return "", ErrManagementTransitionRequired
+		return managementArtifactIdentity{}, ErrManagementTransitionRequired
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return "", ErrManagementTransitionRequired
+		return managementArtifactIdentity{}, ErrManagementTransitionRequired
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > 256<<20 {
-		return "", ErrManagementTransitionRequired
+		return managementArtifactIdentity{}, ErrManagementTransitionRequired
 	}
 	h := sha256.New()
 	n, err := io.Copy(h, io.LimitReader(file, 256<<20+1))
 	if err != nil || n != info.Size() {
-		return "", ErrManagementTransitionRequired
+		return managementArtifactIdentity{}, ErrManagementTransitionRequired
 	}
 	// This binds actual local bytes and the supplied build label. It is an
 	// identity receipt, not a signature or claim of protected publication.
-	raw, _ := json.Marshal(struct{ Executable, Runner, Migration string }{hex.EncodeToString(h.Sum(nil)), runner, migration.SHA256})
-	return ctr06SHA(raw), nil
+	executable := hex.EncodeToString(h.Sum(nil))
+	document, err := buildinfo.Document("not-probed", buildinfo.Center{})
+	if err != nil {
+		return managementArtifactIdentity{}, ErrManagementTransitionRequired
+	}
+	source := document.Revision
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" && document.Build.SourceCommit == "local" {
+				source = setting.Value
+				if document.Build.Dirty {
+					source += "-dirty"
+				}
+			}
+		}
+	}
+	raw, _ := json.Marshal(struct{ Executable, Source, Compiler, OS, Arch, Runner, Migration string }{executable, source, runtime.Version(), runtime.GOOS, runtime.GOARCH, runner, migration.SHA256})
+	return managementArtifactIdentity{ctr06SHA(raw), executable, source}, nil
 }
 
-// ApplyManagement expands a valid schema11 in finite offline maintenance.
+// ApplyManagement expands a checked schema10/11 in finite offline maintenance.
 // CaptureLogical produces the real snapshot/archive before writer fencing; its
 // full data/sequence/object assertions are rechecked under the writer locks.
-// Schema10 is refused before backup, roles or SQL change. The obsolete bridge
-// is never started or accepted as a V2 successor by this entry point.
+// No old bridge is started, and the old publisher proof is never accepted. A
+// schema10 floor is established only by its same-call complete writer fence.
 func ApplyManagement(ctx context.Context, conn *pgx.Conn, build []Migration, options Options, cfg config.Migration, archivePath, metadataPath string) (Result, error) {
 	if options.BridgeProof != nil || cfg.CTR06BridgeExecutable != "" || cfg.CTR06ProofFile != "" {
 		return Result{State: StateRefused}, ErrManagementSuccessorUnqualified
@@ -106,13 +138,16 @@ func ApplyManagement(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 	if err != nil || !exists {
 		return Result{State: StateRefused}, ErrManagementTransitionRequired
 	}
-	if len(applied) == 10 {
-		return Result{State: StateRefused, Version: 10}, ErrManagementSuccessorUnqualified
-	}
-	if len(applied) != 11 || len(Compare(build[:11], applied).Problems) != 0 {
+	sourceVersion := len(applied)
+	if (sourceVersion != 10 && sourceVersion != 11) || len(Compare(build[:sourceVersion], applied).Problems) != 0 {
 		return Result{State: StateRefused}, ErrRefused
 	}
-	oldRole, _, err := readyCTR06Admission(ctx, conn, cfg.RuntimeRole)
+	oldRole := cfg.RuntimeRole
+	if sourceVersion == 11 {
+		oldRole, _, err = readyCTR06Admission(ctx, conn, cfg.RuntimeRole)
+	} else {
+		err = requireManagementSchema10Source(ctx, conn, cfg.RuntimeRole)
+	}
 	if err != nil {
 		return Result{State: StateRefused}, err
 	}
@@ -128,7 +163,7 @@ func ApplyManagement(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 	if err != nil {
 		return Result{State: StateRefused}, err
 	}
-	artifact, err := managementArtifact(options.Runner, build[11])
+	artifact, err := readManagementArtifact(options.Runner, build[11])
 	if err != nil {
 		return Result{State: StateRefused}, err
 	}
@@ -137,11 +172,26 @@ func ApplyManagement(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 		role = role[:19]
 	}
 	role += "_v2_" + strings.ReplaceAll(newManagementID(), "-", "")[:16]
-	a := &managementAdmission{conn: conn, source: 11, oldRole: oldRole, backup: &meta, backupDigest: report.MetadataSHA256, artifactDigest: artifact, active: true}
+	databaseIdentity, err := managementDatabaseIdentity(ctx, conn)
+	if err != nil {
+		return Result{State: StateRefused}, err
+	}
+	if report.SchemaVersion != sourceVersion {
+		return Result{State: StateRefused}, ErrManagementTransitionRequired
+	}
+	a := &managementAdmission{conn: conn, source: sourceVersion, oldRole: oldRole, backup: &meta, backupDigest: report.MetadataSHA256, artifactDigest: artifact.Digest, executableDigest: artifact.Executable, sourceLabel: artifact.Source, databaseIdentity: databaseIdentity, targetRole: role, active: true}
 	defer func() { a.active = false }()
 	options.RuntimeRole = role
 	options.management = a
-	return Apply(ctx, conn, build, options)
+	result, applyErr := Apply(ctx, conn, build, options)
+	if applyErr != nil {
+		// 0011 and 0012 remain distinct forward transactions. Report a committed
+		// floor honestly; never re-enable the old generation after a later fault.
+		if current, exists, readErr := ReadApplied(ctx, conn); readErr == nil && exists {
+			result.describe(build, current, true)
+		}
+	}
+	return result, applyErr
 }
 
 func newManagementID() string {
@@ -167,6 +217,9 @@ func guardManagement(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Opt
 		}
 		_, _, err := readyCTR06Admission(ctx, tx, options.RuntimeRole)
 		return err
+	}
+	if a.source == 10 {
+		return guardManagementAfterSchema11(ctx, tx, conn, options, a)
 	}
 	if a.source != 11 || a.backup == nil {
 		return ErrManagementTransitionRequired
@@ -261,35 +314,58 @@ func fenceManagementWriters(ctx context.Context, tx pgx.Tx, group string) (strin
 	if err := RequirePlainRole(ctx, tx, group, false); err != nil {
 		return "", err
 	}
-	names := []string{group, group + "_a", group + "_b"}
+	candidates := []string{group, group + "_a", group + "_b"}
 	type roleIdentity struct {
 		Name string
 		OID  uint32
 	}
-	identities := make([]roleIdentity, 0, 3)
-	oids := make([]uint32, 0, 3)
-	for _, name := range names {
+	var identities []roleIdentity
+	var oids []uint32
+	var names []string
+	var groupOID uint32
+	for _, name := range candidates {
 		var oid uint32
 		var login bool
-		if err := tx.QueryRow(ctx, "SELECT oid,rolcanlogin FROM pg_roles WHERE rolname=$1", name).Scan(&oid, &login); err != nil {
+		err := tx.QueryRow(ctx, "SELECT oid,rolcanlogin FROM pg_roles WHERE rolname=$1", name).Scan(&oid, &login)
+		if errors.Is(err, pgx.ErrNoRows) && name != group {
+			continue
+		}
+		if err != nil {
 			return "", ErrManagementTransitionRequired
 		}
 		if err := RequirePlainRole(ctx, tx, name, login); err != nil {
 			return "", err
 		}
+		if name == group {
+			groupOID = oid
+		} else {
+			var member, reserved bool
+			err := tx.QueryRow(ctx, `SELECT pg_has_role($1::oid,$2::oid,'MEMBER'),
+    NOT $3::boolean AND EXISTS(SELECT 1 FROM pg_auth_members WHERE roleid=$1::oid
+     AND member=(SELECT oid FROM pg_roles WHERE rolname=current_user) AND admin_option)
+    AND NOT EXISTS(SELECT 1 FROM platform.runtime_credential WHERE login_role=$4)`, oid, groupOID, login, name).Scan(&member, &reserved)
+			if err != nil || (!member && !reserved) {
+				return "", ErrManagementTransitionRequired
+			}
+		}
 		identities = append(identities, roleIdentity{name, oid})
 		oids = append(oids, oid)
+		names = append(names, name)
 	}
 	var unsafe bool
 	err := tx.QueryRow(ctx, `WITH RECURSIVE reach(actor,memberof) AS (
  SELECT oid,oid FROM pg_roles UNION SELECT reach.actor,m.roleid FROM reach JOIN pg_auth_members m ON m.member=reach.memberof)
  SELECT EXISTS(SELECT 1 FROM platform.runtime_credential WHERE login_role<>ALL($1::text[]))
  OR EXISTS(SELECT 1 FROM pg_stat_activity WHERE usesysid=ANY($2::oid[]) AND pid<>pg_backend_pid())
+ OR EXISTS(SELECT 1 FROM pg_auth_members WHERE member=ANY($2::oid[]) AND NOT(member<>$4::oid AND roleid=$4::oid))
+ OR EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace,
+ LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl
+ WHERE n.nspname=ANY($3::text[]) AND acl.grantee=0 AND acl.privilege_type IN('INSERT','UPDATE','DELETE','TRUNCATE'))
  OR EXISTS(SELECT 1 FROM reach JOIN pg_roles actor ON actor.oid=reach.actor JOIN pg_roles reachable ON reachable.oid=reach.memberof
  WHERE actor.rolname<>current_user AND actor.rolname !~ '^pg_' AND NOT actor.rolsuper AND NOT actor.oid=ANY($2::oid[])
  AND (reachable.rolsuper OR reachable.rolname=current_user OR reachable.oid=ANY($2::oid[]) OR EXISTS(
  SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=ANY($3::text[])
- AND c.relkind IN('r','p') AND has_table_privilege(reachable.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE'))))`, names[1:], oids, []string{"platform", "audit", "fleet", "identity", "device", "entitlement"}).Scan(&unsafe)
+ AND c.relkind IN('r','p') AND (has_table_privilege(reachable.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') OR has_any_column_privilege(reachable.oid,c.oid,'INSERT,UPDATE')))))`, names[1:], oids, []string{"platform", "audit", "fleet", "identity", "device", "entitlement"}, groupOID).Scan(&unsafe)
 	if err != nil || unsafe {
 		return "", ErrManagementTransitionRequired
 	}

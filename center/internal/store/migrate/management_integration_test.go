@@ -229,7 +229,7 @@ func TestManagementFreshStorageAndSQLGuards(t *testing.T) {
 	}
 }
 
-func TestManagementSchema10RemainsUnqualifiedWithoutEffects(t *testing.T) {
+func TestManagementOldBridgeCannotQualifySchema10(t *testing.T) {
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
@@ -244,7 +244,9 @@ func TestManagementSchema10RemainsUnqualifiedWithoutEffects(t *testing.T) {
 	}
 	dir := t.TempDir()
 	archive, meta := filepath.Join(dir, "source.dump"), filepath.Join(dir, "source.json")
-	result, err := ApplyManagement(ctx, owner, build, Options{Runner: "isolated-native-fixture", RuntimeRole: group}, managementConfig(url, name, group), archive, meta)
+	cfg := managementConfig(url, name, group)
+	cfg.CTR06BridgeExecutable = filepath.Join(dir, "obsolete-bridge")
+	result, err := ApplyManagement(ctx, owner, build, Options{Runner: "isolated-native-fixture", RuntimeRole: group}, cfg, archive, meta)
 	if !errors.Is(err, ErrManagementSuccessorUnqualified) || result.State != StateRefused {
 		t.Fatalf("unqualified successor boundary: %v", err)
 	}

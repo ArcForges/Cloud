@@ -130,8 +130,8 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, errors.New("the supported migration catalogue is unavailable")
 	}
 	applied, exists, err := ReadApplied(ctx, tx)
-	if err != nil || !exists || (len(applied) != 11 && len(applied) != 12) || len(applied) > len(build) {
-		return report, errors.New("only a supported complete 0011 or 0012 source can be captured")
+	if err != nil || !exists || (len(applied) != 10 && len(applied) != 11 && len(applied) != 12) || len(applied) > len(build) {
+		return report, errors.New("only a supported complete 0010,0011 or 0012 source can be captured")
 	}
 	version := len(applied)
 	build = build[:version]
@@ -143,7 +143,12 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if len(comparison.Pending) != 0 || len(comparison.Problems) != 0 {
 		return report, errors.New("the source migration history is incompatible")
 	}
-	sourceRole, _, err := readyCTR06Admission(ctx, tx, cfg.RuntimeRole)
+	sourceRole := cfg.RuntimeRole
+	if version == 10 {
+		err = requireManagementSchema10Source(ctx, tx, cfg.RuntimeRole)
+	} else {
+		sourceRole, _, err = readyCTR06Admission(ctx, tx, cfg.RuntimeRole)
+	}
 	if err != nil {
 		return report, errors.New("the source runtime floor or admission is untrusted")
 	}
@@ -170,8 +175,14 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if _, err := tx.Exec(ctx, "LOCK TABLE "+strings.Join(quoted, ",")+" IN SHARE MODE"); err != nil {
 		return report, errors.New("source writers could not be drained for a complete backup")
 	}
-	if checkedRole, _, err := readyCTR06Admission(ctx, tx, sourceRole); err != nil || checkedRole != sourceRole {
-		return report, errors.New("the source admission changed during backup preparation")
+	if version == 10 {
+		if err := requireManagementSchema10Source(ctx, tx, sourceRole); err != nil {
+			return report, err
+		}
+	} else {
+		if checkedRole, _, err := readyCTR06Admission(ctx, tx, sourceRole); err != nil || checkedRole != sourceRole {
+			return report, errors.New("the source admission changed during backup preparation")
+		}
 	}
 	var malformedHistory bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM platform.runtime_credential
@@ -231,8 +242,10 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, err
 	}
 	backupSchemas, _ := schema.AtVersion(version)
-	if _, err := restoreList(raw, backupSchemas); err != nil {
-		return report, err
+	if version != 10 {
+		if _, err := restoreList(raw, backupSchemas); err != nil {
+			return report, err
+		}
 	}
 	archiveSequence, err := ctr06ArchiveFacts(ctx, restore, childEnv, archive, build)
 	if err != nil || !reflect.DeepEqual(sequences, archiveSequence) {

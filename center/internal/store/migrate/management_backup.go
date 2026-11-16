@@ -17,6 +17,8 @@ import (
 // archive being admitted. The original 0011 format and oracle remain unchanged.
 func backupDefinition(version int) (inventory, catalogue string, err error) {
 	switch version {
+	case 10:
+		return ctr06Schema10Inventory, ctr06Schema10CatalogueSHA, nil
 	case 11:
 		return ctr06Schema11Inventory, ctr06Schema11CatalogueSHA, nil
 	case 12:

@@ -46,7 +46,7 @@ commands:
   migrate [apply|status|plan]      apply the PostgreSQL migrations (apply, the default), or report them without changing
                                    anything; configured by ARCFORGES_CENTER_MIGRATION_DATABASE_URL (docs/postgres-store.md)
   migrate management --archive <new path> --metadata <new path>
-                                   expand a valid schema11 in checked offline maintenance; schema10 requires a qualified successor
+                                   expand checked schema10/11 in offline maintenance with a verified backup and writer fence
   admin ensure-database            create the center's database if it does not exist
   admin backup-logical --archive <new path> --metadata <new path>
                                    capture a checked full 0011/0012 backup and its trusted snapshot metadata

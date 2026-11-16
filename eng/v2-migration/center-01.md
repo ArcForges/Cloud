@@ -39,11 +39,19 @@ schema11; they are not evidence that old routing works after V2 expansion.
   `admin rotate-runtime-credential` procedure; the retired generation is not
   silently re-enabled. Failures preserve the backup and require inspection
   before retry with distinct new output paths.
-- Existing schema10: this entry refuses before backup or SQL changes. The old
-  `RequireCTR06SecurityBridge` hard stop remains. No published qualified V2
-  successor has been admitted, and neither a supplied test key nor an executable
-  self-hash can replace that prerequisite. This is negative evidence, never a
-  successful schema10 upgrade.
+- Checked schema10: the same finite entry captures the exact schema10 snapshot
+  and proves the complete writer fence under its same-invocation private
+  connection/database capability. The unchanged 0011 transaction records a new
+  floor bound to the actual transition executable/source, backup and retired
+  writer evidence; it never records the obsolete 8e5 producer as executed.
+  Then 0012 expands management storage. If 0011 commits and 0012 fails, the
+  committed floor and retired writers remain in maintenance. Inspect migration
+  status for the actual current runtime generation, then repair forward with
+  distinct new backup paths. No code restores the old writer's privileges.
+
+The old `RequireCTR06SecurityBridge` and hosted publisher entry remain unavailable.
+The finite maintenance path is independently reviewed engineering, not a force
+flag, user-supplied promotion assertion or a claim that an old bootstrap ran.
 
 A revoked protocol cannot reserve a new identity or increase an operation's
 delivery count/change its channel. An existing UNKNOWN can still accept a definite
@@ -52,8 +60,9 @@ digest, channel and delivery count. The transport must verify the observation;
 this database transition supplies no signature or delivery authority. Final
 outcomes remain immutable.
 
-The transition artifact digest binds actual executing bytes, the supplied build
-label and the exact 0012 hash. It is an identity receipt, not a publication
+The transition artifact digest binds actual executing bytes, compiled
+source/compiler/platform facts, the supplied run label and the exact 0012 hash.
+It is an identity receipt, not a publication
 attestation or activation authority. Native post-push gates, independent review
 and the protected artifact path remain separate. H-03 production/destructive
 operator admission stays closed; no deployment switch is changed here.

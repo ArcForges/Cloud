@@ -198,7 +198,13 @@ WHERE p.prosecdef AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema')
 
 // recordCTR06Floor executes after the 0011 DDL, inside the same transaction as
 // the lock, revocation and lease handoff; a failure rolls back all of them.
-func recordCTR06Floor(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, runtimeRole string, proof *bridgeproof.Verified, local *localBridgeAdmission, recovery *restoreCapability) error {
+func recordCTR06Floor(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, runtimeRole string, proof *bridgeproof.Verified, local *localBridgeAdmission, recovery *restoreCapability, maintenance *managementAdmission) error {
+	if maintenance != nil && maintenance.source == 10 {
+		if proof != nil || local != nil {
+			return ErrCTR06RetirementUnproven
+		}
+		return recordManagementSchema11Floor(ctx, tx, conn, runtimeRole, maintenance, recovery)
+	}
 	if runtimeRole == "" {
 		// Canonical 0011 must never commit without the final floor and its
 		// atomic admission, including for schema-only callers.
