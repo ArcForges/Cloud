@@ -10,15 +10,15 @@
       },
       "ArcForges.Contracts.CloudInternal": {
         "type": "Direct",
-        "requested": "[1.0.0-ci.287.1, )",
-        "resolved": "1.0.0-ci.287.1",
-        "contentHash": "HoBe7RUNJUW+cHc5SrPSHO3MT4bD498PDqcwE5MAO50KAsZxNb0WLnyZnZzSBMpJK9aqKAnjOvXSXpOAeBvqSA==",
+        "requested": "[1.0.0-ci.481.1, )",
+        "resolved": "1.0.0-ci.481.1",
+        "contentHash": "DrY+P/uvGDBSovdUeGA6xJjDyLWhWrG/pe8SVX/VCPtu2MeX+Aj7WbhODbAXXlAVPckNHwMVhA1kSHQLrm91ug==",
         "dependencies": {
-          "ArcForges.Contracts.Events": "1.0.0-ci.287.1",
-          "ArcForges.Contracts.Foundation": "1.0.0-ci.287.1",
-          "ArcForges.Contracts.PublicApi": "1.0.0-ci.287.1",
-          "Google.Protobuf": "3.36.1",
-          "Grpc.Core.Api": "2.84.0"
+          "ArcForges.Contracts.Events": "1.0.0-ci.481.1",
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.481.1",
+          "ArcForges.Contracts.PublicApi": "1.0.0-ci.481.1",
+          "Google.Protobuf": "3.36.2",
+          "Grpc.Core.Api": "2.85.0"
         }
       },
       "ArcForges.Contracts.PublicApi": {
@@ -69,21 +69,21 @@
       },
       "ArcForges.Contracts.Events": {
         "type": "Transitive",
-        "resolved": "1.0.0-ci.287.1",
-        "contentHash": "VRVuvUTYjpe2L7UrO/s/ciJ4iw5xOXfwu5yORIEvgqjd/p4+zlkBrgfa4apjTUWRNyFj+zu8aeVz1w9O5d2U9g==",
+        "resolved": "1.0.0-ci.481.1",
+        "contentHash": "QOrC/uZ2bhuVrdSZTjpVMRqP+WFl8OoX/bL+aEaKn+vpNikyRLn58Ly6Km6QhWVUScSq3YUBi6lRPaIw350htQ==",
         "dependencies": {
-          "ArcForges.Contracts.Foundation": "1.0.0-ci.287.1",
-          "ArcForges.Contracts.PublicApi": "1.0.0-ci.287.1",
-          "Google.Protobuf": "3.36.1",
-          "Grpc.Core.Api": "2.84.0"
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.481.1",
+          "ArcForges.Contracts.PublicApi": "1.0.0-ci.481.1",
+          "Google.Protobuf": "3.36.2",
+          "Grpc.Core.Api": "2.85.0"
         }
       },
       "ArcForges.Contracts.Foundation": {
         "type": "Transitive",
-        "resolved": "1.0.0-ci.287.1",
-        "contentHash": "Jwe5Z6K57vDsKmcxQFbbwyQZQUQsOkzYH26ogQIRb/biRtaGxLCtOsNg4felCuNTJt9bwRmC6AGx3eJyCoCk/g==",
+        "resolved": "1.0.0-ci.481.1",
+        "contentHash": "zlCOSkAQ9zI1BlIVhOxcbkm1QPRQ2RK5xhvtEmZwUSMORkvOUDZZwRkKNK7X6gd7NPI804rRuzuP9RGHRqJQIQ==",
         "dependencies": {
-          "Google.Protobuf": "3.36.1"
+          "Google.Protobuf": "3.36.2"
         }
       },
       "Grpc.AspNetCore.Server": {
@@ -245,7 +245,7 @@
         "type": "Project",
         "dependencies": {
           "ArcForges.Cloud.Modules.Abstractions": "[1.0.0, )",
-          "ArcForges.Contracts.CloudInternal": "[1.0.0-ci.287.1, )"
+          "ArcForges.Contracts.CloudInternal": "[1.0.0-ci.481.1, )"
         }
       },
       "Google.Protobuf": {
