@@ -170,9 +170,16 @@ func ctr06SupportedACL(item []string, objects map[string]int) bool {
 		_, ok := objects["SCHEMA - "+item[2]]
 		return ok
 	}
+	// Function signatures may contain argument names and multiword types.
+	// Match the complete native signature to the closed object inventory;
+	// accepting only the function name would admit an unreviewed overload.
+	if len(item) >= 3 && item[1] == "FUNCTION" {
+		_, ok := objects["FUNCTION "+item[0]+" "+strings.Join(item[2:], " ")]
+		return ok
+	}
 	if len(item) == 3 {
 		typ, schemaName, name := item[1], item[0], strings.Trim(item[2], `"`)
-		if typ == "TABLE" || typ == "FUNCTION" || typ == "SEQUENCE" {
+		if typ == "TABLE" || typ == "SEQUENCE" {
 			_, ok := objects[typ+" "+schemaName+" "+name]
 			return ok
 		}
