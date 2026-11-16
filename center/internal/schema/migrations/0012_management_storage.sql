@@ -200,7 +200,13 @@ BEGIN
  IF TG_OP='UPDATE' THEN
   PERFORM 1 FROM fleet.hub_lease h WHERE h.singleton AND h.fence=NEW.hub_fence AND h.expires_at>clock_timestamp() FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'current hub lease required' USING ERRCODE='55000'; END IF;
-  IF NEW.state<>7 THEN
+  -- A revoked protocol cannot send again, but a previously uncertain effect
+  -- must still accept its verified definite observation under the current hub.
+  -- Identity, owner epoch and digest remain protected above; this grants no send.
+  IF NEW.delivery_count>OLD.delivery_count OR NEW.channel_epoch IS DISTINCT FROM OLD.channel_epoch OR
+   (NEW.state<>7 AND NOT (OLD.state=7 AND OLD.may_have_delivered AND NEW.state IN(3,4,5,6)
+    AND NEW.effect IN(1,2) AND NEW.final_at IS NOT NULL AND NEW.result_sha256 IS NOT NULL
+    AND NEW.delivery_count=OLD.delivery_count AND NEW.channel_epoch=OLD.channel_epoch)) THEN
    PERFORM 1 FROM management.command_identity identity_row JOIN management.node_protocol p USING(enrollment_id,node_id,account_id)
     JOIN fleet.node n ON (n.enrollment_id,n.node_id,n.user_id)=(p.enrollment_id,p.node_id,p.account_id)
     WHERE identity_row.account_id=NEW.account_id AND identity_row.command_id=NEW.command_id AND p.revoked_at IS NULL

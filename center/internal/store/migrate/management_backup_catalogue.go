@@ -13,3 +13,5 @@ import _ "embed"
 var managementSchema12Inventory string
 
 const managementSchema12CatalogueSHA = "034aa62eb4aba1396197a096e89b8aad9fa6ff6a904fafdbacda026f2386938c"
+
+const managementSchema12MigrationSHA = "485661afcadbd485d83c660e39c163f7519b7e34a0a67e004203867f363670b3"

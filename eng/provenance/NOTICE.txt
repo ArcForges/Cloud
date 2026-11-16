@@ -2,7 +2,7 @@ Cloud source provenance
 
 Original material retains its recorded licence and full legal text.
 
-afv2-center-01-management-storage-r3
+afv2-center-01-management-storage-r4
 https://github.com/ArcForges/ArcForges-Design @ 493022fbf643b484665b2713c9eb8670f2fb2234
 AGPL-3.0-only
 Management PostgreSQL specification adapted from ArcForges-Design493022fb. Copyright ArcForges contributors. AGPL-3.0-only; full licence and corresponding source accompany applicable distribution.

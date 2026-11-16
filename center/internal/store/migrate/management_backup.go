@@ -9,6 +9,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -19,6 +20,10 @@ func backupDefinition(version int) (inventory, catalogue string, err error) {
 	case 11:
 		return ctr06Schema11Inventory, ctr06Schema11CatalogueSHA, nil
 	case 12:
+		build, err := Load(schema.Migrations())
+		if err != nil || len(build) != 12 || build[11].SHA256 != managementSchema12MigrationSHA {
+			return "", "", errors.New("schema12 backup catalogue qualification does not match this migration build")
+		}
 		return managementSchema12Inventory, managementSchema12CatalogueSHA, nil
 	default:
 		return "", "", errors.New("unsupported logical backup schema")
