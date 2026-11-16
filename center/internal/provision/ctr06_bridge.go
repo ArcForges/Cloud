@@ -108,14 +108,8 @@ func completeIssuedCTR06Bridge(ctx context.Context, conn *pgx.Conn, build []migr
 	if len(build) < 11 || build[9].Name != "0010_fleet_routed_call.sql" || build[10].Name != "0011_fleet_routed_files.sql" {
 		return BridgePreparation{}, errors.New("the sealed candidate does not contain the expected bridge and file migrations")
 	}
-	grants := make([]schema.Grant, 0, len(schema.RuntimeGrants))
-	for _, grant := range schema.RuntimeGrants {
-		if grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_command_id" || grant.Table == "routed_file_target") {
-			continue
-		}
-		grants = append(grants, grant)
-	}
-	if _, err := migrate.Apply(ctx, conn, build[:10], migrate.Options{Runner: options.Runner, RuntimeRole: roles.BridgeRole, Grants: grants, Schemas: schema.Schemas}); err != nil {
+	schemas, grants := schema.AtVersion(10)
+	if _, err := migrate.Apply(ctx, conn, build[:10], migrate.Options{Runner: options.Runner, RuntimeRole: roles.BridgeRole, Grants: grants, Schemas: schemas}); err != nil {
 		return BridgePreparation{}, err
 	}
 	password, err := newPassword()
