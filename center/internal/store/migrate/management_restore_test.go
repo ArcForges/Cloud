@@ -47,13 +47,16 @@ func testManagementBackupRestore(t *testing.T, version int) {
 		export, recovery, deletion = platform.NewID(), platform.NewID(), platform.NewID()
 		// Supplied source facts exercise restore preservation, not the business
 		// acceptance of a recovery, export or deletion ceremony.
+		// Confirmed/completed source facts include their retained command/proof
+		// reference IDs and confirmation instant; this fixture executes no proof
+		// ceremony and makes no claim that a provider or export actually ran.
 		if _, err := owner.Exec(ctx, `UPDATE identity.account_security_state SET auth_epoch=7,recovery_generation=4,rev=rev+1,changed_at=clock_timestamp() WHERE user_id=$1`, authority.account); err != nil {
 			t.Fatal(store.Sanitize("seed current account authority", err))
 		}
-		if _, err := owner.Exec(ctx, `INSERT INTO identity.lifecycle_operation(operation_id,user_id,kind,state,plan_rev,intent_sha256,auth_epoch,recovery_generation,created_at,expires_at,finished_at,rev,export_artifact_id,export_sha256,export_bytes)
- VALUES($2,$1,3,4,1,sha256('supplied export intent'),7,4,now(),now()+interval '1 hour',now(),1,gen_random_uuid(),sha256('supplied export digest'),123),
- ($3,$1,1,2,1,sha256('supplied recovery intent'),7,4,now(),now()+interval '1 hour',NULL,1,NULL,NULL,NULL),
- ($4,$1,2,2,1,sha256('supplied deletion intent'),7,4,now(),now()+interval '1 hour',NULL,1,NULL,NULL,NULL);`, authority.account, export, recovery, deletion); err != nil {
+		if _, err := owner.Exec(ctx, `INSERT INTO identity.lifecycle_operation(operation_id,user_id,kind,state,plan_rev,intent_sha256,auth_epoch,recovery_generation,created_at,expires_at,finished_at,rev,export_artifact_id,export_sha256,export_bytes,command_id,proof_id,confirmed_at)
+ VALUES($2,$1,3,4,1,sha256('supplied export intent'),7,4,now(),now()+interval '1 hour',now(),1,gen_random_uuid(),sha256('supplied export digest'),123,gen_random_uuid(),gen_random_uuid(),now()),
+ ($3,$1,1,2,1,sha256('supplied recovery intent'),7,4,now(),now()+interval '1 hour',NULL,1,NULL,NULL,NULL,gen_random_uuid(),gen_random_uuid(),now()),
+ ($4,$1,2,2,1,sha256('supplied deletion intent'),7,4,now(),now()+interval '1 hour',NULL,1,NULL,NULL,NULL,gen_random_uuid(),gen_random_uuid(),now());`, authority.account, export, recovery, deletion); err != nil {
 			t.Fatal(store.Sanitize("seed source lifecycle facts", err))
 		}
 	}
