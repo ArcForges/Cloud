@@ -41,8 +41,8 @@ func seedLifecycleAuthority(t *testing.T, owner *pgx.Conn) lifecycleAuthority {
  VALUES($1,$2,$3,'arcforges-web','web','web',$4,now(),now(),1)`, []any{installation, device, a.account, platform.NewID()}},
 		{`INSERT INTO identity.session(session_id,user_id,device_id,installation_id,credential_kind,scope,product_id,purpose,auth_method,authenticated_at,
  issued_at,expires_at,idle_expires_at,last_activity_at,browser_handle_hash,browser_origin,auth_epoch,recovery_generation,session_policy_version,rev)
- VALUES($1,$2,$3,$4,2,1,'arcforges-web',1,1,now(),now(),now()+interval '12 hours',now()+interval '30 minutes',now(),sha256($1::text::bytea),
- 'https://center.example',2,1,'v1',1),($5,$2,$3,$4,2,1,'arcforges-web',1,1,now(),now(),now()+interval '12 hours',now()+interval '30 minutes',now(),sha256($5::text::bytea),
+ VALUES($1,$2,$3,$4,2,1,'arcforges-web',1,1,now(),now(),now()+interval '12 hours',now()+interval '30 minutes',now(),sha256(convert_to(($1::uuid)::text,'UTF8')),
+ 'https://center.example',2,1,'v1',1),($5,$2,$3,$4,2,1,'arcforges-web',1,1,now(),now(),now()+interval '12 hours',now()+interval '30 minutes',now(),sha256(convert_to(($5::uuid)::text,'UTF8')),
  'https://center.example',7,4,'v1',1)`, []any{a.low, a.account, device, installation, a.current}},
 		{`INSERT INTO identity.step_up_challenge(challenge_id,user_id,session_id,operation_id,target_hash,method,challenge,state,attempt_count,
  created_at,expires_at,proved_at,auth_epoch,recovery_generation,rev)
