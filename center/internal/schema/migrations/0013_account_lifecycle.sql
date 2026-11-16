@@ -218,7 +218,7 @@ BEGIN
     UPDATE device.device SET display_name = 'Deleted device',remote_enabled = false,
         revoked_at = coalesce(revoked_at,p_now),revoke_reason = coalesce(revoke_reason,1),trust_level = 3,rev = rev + 1 WHERE user_id = deletion_user_id;
     UPDATE device.installation SET revoked_at = coalesce(revoked_at,p_now),rev = rev + 1 WHERE user_id = deletion_user_id;
-    UPDATE fleet.node SET display_name = 'Deleted node',revoked_at = coalesce(revoked_at,p_now),
+    UPDATE fleet.node SET display_name = 'Deleted node',reported_name = NULL,named_by_account = false,revoked_at = coalesce(revoked_at,p_now),
         revoke_reason = coalesce(revoke_reason,1),rev = rev + 1 WHERE user_id = deletion_user_id;
     DELETE FROM identity.auth_flow WHERE user_id = deletion_user_id OR email_hash IN
         (SELECT sha256(convert_to(subject,'UTF8')) FROM identity.auth_identity WHERE user_id = deletion_user_id AND provider_id = 'email');

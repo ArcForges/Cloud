@@ -34,15 +34,15 @@ The account pages add `/account/recovery` and `/account/lifecycle`, using the ex
 cookie and CSRF rules. Browser JSON requests are objects without unknown/repeated fields. UUIDs are canonical lowercase text,
 revisions are positive decimal strings, and byte pages are unpadded base64url. Routes below `/session/v1/web` are:
 
-| POST path | Required body fields | Result |
-| --- | --- | --- |
-| `/recovery/begin` | `method: "emailCode"`, `email`, `installation` | Non-enumerating recovery challenge with replacement creation options |
-| `/recovery/complete` | `flowId`, `commandId`, `proof.emailCode`, `replacement.passkey` | Command receipt metadata; no session or cookie |
-| `/account/deletion/prepare` | `commandId` | Expiring plan, revision, subscription/unresolved-operation counts and proof targets |
-| `/account/deletion/confirm` | `commandId`, `planId`, `planRevision` | Pending deletion metadata and receipt |
-| `/account/deletion/cancel` | `commandId`, `planId` | Cancellation metadata and receipt |
-| `/account/export/prepare` | `commandId` | Short-lived export receipt metadata and byte count |
-| `/account/export/read` | `operationId`, integer `offset`, integer `limit` (1–32768) | One bounded byte page after a fresh authorization check |
+| POST path                   | Required body fields                                            | Result                                                                              |
+| --------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `/recovery/begin`           | `method: "emailCode"`, `email`, `installation`                  | Non-enumerating recovery challenge with replacement creation options                |
+| `/recovery/complete`        | `flowId`, `commandId`, `proof.emailCode`, `replacement.passkey` | Command receipt metadata; no session or cookie                                      |
+| `/account/deletion/prepare` | `commandId`                                                     | Expiring plan, revision, subscription/unresolved-operation counts and proof targets |
+| `/account/deletion/confirm` | `commandId`, `planId`, `planRevision`                           | Pending deletion metadata and receipt                                               |
+| `/account/deletion/cancel`  | `commandId`, `planId`                                           | Cancellation metadata and receipt                                                   |
+| `/account/export/prepare`   | `commandId`                                                     | Short-lived export receipt metadata and byte count                                  |
+| `/account/export/read`      | `operationId`, integer `offset`, integer `limit` (1–32768)      | One bounded byte page after a fresh authorization check                             |
 
 Recovery sends a one-use code only to an already verified channel. A disabled sender returns the same service-unavailable refusal for every address; a
 recipient-specific delivery failure does not reveal account existence or claim delivery success. Proof verification, bounded
@@ -105,33 +105,33 @@ for it (`TestTheServedMethodsAreExactlyTheIdentitySet` compares the set with the
 request carries a `RequestMeta`; a `RequestMeta.workspace_id` is refused with `VALIDATION/invalid_argument`
 (`meta.workspace_id: not_admitted`): identity and device methods are account-scoped.
 
-| Method                                      | Operation ID (con-07)                  | Risk | Credential | mobile.limited               | Restricted account | Step-up evidence       | Receipt |
-| ------------------------------------------- | -------------------------------------- | ---- | ---------- | ---------------------------- | ------------------ | ---------------------- | ------- |
-| IdentityService.BeginAuthentication         | `identity.beginAuthentication`         | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.CompleteAuthentication      | `identity.completeAuthentication`      | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.RequestEmailCode            | `identity.requestEmailCode`            | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.RedeemEmailCode             | `identity.redeemEmailCode`             | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.CompleteEnrollment          | `identity.completeEnrollment`          | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.BeginRecovery | `identity.beginRecovery` | R1 | anonymous | — | — | — | — |
-| IdentityService.CompleteRecovery | `identity.completeRecovery` | R3 | anonymous | — | — | email proof + replacement ceremony | flow scoped |
-| IdentityService.ListAuthProviders           | `identity.listAuthProviders`           | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.RefreshSession              | `identity.refreshSession`              | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.GetProfile                  | `identity.getProfile`                  | R1   | session    | allowed                      | refused            | —                      | —       |
-| IdentityService.GetAccountDeletion | `identity.getAccountDeletion` | R1 | session | upgrade | allowed | — | — |
-| IdentityService.ListAuthIdentities          | `identity.listAuthIdentities`          | R1   | session    | allowed                      | allowed            | —                      | —       |
-| IdentityService.ListSessions                | `identity.listSessions`                | R1   | session    | allowed                      | allowed            | —                      | —       |
-| DeviceService.List                          | `device.list`                          | R1   | session    | allowed                      | allowed            | —                      | —       |
-| IdentityService.BeginStepUp                 | `identity.beginStepUp`                 | R1   | session    | allowed                      | allowed            | —                      | —       |
-| IdentityService.CompleteStepUp              | `identity.completeStepUp`              | R1   | session    | allowed                      | allowed            | —                      | —       |
-| IdentityService.UpdateProfile               | `identity.updateProfile`               | R2   | session    | upgrade                      | refused            | —                      | yes     |
-| IdentityService.BeginPasskeyRegistration    | `identity.beginPasskeyRegistration`    | R2   | session    | upgrade                      | refused            | account                | —       |
-| IdentityService.CompletePasskeyRegistration | `identity.completePasskeyRegistration` | R2   | session    | upgrade                      | refused            | —                      | yes     |
-| IdentityService.RenameAuthIdentity          | `identity.renameAuthIdentity`          | R2   | session    | upgrade                      | allowed            | —                      | yes     |
-| IdentityService.RemoveAuthIdentity          | `identity.removeAuthIdentity`          | R3   | session    | upgrade                      | allowed            | credential             | yes     |
-| IdentityService.RevokeSession               | `identity.revokeSession`               | R2   | session    | own: allowed; other: upgrade | allowed            | own: —; other: session | yes     |
-| IdentityService.RevokeAllSessions           | `identity.revokeAllSessions`           | R3   | session    | upgrade                      | allowed            | account                | yes     |
-| DeviceService.Rename                        | `device.rename`                        | R1   | session    | upgrade                      | allowed            | —                      | yes     |
-| DeviceService.Revoke                        | `device.revoke`                        | R3   | session    | own: allowed; other: upgrade | allowed            | own: —; other: device  | yes     |
+| Method                                      | Operation ID (con-07)                  | Risk | Credential | mobile.limited               | Restricted account | Step-up evidence                   | Receipt     |
+| ------------------------------------------- | -------------------------------------- | ---- | ---------- | ---------------------------- | ------------------ | ---------------------------------- | ----------- |
+| IdentityService.BeginAuthentication         | `identity.beginAuthentication`         | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.CompleteAuthentication      | `identity.completeAuthentication`      | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.RequestEmailCode            | `identity.requestEmailCode`            | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.RedeemEmailCode             | `identity.redeemEmailCode`             | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.CompleteEnrollment          | `identity.completeEnrollment`          | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.BeginRecovery               | `identity.beginRecovery`               | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.CompleteRecovery            | `identity.completeRecovery`            | R3   | anonymous  | —                            | —                  | email proof + replacement ceremony | flow scoped |
+| IdentityService.ListAuthProviders           | `identity.listAuthProviders`           | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.RefreshSession              | `identity.refreshSession`              | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.GetProfile                  | `identity.getProfile`                  | R1   | session    | allowed                      | refused            | —                                  | —           |
+| IdentityService.GetAccountDeletion          | `identity.getAccountDeletion`          | R1   | session    | upgrade                      | allowed            | —                                  | —           |
+| IdentityService.ListAuthIdentities          | `identity.listAuthIdentities`          | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| IdentityService.ListSessions                | `identity.listSessions`                | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| DeviceService.List                          | `device.list`                          | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| IdentityService.BeginStepUp                 | `identity.beginStepUp`                 | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| IdentityService.CompleteStepUp              | `identity.completeStepUp`              | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| IdentityService.UpdateProfile               | `identity.updateProfile`               | R2   | session    | upgrade                      | refused            | —                                  | yes         |
+| IdentityService.BeginPasskeyRegistration    | `identity.beginPasskeyRegistration`    | R2   | session    | upgrade                      | refused            | account                            | —           |
+| IdentityService.CompletePasskeyRegistration | `identity.completePasskeyRegistration` | R2   | session    | upgrade                      | refused            | —                                  | yes         |
+| IdentityService.RenameAuthIdentity          | `identity.renameAuthIdentity`          | R2   | session    | upgrade                      | allowed            | —                                  | yes         |
+| IdentityService.RemoveAuthIdentity          | `identity.removeAuthIdentity`          | R3   | session    | upgrade                      | allowed            | credential                         | yes         |
+| IdentityService.RevokeSession               | `identity.revokeSession`               | R2   | session    | own: allowed; other: upgrade | allowed            | own: —; other: session             | yes         |
+| IdentityService.RevokeAllSessions           | `identity.revokeAllSessions`           | R3   | session    | upgrade                      | allowed            | account                            | yes         |
+| DeviceService.Rename                        | `device.rename`                        | R1   | session    | upgrade                      | allowed            | —                                  | yes         |
+| DeviceService.Revoke                        | `device.revoke`                        | R3   | session    | own: allowed; other: upgrade | allowed            | own: —; other: device              | yes         |
 
 The table is `access.Operations`, closed: the composition refuses to start when a served method has no row, a row has no served
 method or a row and the method's policy disagree about the session (`checkIdentityComposition`). A session method admits only the
@@ -483,19 +483,19 @@ the step-up evidence, the rate-limit buckets and the audit events, and the forms
 receipt is a reply shape only: the contract's logout has no command ID, so its reply carries a new one, nothing is stored and
 nothing replays. A page never reads or writes a table.
 
-| Route                                                                                       | Kind | Credential       |
-| ------------------------------------------------------------------------------------------- | ---- | ---------------- |
-| `GET /account/sign-in`, `/account/bootstrap`, `/account/account.js`, `/account/account.css` | page | none             |
-| `GET /account/passkeys`, `/account/sessions`, `/account/devices`, `/account/sign-out`       | page | cookie session   |
-| `POST /account/passkeys/{add,complete,rename,remove}`                                       | form | cookie session   |
-| `POST /account/sessions/{revoke,revoke-all}`, `POST /account/devices/{rename,revoke}`       | form | cookie session   |
-| `GET /session/v1/web/bootstrap`                                                             | JSON | optional session |
-| `POST /session/v1/web/{authentication/begin,authentication/complete,enrollment/complete}`   | JSON | none (see CSRF)  |
-| `POST /session/v1/web/{step-up/begin,step-up/complete,logout}`                              | JSON | cookie session   |
-| `GET /account/recovery` | page | none |
-| `GET /account/lifecycle` | page | cookie session |
-| `POST /session/v1/web/recovery/{begin,complete}` | JSON | pre-session CSRF |
-| `POST /session/v1/web/account/{deletion/prepare,deletion/confirm,deletion/cancel,export/prepare,export/read}` | JSON | cookie session |
+| Route                                                                                                         | Kind | Credential       |
+| ------------------------------------------------------------------------------------------------------------- | ---- | ---------------- |
+| `GET /account/sign-in`, `/account/bootstrap`, `/account/account.js`, `/account/account.css`                   | page | none             |
+| `GET /account/passkeys`, `/account/sessions`, `/account/devices`, `/account/sign-out`                         | page | cookie session   |
+| `POST /account/passkeys/{add,complete,rename,remove}`                                                         | form | cookie session   |
+| `POST /account/sessions/{revoke,revoke-all}`, `POST /account/devices/{rename,revoke}`                         | form | cookie session   |
+| `GET /session/v1/web/bootstrap`                                                                               | JSON | optional session |
+| `POST /session/v1/web/{authentication/begin,authentication/complete,enrollment/complete}`                     | JSON | none (see CSRF)  |
+| `POST /session/v1/web/{step-up/begin,step-up/complete,logout}`                                                | JSON | cookie session   |
+| `GET /account/recovery`                                                                                       | page | none             |
+| `GET /account/lifecycle`                                                                                      | page | cookie session   |
+| `POST /session/v1/web/recovery/{begin,complete}`                                                              | JSON | pre-session CSRF |
+| `POST /session/v1/web/account/{deletion/prepare,deletion/confirm,deletion/cancel,export/prepare,export/read}` | JSON | cookie session   |
 
 The `operations` surface adds `/operations/grant` and its two forms, the `fleet` surface the six pages `/connect`, `/connect/review`,
 `/connect/decision`, `/activate`, `/activate/review` and `/activate/decision` ([center fleet](center-fleet.md#the-pages)), the

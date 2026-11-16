@@ -5,6 +5,10 @@ package identity
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"net/netip"
@@ -299,6 +303,76 @@ func TestRecoveryOutageDoesNotEnumerateOrCreateAnAlternativeProof(t *testing.T) 
 	}
 }
 
+func TestRecoveryRechecksTheChannelAfterWaitingForCredentialRemoval(t *testing.T) {
+	r := newLifecycleRig(t, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var emailID platform.ID
+	if err := r.db.Migration.QueryRow(ctx, `SELECT auth_identity_id FROM identity.auth_identity WHERE user_id=$1 AND provider_id='email' AND revoked_at IS NULL`, r.user).Scan(&emailID); err != nil {
+		t.Fatal(err)
+	}
+	r.prove(ClassRemoveCredential, emailID)
+	tx, err := r.db.Migration.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(ctx, `SELECT 1 FROM identity.user WHERE user_id=$1 FOR UPDATE`, r.user); err != nil {
+		t.Fatal(err)
+	}
+	type begun struct {
+		challenge Challenge
+		err       error
+	}
+	done := make(chan begun, 1)
+	go func() {
+		challenge, err := r.s.BeginRecovery(ctx, r.request(), RecoveryBegin{Email: "owner@example.test", Claim: r.claim(), HasClaim: true, Browser: true})
+		done <- begun{challenge, err}
+	}()
+	waited := false
+	for deadline := time.Now().Add(8 * time.Second); !waited && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		select {
+		case result := <-done:
+			t.Fatalf("recovery did not wait for the account mutation: %v", result.err)
+		default:
+		}
+		var waiting int
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM pg_locks l WHERE NOT l.granted AND pg_backend_pid()=ANY(pg_blocking_pids(l.pid))`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		waited = waiting > 0
+	}
+	if !waited {
+		t.Fatal("recovery never reached its account lock")
+	}
+	if err = ConsumeEvidence(ctx, tx, r.caller, ClassRemoveCredential, emailID, r.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.s.RemoveCredential(ctx, tx, r.caller, emailID, Cancellations{}, r.now); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatal("channel removal changed non-enumerating acceptance", result.err)
+		}
+		if len(r.mail.Messages()) != 0 {
+			t.Fatal("recovery delivered an authority proof to the revoked channel")
+		}
+		if got := r.db.Count(`SELECT count(*) FROM identity.auth_flow WHERE flow_id=$1 AND user_id IS NULL AND lifecycle_operation_id IS NULL`, result.challenge.FlowID); got != 1 {
+			t.Fatal("revoked channel inherited the new account generation", got)
+		}
+		if got := r.db.Count(`SELECT count(*) FROM identity.lifecycle_operation WHERE operation_id=$1`, result.challenge.FlowID); got != 0 {
+			t.Fatal("revoked channel acquired a recovery operation", got)
+		}
+	case <-ctx.Done():
+		t.Fatal("recovery did not settle", ctx.Err())
+	}
+}
+
 func TestOwnerDeletionCleanupIsRealAndProviderUncertaintyStaysPending(t *testing.T) {
 	for _, providerPending := range []bool{false, true} {
 		name := "self_hosted"
@@ -317,6 +391,28 @@ func TestOwnerDeletionCleanupIsRealAndProviderUncertaintyStaysPending(t *testing
 			}
 			if _, err := r.db.Migration.Exec(ctx, `INSERT INTO entitlement.service_term(term_id,account_id,kind,subscription_ref,period_ref,starts_at,ends_at,authorized_at,created_at)
 VALUES($1,$2,$3,$4,'historical-term',$5,$6,$5,$5)`, platform.NewID(), r.user, kind, subscription, r.now, r.now.Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			// A real retained enrollment carries both the account's chosen name
+			// and the node's independently reported personal hostname.
+			key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			publicKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			enrollmentID := platform.NewID()
+			if err = r.tx(func(ctx context.Context, tx pgx.Tx) error {
+				deviceID, installationID, err := device.CreateNode(ctx, tx, device.Node{UserID: r.user, Name: "Private node label", Platform: device.PlatformLinux, PlatformText: "linux", AppVersion: "1.0.0", PublicKey: publicKey}, r.now)
+				if err != nil {
+					return err
+				}
+				_, err = tx.Exec(ctx, `INSERT INTO fleet.node(enrollment_id,node_id,user_id,device_id,installation_id,display_name,reported_name,named_by_account,os,arch,version,enrolled_at,last_seen_at,rev)
+VALUES($1,$2,$3,$4,$5,'Private account label','Private host name',true,2,1,'1.0.0',$6,$6,1)`, enrollmentID, platform.NewID(), r.user, deviceID, installationID, r.now)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			var plan Lifecycle
@@ -360,6 +456,9 @@ VALUES($1,$2,$3,$4,'historical-term',$5,$6,$5,$5)`, platform.NewID(), r.user, ki
 				if got := r.db.Count(`SELECT count(*) FROM identity.auth_identity WHERE user_id=$1`, r.user); got == 0 {
 					t.Fatal("pending cleanup erased credentials before cancellation window")
 				}
+				if got := r.db.Count(`SELECT count(*) FROM fleet.node WHERE enrollment_id=$1 AND reported_name='Private host name' AND named_by_account`, enrollmentID); got != 1 {
+					t.Fatal("pending provider cleanup erased the retained node fact", got)
+				}
 			} else {
 				if got := r.db.Count(`SELECT state FROM identity.user WHERE user_id=$1`, r.user); got != 5 {
 					t.Fatal("self-hosted cleanup did not finish", got)
@@ -372,6 +471,9 @@ VALUES($1,$2,$3,$4,'historical-term',$5,$6,$5,$5)`, platform.NewID(), r.user, ki
 				}
 				if got := r.db.Count(`SELECT count(*) FROM device.device WHERE user_id=$1 AND display_name <> 'Deleted device'`, r.user); got != 0 {
 					t.Fatal("personal device labels retained", got)
+				}
+				if got := r.db.Count(`SELECT count(*) FROM fleet.node WHERE enrollment_id=$1 AND display_name='Deleted node' AND reported_name IS NULL AND NOT named_by_account AND revoked_at IS NOT NULL`, enrollmentID); got != 1 {
+					t.Fatal("retained node tombstone kept a personal name", got)
 				}
 				if err := r.db.Migration.QueryRow(ctx, `SELECT identity.finish_account_deletion($1,$2)`, plan.ID, r.now).Scan(&completed); err != nil || !completed {
 					t.Fatal("cleanup replay", err)

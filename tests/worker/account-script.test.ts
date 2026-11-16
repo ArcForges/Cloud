@@ -563,6 +563,8 @@ class Element {
   elements: Record<string, Element> = {};
   children: Element[] = [];
   listeners: Record<string, Listener[]> = {};
+  href = "";
+  clicked = 0;
   addEventListener(type: string, listener: Listener) {
     this.listeners[type] = [...(this.listeners[type] ?? []), listener];
   }
@@ -577,6 +579,20 @@ class Element {
   }
   getAttribute(name: string) {
     return this.attributes[name] ?? null;
+  }
+  removeAttribute(name: string) {
+    delete this.attributes[name];
+    if (name === "href") this.href = "";
+  }
+  click() {
+    this.clicked += 1;
+    this.fire("click");
+  }
+  checkValidity() {
+    return this.value !== "";
+  }
+  reportValidity() {
+    return this.checkValidity();
   }
   querySelector(selector: string) {
     return selector === "a" ? (this.children[0] ?? null) : null;
@@ -652,6 +668,10 @@ function page(
       setItem: (key: string, value: string) => {
         events.push(`storage set ${key}`);
         stored.set(key, value);
+      },
+      removeItem: (key: string) => {
+        events.push(`storage remove ${key}`);
+        stored.delete(key);
       },
     },
     crypto: { randomUUID: () => "6c1d7f0e-3a52-4b9c-8e47-90a1b2c3d4e5" },
@@ -1909,4 +1929,249 @@ test("the mobile authorization page reads the flow, drops the fragment first and
   assert.equal(authorize.events[0], "replaceState");
   assert.equal(form.elements.flow_id.value, flowId);
   assert.equal(submitted, 1);
+});
+
+// AFV2-ID-01: these are tests of the actual page script's protocol and browser
+// wiring. The composed HTTP/PostgreSQL suite proves the account decisions.
+test("account export reads exact bounded pages and refuses changed or malformed metadata", async () => {
+  const operationId = "11111111-1111-4111-8111-111111111111";
+  const source = new Uint8Array(70000).map((_, index) => index % 256);
+  const calls: unknown[] = [];
+  const { api } = fakes();
+  api.post = async (path, body) => {
+    assert.equal(path, "/account/export/read");
+    calls.push(body);
+    const input = body as { operationId: string; offset: number; limit: number };
+    assert.equal(input.operationId, operationId);
+    assert.equal(input.limit, 32768);
+    const end = Math.min(input.offset + input.limit, source.length);
+    return {
+      operation: { operationId },
+      offset: input.offset,
+      total: source.length,
+      data: script.encodeBase64Url(source.slice(input.offset, end)),
+      done: end === source.length,
+    };
+  };
+  const chunks = await script.readAccountExport({ api, operationId, total: source.length });
+  assert.deepEqual(
+    chunks.map((chunk) => chunk.length),
+    [32768, 32768, 4464],
+  );
+  assert.deepEqual(new Uint8Array(Buffer.concat(chunks)), source);
+  assert.deepEqual(
+    calls,
+    [0, 32768, 65536].map((offset) => ({ operationId, offset, limit: 32768 })),
+  );
+  for (const changed of [
+    { operation: { operationId: "another-account-operation" } },
+    { offset: 1 },
+    { total: 2 },
+    { data: "" },
+    { data: "!" },
+    { done: false },
+    { data: script.encodeBase64Url(new Uint8Array(32769)) },
+  ]) {
+    api.post = async () => ({
+      operation: { operationId },
+      offset: 0,
+      total: 1,
+      data: "AA",
+      done: true,
+      ...changed,
+    });
+    await assert.rejects(
+      script.readAccountExport({ api, operationId, total: 1 }),
+      script.PageDataError,
+    );
+  }
+  let sent = false;
+  api.post = async () => {
+    sent = true;
+    return {};
+  };
+  for (const total of [0, -1, 0.5, 2 * 1024 * 1024 + 1])
+    await assert.rejects(
+      script.readAccountExport({ api, operationId, total }),
+      script.PageDataError,
+    );
+  assert.equal(sent, false, "an invalid export size sends no request");
+  api.post = async () => {
+    throw new script.ApiError(403, "credential_revoked");
+  };
+  await assert.rejects(script.readAccountExport({ api, operationId, total: 1 }), script.ApiError);
+});
+
+test("deletion confirmation and cancellation prove the exact target and keep their command across a lost reply", async () => {
+  for (const action of ["confirm", "cancel"]) {
+    const seen: { path: string; body: Record<string, unknown>; csrf: string }[] = [];
+    let attempts = 0;
+    const ui = page("lifecycle", [...common, "lifecycle", `${action}-deletion`], {
+      fetchImpl: async (path, init) => {
+        const body = JSON.parse(init.body as string) as Record<string, unknown>;
+        seen.push({
+          path,
+          body,
+          csrf: (init.headers as Record<string, string>)["X-AF-CSRF"] ?? "",
+        });
+        if (path.endsWith("/step-up/begin")) return reply(200, challengeBody("stepUp"));
+        if (path.endsWith("/step-up/complete")) return reply(200, {});
+        attempts += 1;
+        if (attempts === 1) throw new TypeError("response lost");
+        return reply(200, { receipt: { effect: "happened" } });
+      },
+    });
+    const root = ui.elements.get("lifecycle")!;
+    root.dataset.csrf = "C".repeat(43);
+    const button = ui.elements.get(`${action}-deletion`)!;
+    button.dataset.planId = "11111111-1111-4111-8111-111111111111";
+    button.dataset.planRevision = "4";
+    button.dataset.target = "d".repeat(64);
+    await script.start(ui.window);
+    button.fire("click");
+    await settle();
+    assert.equal(button.disabled, false, "a lost reply leaves the same command available");
+    assert.deepEqual(ui.assigned, []);
+    button.fire("click");
+    await settle();
+    const mutations = seen.filter((call) => call.path.endsWith(`/account/deletion/${action}`));
+    assert.equal(mutations.length, 2);
+    assert.deepEqual(mutations[0]?.body, mutations[1]?.body);
+    assert.equal(mutations[0]?.body.planId, button.dataset.planId);
+    assert.equal(mutations[0]?.body.planRevision, action === "confirm" ? "4" : undefined);
+    assert.equal(typeof mutations[0]?.body.commandId, "string");
+    const proof = seen.find((call) => call.path.endsWith("/step-up/begin"))!;
+    assert.equal(proof.body.operationClass, `identity.${action}AccountDeletion`);
+    assert.equal(proof.body.targetHash, button.dataset.target);
+    assert(seen.every((call) => call.csrf === "C".repeat(43)));
+    assert.deepEqual(ui.assigned, ["/api/account/lifecycle"]);
+    assert.equal(
+      ui.events.some((event) => event.startsWith("storage remove")),
+      action === "confirm",
+    );
+  }
+});
+
+test("recovery uses email proof and a bound replacement ceremony, retries its command and returns to fresh sign-in", async () => {
+  const seen: { path: string; body: Record<string, unknown> }[] = [];
+  let attempts = 0;
+  const ui = page(
+    "recovery",
+    [
+      ...common,
+      "recovery-email",
+      "recovery-code",
+      "recovery-begin",
+      "recovery-complete",
+      "recovery-proof",
+    ],
+    {
+      fetchImpl: async (path, init) => {
+        if (path.endsWith("/bootstrap")) return signedOut();
+        const body = JSON.parse(init.body as string) as Record<string, unknown>;
+        seen.push({ path, body });
+        if (path.endsWith("/recovery/begin"))
+          return reply(200, { ...challengeBody("recover"), method: "emailCode" });
+        attempts += 1;
+        if (attempts === 1) throw new TypeError("response lost");
+        return reply(200, { commandId: body.commandId, resultRevision: "2", effect: "happened" });
+      },
+    },
+  );
+  ui.elements.get("recovery-email")!.value = "owner@example.test";
+  ui.elements.get("recovery-code")!.value = "BCDF-GHJK";
+  await script.start(ui.window);
+  ui.elements.get("recovery-begin")!.fire("click");
+  await settle();
+  assert.equal(ui.elements.get("recovery-proof")!.hidden, false);
+  assert.equal(
+    ui.elements.get("status")!.textContent,
+    "If this address is eligible for recovery and the message can be delivered, you will receive a code. Otherwise, try again later. Enter the code before creating a replacement passkey.",
+  );
+  ui.elements.get("recovery-complete")!.fire("click");
+  await settle();
+  assert.deepEqual(ui.assigned, []);
+  ui.elements.get("recovery-complete")!.fire("click");
+  await settle();
+  const completed = seen.filter((call) => call.path.endsWith("/recovery/complete"));
+  assert.equal(completed.length, 2);
+  assert.deepEqual(
+    completed[0]?.body,
+    completed[1]?.body,
+    "the exact command and ceremony reconcile a lost response",
+  );
+  assert.deepEqual(completed[0]?.body.proof, { emailCode: "BCDF-GHJK" });
+  assert.deepEqual(completed[0]?.body.replacement, {
+    passkey: {
+      credentialId: "AQID",
+      clientDataJson: "BA",
+      attestationObject: "BQ",
+      transports: ["internal"],
+    },
+  });
+  assert.equal(
+    ui.fakes.creates.length,
+    1,
+    "a retry does not create another replacement credential",
+  );
+  assert.equal(seen[0]?.body.method, "emailCode");
+  assert.equal(ui.elements.get("recovery-code")!.value, "");
+  assert.equal(ui.window.localStorage.getItem("af.installation"), null);
+  assert.deepEqual(ui.assigned, ["/api/account/sign-in"]);
+  assert.equal(
+    seen.some((call) => call.path.includes("authentication/complete")),
+    false,
+    "metadata is not a session",
+  );
+});
+
+test("the lifecycle download uses verified page bytes and a local JSON blob without adding markup", async () => {
+  const body = new TextEncoder().encode('{"displayName":"Owner"}');
+  const operationId = "11111111-1111-4111-8111-111111111111";
+  const blobs: Blob[] = [];
+  const revoked: string[] = [];
+  const seen: { path: string; body: Record<string, unknown> }[] = [];
+  const ui = page("lifecycle", [...common, "lifecycle", "export-account", "export-download"], {
+    fetchImpl: async (path, init) => {
+      const input = JSON.parse(init.body as string) as Record<string, unknown>;
+      seen.push({ path, body: input });
+      if (path.endsWith("/step-up/begin")) return reply(200, challengeBody("stepUp"));
+      if (path.endsWith("/step-up/complete")) return reply(200, {});
+      if (path.endsWith("/export/prepare"))
+        return reply(200, { operation: { operationId, exportBytes: body.length } });
+      return reply(200, {
+        operation: { operationId },
+        offset: 0,
+        total: body.length,
+        data: script.encodeBase64Url(body),
+        done: true,
+      });
+    },
+  });
+  Object.assign(ui.window, {
+    Blob,
+    URL: {
+      createObjectURL: (blob: Blob) => {
+        blobs.push(blob);
+        return "blob:account-export";
+      },
+      revokeObjectURL: (url: string) => revoked.push(url),
+    },
+  });
+  Object.assign(ui.elements.get("lifecycle")!.dataset, {
+    csrf: "C".repeat(43),
+    exportTarget: "e".repeat(64),
+  });
+  await script.start(ui.window);
+  ui.elements.get("export-account")!.fire("click");
+  await settle();
+  assert.equal(seen[0]?.body.operationClass, "identity.exportAccount");
+  assert.equal(seen[0]?.body.targetHash, "e".repeat(64));
+  assert.equal(blobs.length, 1);
+  assert.equal(blobs[0]?.type, "application/json");
+  assert.equal(await blobs[0]?.text(), new TextDecoder().decode(body));
+  assert.deepEqual(revoked, ["blob:account-export"]);
+  assert.equal(ui.elements.get("export-download")!.clicked, 1);
+  assert.equal(ui.elements.get("export-download")!.href, "");
+  assert.equal(ui.elements.get("export-account")!.disabled, false);
 });

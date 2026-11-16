@@ -101,16 +101,26 @@ JOIN identity.user u ON u.user_id=a.user_id WHERE a.provider_id='email' AND a.su
 				return err
 			}
 			if UserState(security.State).MaySignIn() {
-				eligible = true
-				row.UserID = &userID
-				row.AccountAuthEpoch = &security.AuthEpoch
-				row.AccountRecoveryGeneration = &security.RecoveryGeneration
-				operationID := row.ID
-				row.LifecycleOperationID = &operationID
-				intent := lifecycleIntent(LifecycleRecovery, userID, operationID)
-				if _, err = tx.Exec(ctx, `INSERT INTO identity.lifecycle_operation(operation_id,user_id,kind,state,plan_rev,intent_sha256,auth_epoch,
-recovery_generation,created_at,expires_at,rev) VALUES($1,$2,1,1,1,$3,$4,$5,$6,$7,1)`, operationID, userID, intent[:], security.AuthEpoch, security.RecoveryGeneration, now, row.ExpiresAt); err != nil {
+				// Discovery happened before the account lock. A concurrent
+				// removal may have revoked this channel and raised the epochs
+				// while we waited; it must not inherit that new generation.
+				var channelLive bool
+				if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM identity.auth_identity
+WHERE user_id=$1 AND provider_id='email' AND subject=$2 AND revoked_at IS NULL)`, userID, normalized).Scan(&channelLive); err != nil {
 					return err
+				}
+				if channelLive {
+					eligible = true
+					row.UserID = &userID
+					row.AccountAuthEpoch = &security.AuthEpoch
+					row.AccountRecoveryGeneration = &security.RecoveryGeneration
+					operationID := row.ID
+					row.LifecycleOperationID = &operationID
+					intent := lifecycleIntent(LifecycleRecovery, userID, operationID)
+					if _, err = tx.Exec(ctx, `INSERT INTO identity.lifecycle_operation(operation_id,user_id,kind,state,plan_rev,intent_sha256,auth_epoch,
+recovery_generation,created_at,expires_at,rev) VALUES($1,$2,1,1,1,$3,$4,$5,$6,$7,1)`, operationID, userID, intent[:], security.AuthEpoch, security.RecoveryGeneration, now, row.ExpiresAt); err != nil {
+						return err
+					}
 				}
 			}
 		}

@@ -537,11 +537,19 @@ export async function readAccountExport({ api, operationId, total }) {
   let offset = 0;
   while (offset < total) {
     const reply = await api.post("/account/export/read", { operationId, offset, limit: 32768 });
-    if (reply.operation?.operationId !== operationId || reply.offset !== offset || reply.total !== total)
+    if (
+      reply.operation?.operationId !== operationId ||
+      reply.offset !== offset ||
+      reply.total !== total
+    )
       throw new PageDataError("The export changed while being read.");
     const bytes = decodeBase64Url(reply.data);
-    if (bytes.length < 1 || bytes.length > 32768 || offset + bytes.length > total ||
-        reply.done !== (offset + bytes.length === total))
+    if (
+      bytes.length < 1 ||
+      bytes.length > 32768 ||
+      offset + bytes.length > total ||
+      reply.done !== (offset + bytes.length === total)
+    )
       throw new PageDataError("The export range is not valid.");
     chunks.push(bytes);
     offset += bytes.length;
@@ -663,7 +671,11 @@ async function signInPage(page) {
 }
 
 function forgetInstallation(page) {
-  try { storageOf(page.window)?.removeItem(INSTALLATION_KEY); } catch { /* Storage may be unavailable. */ }
+  try {
+    storageOf(page.window)?.removeItem(INSTALLATION_KEY);
+  } catch {
+    /* Storage may be unavailable. */
+  }
 }
 
 async function recoveryPage(page) {
@@ -672,56 +684,90 @@ async function recoveryPage(page) {
   const email = page.document.getElementById("recovery-email");
   const code = page.document.getElementById("recovery-code");
   if (!begin || !complete || !email || !code) return;
-  if (!passkeysSupported(page.window)) { showError(page.document, UNSUPPORTED_TEXT); return; }
-  try { await page.api.bootstrap(); } catch (error) { showError(page.document, errorText(error)); return; }
+  if (!passkeysSupported(page.window)) {
+    showError(page.document, UNSUPPORTED_TEXT);
+    return;
+  }
+  try {
+    await page.api.bootstrap();
+  } catch (error) {
+    showError(page.document, errorText(error));
+    return;
+  }
   let challenge = null;
   let completion = null;
   begin.disabled = false;
-  begin.addEventListener("click", () => guarded(page, begin, "Requesting a recovery code.", async () => {
-    if (!email.checkValidity()) { email.reportValidity(); throw new ApiError(400, "invalid_argument"); }
-    challenge = await page.api.post("/recovery/begin", {
-      method: "emailCode", email: email.value.trim(),
-      installation: installationClaim(storageOf(page.window), page.window.crypto),
-    });
-    completion = null;
-    page.document.getElementById("recovery-proof").hidden = false;
-    complete.disabled = false;
-    setStatus(page.document, "If this verified address belongs to an account, a recovery code has been sent. Enter the code before creating a replacement passkey.");
-    code.focus();
-  }));
-  complete.addEventListener("click", () => guarded(page, complete, "Checking recovery and creating a replacement passkey.", async () => {
-    if (!challenge || !code.value.trim()) throw new ApiError(400, "invalid_argument");
-    // Keep the exact command and ceremony after a network failure: a retry reconciles it.
-    if (!completion) {
-      const credential = await createCredential(page.credentials, creationOptions(challenge, "Recovered ArcForges account"));
-      if (!credential) throw new DOMException("No credential.", "NotAllowedError");
-      completion = { flowId: challenge.flowId, commandId: page.window.crypto.randomUUID(),
-        proof: { emailCode: code.value.trim() }, replacement: { passkey: creationBody(credential) } };
-    } else if (completion.proof.emailCode !== code.value.trim()) {
-      completion = { ...completion, commandId: page.window.crypto.randomUUID(),
-        proof: { emailCode: code.value.trim() } };
-    }
-    await page.api.post("/recovery/complete", completion);
-    code.value = "";
-    completion = null;
-    forgetInstallation(page);
-    go(page, `${page.base}${ACCOUNT}/sign-in`);
-  }));
+  begin.addEventListener("click", () =>
+    guarded(page, begin, "Requesting a recovery code.", async () => {
+      if (!email.checkValidity()) {
+        email.reportValidity();
+        throw new ApiError(400, "invalid_argument");
+      }
+      challenge = await page.api.post("/recovery/begin", {
+        method: "emailCode",
+        email: email.value.trim(),
+        installation: installationClaim(storageOf(page.window), page.window.crypto),
+      });
+      completion = null;
+      page.document.getElementById("recovery-proof").hidden = false;
+      complete.disabled = false;
+      setStatus(
+        page.document,
+        "If this address is eligible for recovery and the message can be delivered, you will receive a code. Otherwise, try again later. Enter the code before creating a replacement passkey.",
+      );
+      code.focus();
+    }),
+  );
+  complete.addEventListener("click", () =>
+    guarded(page, complete, "Checking recovery and creating a replacement passkey.", async () => {
+      if (!challenge || !code.value.trim()) throw new ApiError(400, "invalid_argument");
+      // Keep the exact command and ceremony after a network failure: a retry reconciles it.
+      if (!completion) {
+        const credential = await createCredential(
+          page.credentials,
+          creationOptions(challenge, "Recovered ArcForges account"),
+        );
+        if (!credential) throw new DOMException("No credential.", "NotAllowedError");
+        completion = {
+          flowId: challenge.flowId,
+          commandId: page.window.crypto.randomUUID(),
+          proof: { emailCode: code.value.trim() },
+          replacement: { passkey: creationBody(credential) },
+        };
+      } else if (completion.proof.emailCode !== code.value.trim()) {
+        completion = {
+          ...completion,
+          commandId: page.window.crypto.randomUUID(),
+          proof: { emailCode: code.value.trim() },
+        };
+      }
+      await page.api.post("/recovery/complete", completion);
+      code.value = "";
+      completion = null;
+      forgetInstallation(page);
+      go(page, `${page.base}${ACCOUNT}/sign-in`);
+    }),
+  );
 }
 
 function lifecyclePage(page) {
   const root = page.document.getElementById("lifecycle");
   if (!root) return;
-  if (!passkeysSupported(page.window)) { showError(page.document, UNSUPPORTED_TEXT); return; }
+  if (!passkeysSupported(page.window)) {
+    showError(page.document, UNSUPPORTED_TEXT);
+    return;
+  }
   page.api.useToken(root.dataset.csrf);
   const prepare = page.document.getElementById("prepare-deletion");
   if (prepare) {
     const commandId = page.window.crypto.randomUUID();
     prepare.disabled = false;
-    prepare.addEventListener("click", () => guarded(page, prepare, "Preparing the deletion plan.", async () => {
-      await page.api.post("/account/deletion/prepare", { commandId });
-      go(page, `${page.base}${ACCOUNT}/lifecycle`);
-    }));
+    prepare.addEventListener("click", () =>
+      guarded(page, prepare, "Preparing the deletion plan.", async () => {
+        await page.api.post("/account/deletion/prepare", { commandId });
+        go(page, `${page.base}${ACCOUNT}/lifecycle`);
+      }),
+    );
   }
   for (const [id, operationClass, path] of [
     ["confirm-deletion", "identity.confirmAccountDeletion", "/account/deletion/confirm"],
@@ -732,33 +778,51 @@ function lifecyclePage(page) {
     const request = { commandId: page.window.crypto.randomUUID(), planId: button.dataset.planId };
     if (id === "confirm-deletion") request.planRevision = button.dataset.planRevision;
     button.disabled = false;
-    button.addEventListener("click", () => guarded(page, button, "Verifying this account operation.", async () => {
-      await stepUp({ api: page.api, credentials: page.credentials, operationClass, targetHash: button.dataset.target });
-      await page.api.post(path, request);
-      if (id === "confirm-deletion") forgetInstallation(page);
-      go(page, `${page.base}${ACCOUNT}/lifecycle`);
-    }));
+    button.addEventListener("click", () =>
+      guarded(page, button, "Verifying this account operation.", async () => {
+        await stepUp({
+          api: page.api,
+          credentials: page.credentials,
+          operationClass,
+          targetHash: button.dataset.target,
+        });
+        await page.api.post(path, request);
+        if (id === "confirm-deletion") forgetInstallation(page);
+        go(page, `${page.base}${ACCOUNT}/lifecycle`);
+      }),
+    );
   }
   const download = page.document.getElementById("export-account");
   if (!download) return;
   const commandId = page.window.crypto.randomUUID();
   download.disabled = false;
-  download.addEventListener("click", () => guarded(page, download, "Verifying and reading your account export.", async () => {
-    await stepUp({ api: page.api, credentials: page.credentials,
-      operationClass: "identity.exportAccount", targetHash: root.dataset.exportTarget });
-    const reply = await page.api.post("/account/export/prepare", { commandId });
-    const chunks = await readAccountExport({ api: page.api,
-      operationId: reply.operation.operationId, total: reply.operation.exportBytes });
-    const url = page.window.URL.createObjectURL(new page.window.Blob(chunks, { type: "application/json" }));
-    const link = page.document.getElementById("export-download");
-    if (!link) throw new PageDataError("The export download is not available.");
-    link.href = url;
-    link.click();
-    page.window.URL.revokeObjectURL(url);
-    link.removeAttribute("href");
-    setStatus(page.document, "Your account export is ready.");
-    download.disabled = false;
-  }));
+  download.addEventListener("click", () =>
+    guarded(page, download, "Verifying and reading your account export.", async () => {
+      await stepUp({
+        api: page.api,
+        credentials: page.credentials,
+        operationClass: "identity.exportAccount",
+        targetHash: root.dataset.exportTarget,
+      });
+      const reply = await page.api.post("/account/export/prepare", { commandId });
+      const chunks = await readAccountExport({
+        api: page.api,
+        operationId: reply.operation.operationId,
+        total: reply.operation.exportBytes,
+      });
+      const url = page.window.URL.createObjectURL(
+        new page.window.Blob(chunks, { type: "application/json" }),
+      );
+      const link = page.document.getElementById("export-download");
+      if (!link) throw new PageDataError("The export download is not available.");
+      link.href = url;
+      link.click();
+      page.window.URL.revokeObjectURL(url);
+      link.removeAttribute("href");
+      setStatus(page.document, "Your account export is ready.");
+      download.disabled = false;
+    }),
+  );
 }
 
 async function bootstrapPage(page) {
