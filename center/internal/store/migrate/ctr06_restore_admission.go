@@ -82,14 +82,8 @@ func (g *ctr06RestoreBridgeGrant) valid(ctx context.Context, q Querier, conn *pg
 		options.RuntimeRole != g.roles.BridgeRole || requireCTR06RestoreIsolation(ctx, q) != nil {
 		return false
 	}
-	expected := make([]schema.Grant, 0, len(schema.RuntimeGrants))
-	for _, grant := range schema.RuntimeGrants {
-		if grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_command_id" || grant.Table == "routed_file_target") {
-			continue
-		}
-		expected = append(expected, grant)
-	}
-	if !reflect.DeepEqual(options.Grants, expected) || !reflect.DeepEqual(options.Schemas, schema.Schemas) ||
+	schemas, expected := schema.AtVersion(10)
+	if !reflect.DeepEqual(options.Grants, expected) || !reflect.DeepEqual(options.Schemas, schemas) ||
 		g.roles.DatabaseOID != g.restore.databaseOID || g.roles.OwnerOID != g.restore.ownerOID ||
 		g.roles.ClusterSystemIdentifier != g.restore.cluster {
 		return false

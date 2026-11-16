@@ -38,7 +38,9 @@ type Database struct {
 	Name       string
 }
 
-// New creates an isolated database, applies every migration with the center's own runner and connects the runtime role.
+// New retains the schema11 runtime fixture for historical V1 service tests.
+// V2 storage tests exercise their own finite transition and least-privilege role;
+// these fixtures do not assert that a retired V1 route works on a V2 database.
 func New(t *testing.T) *Database {
 	t.Helper()
 	url, name := pgtest.Database(t)
@@ -46,6 +48,9 @@ func New(t *testing.T) *Database {
 	build, err := migrate.Load(schema.Migrations())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(build) > 11 {
+		build = build[:11]
 	}
 	// A native Windows run against remote TLS PostgreSQL took about 44s to migrate and 16s to rotate.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

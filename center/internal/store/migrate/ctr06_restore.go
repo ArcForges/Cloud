@@ -328,7 +328,7 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 	if err != nil || strings.TrimPrefix(maintenanceURL.Path, "/") == cfg.Database {
 		return report, errors.New("a distinct maintenance database and fresh destination are required")
 	}
-	build, err := Load(schema.Migrations())
+	build, err := loadCTR06Build()
 	if err != nil || len(build) != 11 || build[10].Name != "0011_fleet_routed_files.sql" {
 		return report, errors.New("the supported migration build is unavailable")
 	}

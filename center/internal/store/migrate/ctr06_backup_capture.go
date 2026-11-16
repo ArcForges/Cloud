@@ -125,7 +125,7 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if _, err := tx.Exec(ctx, "SET LOCAL search_path=pg_catalog; SET LOCAL TIME ZONE 'UTC'"); err != nil {
 		return report, errors.New("the source snapshot settings could not be established")
 	}
-	build, err := Load(schema.Migrations())
+	build, err := loadCTR06Build()
 	if err != nil || len(build) != 11 {
 		return report, errors.New("the supported migration catalogue is unavailable")
 	}

@@ -324,6 +324,10 @@ func Inspect(ctx context.Context, conn *pgx.Conn, build []Migration) (Result, er
 			return result, err
 		}
 	}
+	if result.Version >= 12 && requireManagementReady(ctx, conn) != nil {
+		result.State = StateRefused
+		return result, ErrManagementTransitionRequired
+	}
 	return result, nil
 }
 
@@ -362,6 +366,7 @@ type Options struct {
 	localBridge      *localBridgeAdmission
 	localRestore     *restoreCapability
 	localLegacyGrant *ctr06RestoreBridgeGrant
+	management       *managementAdmission
 	LockTimeout      time.Duration
 	StatementTimeout time.Duration
 	LockWait         time.Duration
@@ -422,6 +427,15 @@ func Apply(ctx context.Context, conn *pgx.Conn, build []Migration, options Optio
 // applyMigrations also retains the isolated historical proof implementation
 // for compatibility research. The public entry above refuses that old proof.
 func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, options Options) (Result, error) {
+	if len(build) > 0 && build[0].Name == "0001_platform_store.sql" {
+		schemas, grants := schema.AtVersion(len(build))
+		if options.Schemas == nil {
+			options.Schemas = schemas
+		}
+		if options.Grants == nil {
+			options.Grants = grants
+		}
+	}
 	options.defaults()
 	result := Result{BuildVersion: len(build), RuntimeRole: options.RuntimeRole, Applied: []Applied{}, Pending: []string{}}
 	defer func() {
@@ -476,16 +490,31 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 		return result, Sanitize("read platform.schema_migration", err)
 	}
 	comparison := result.describe(build, applied, exists)
+	if len(applied) == 0 && len(build) == 12 && build[11].Name == "0012_management_storage.sql" && options.localRestore == nil {
+		artifact, err := managementArtifact(options.Runner, build[11])
+		if err != nil {
+			return result, err
+		}
+		options.management = &managementAdmission{conn: conn, source: 0, artifactDigest: artifact, active: true}
+		defer func() { options.management.active = false }()
+	}
 	// Even a schema-only invocation must not report a quarantined or
 	// identity-mismatched canonical 0011 database as current. Only the
 	// unexported capability held by the active restore manager can pass the
 	// PENDING boundary.
 	if len(applied) >= 11 && len(build) >= 11 && build[10].Name == "0011_fleet_routed_files.sql" && options.localRestore == nil {
-		if _, _, err := readyCTR06Admission(ctx, conn, options.RuntimeRole); err != nil {
+		role := options.RuntimeRole
+		if a := options.management; a != nil && a.active && a.conn == conn && a.source == 11 {
+			role = a.oldRole
+		}
+		if _, _, err := readyCTR06Admission(ctx, conn, role); err != nil {
 			result.State = StateRefused
 			result.Problems = append(result.Problems, "runtime floor or restore admission is unavailable or untrusted")
 			return result, err
 		}
+	}
+	if len(applied) >= 12 && requireManagementReady(ctx, conn) != nil {
+		return Result{State: StateRefused}, ErrManagementTransitionRequired
 	}
 	if len(comparison.Problems) > 0 {
 		for _, problem := range comparison.Problems {
@@ -589,8 +618,18 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 				return err
 			}
 		}
+		if migration.Version == 12 && migration.Name == "0012_management_storage.sql" {
+			if err := guardManagement(ctx, tx, conn, options); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, migration.SQL); err != nil {
 			return err
+		}
+		if migration.Version == 12 && migration.Name == "0012_management_storage.sql" {
+			if err := recordManagement(ctx, tx, conn, options); err != nil {
+				return err
+			}
 		}
 		if migration.Version == 11 && migration.Name == "0011_fleet_routed_files.sql" {
 			if err := recordCTR06Floor(ctx, tx, conn, options.RuntimeRole, options.BridgeProof, options.localBridge, options.localRestore); err != nil {
@@ -602,7 +641,7 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 		return err
 	})
 	if err != nil {
-		if errors.Is(err, ErrCTR06RetirementUnproven) {
+		if errors.Is(err, ErrCTR06RetirementUnproven) || errors.Is(err, ErrManagementTransitionRequired) {
 			return Step{}, err
 		}
 		failure := &Failure{Version: migration.Version, Name: migration.Name, SQLState: "unknown", Message: "the migration did not complete"}

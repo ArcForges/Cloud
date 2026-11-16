@@ -31,6 +31,9 @@ func apply(t *testing.T, url string, build []Migration, options Options) (Result
 	if options.BridgeProof != nil {
 		// Exercise the old signed-promotion mechanics only in this isolated
 		// historical fixture. The public Apply entry refuses the old proof.
+		if len(build) > 11 {
+			build = build[:11]
+		}
 		return applyMigrations(ctx, conn, build, options)
 	}
 	return Apply(ctx, conn, build, options)

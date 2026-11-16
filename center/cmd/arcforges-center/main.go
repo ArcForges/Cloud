@@ -103,6 +103,9 @@ func main() {
 }
 
 func run(arguments []string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+	if len(arguments) >= 2 && arguments[0] == "migrate" && arguments[1] == "management" {
+		return managementCommand(arguments[2:], lookup, stdout, stderr)
+	}
 	command := "serve"
 	if len(arguments) > 0 {
 		command = arguments[0]
