@@ -129,6 +129,9 @@ func TestManagementFreshStorageAndSQLGuards(t *testing.T) {
 	if err != nil || result.Version != 12 || result.State != StateCurrent {
 		t.Fatalf("fresh management migration: %v", err)
 	}
+	if repeated, err := Apply(ctx, owner, build, Options{Runner: "isolated-native-fixture", RuntimeRole: group}); err != nil || repeated.Version != 12 || repeated.State != StateCurrent || len(repeated.Ran) != 0 || repeated.Grants != "reconciled" {
+		t.Fatalf("schema12 repeat and exact grants: %v", err)
+	}
 	f := seedNamespaceFixture(t, owner)
 	channel, holder := platform.NewID(), platform.NewID()
 	protocol := platform.NewID()
@@ -295,5 +298,35 @@ func TestManagementValid11PreservesLegacyUnknownAndFencesItsWriters(t *testing.T
 	}
 	if err := insertNamespace(ctx, owner, f, platform.NewID(), false, 1, 1, false); err == nil {
 		t.Fatal("old routing accepted new work after expansion")
+	}
+	// Restore the actual schema11 backup produced before this transition.
+	// This preserves the original floor protocol instead of copying source READY.
+	metadataPath := filepath.Join(dir, "source.json")
+	raw, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal("schema11 backup metadata unavailable")
+	}
+	metadataDigest := ctr06SHA(raw)
+	meta, err := ctr06ReadMetadata(metadataPath, metadataDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := name + "_r11"
+	targetRole := target + "_runtime"
+	t.Cleanup(func() { pgtest.Drop(t, target) })
+	targetURL := pgtest.WithDatabase(t, url, target)
+	cfg := config.Migration{Mode: config.SelfHosted, URL: targetURL, Maintenance: url, Database: target, RuntimeRole: targetRole}
+	if restored, err := RestoreLogical(ctx, cfg, filepath.Join(dir, "source.dump"), meta.ArchiveSHA256, metadataPath, metadataDigest, "isolated-schema11-restore"); err != nil || restored.SchemaVersion != 11 || restored.RestoreReceipt == "" {
+		t.Fatalf("original schema11 backup restore: %v", err)
+	}
+	copyOwner := pgtest.Connect(t, targetURL)
+	newDir := t.TempDir()
+	copyResult, err := ApplyManagement(ctx, copyOwner, build, Options{Runner: "isolated-restored11-transition", RuntimeRole: targetRole}, cfg, filepath.Join(newDir, "restored.dump"), filepath.Join(newDir, "restored.json"))
+	if err != nil || copyResult.Version != 12 {
+		t.Fatalf("restored11 forward transition: %v", err)
+	}
+	var retained int
+	if err := copyOwner.QueryRow(ctx, "SELECT count(*) FROM management.legacy_outcome WHERE may_have_delivered").Scan(&retained); err != nil || retained != 2 {
+		t.Fatal("schema11 restore/transition lost uncertain legacy identities")
 	}
 }
