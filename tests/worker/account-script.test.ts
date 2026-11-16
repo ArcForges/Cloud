@@ -2021,9 +2021,11 @@ test("deletion confirmation and cancellation prove the exact target and keep the
         return reply(200, { receipt: { effect: "happened" } });
       },
     });
-    const root = ui.elements.get("lifecycle")!;
+    const root = ui.elements.get("lifecycle");
+    assert.ok(root);
     root.dataset.csrf = "C".repeat(43);
-    const button = ui.elements.get(`${action}-deletion`)!;
+    const button = ui.elements.get(`${action}-deletion`);
+    assert.ok(button);
     button.dataset.planId = "11111111-1111-4111-8111-111111111111";
     button.dataset.planRevision = "4";
     button.dataset.target = "d".repeat(64);
@@ -2040,7 +2042,8 @@ test("deletion confirmation and cancellation prove the exact target and keep the
     assert.equal(mutations[0]?.body.planId, button.dataset.planId);
     assert.equal(mutations[0]?.body.planRevision, action === "confirm" ? "4" : undefined);
     assert.equal(typeof mutations[0]?.body.commandId, "string");
-    const proof = seen.find((call) => call.path.endsWith("/step-up/begin"))!;
+    const proof = seen.find((call) => call.path.endsWith("/step-up/begin"));
+    assert.ok(proof);
     assert.equal(proof.body.operationClass, `identity.${action}AccountDeletion`);
     assert.equal(proof.body.targetHash, button.dataset.target);
     assert(seen.every((call) => call.csrf === "C".repeat(43)));
@@ -2078,20 +2081,32 @@ test("recovery uses email proof and a bound replacement ceremony, retries its co
       },
     },
   );
-  ui.elements.get("recovery-email")!.value = "owner@example.test";
-  ui.elements.get("recovery-code")!.value = "BCDF-GHJK";
+  const emailField = ui.elements.get("recovery-email");
+  const codeField = ui.elements.get("recovery-code");
+  const beginButton = ui.elements.get("recovery-begin");
+  const completeButton = ui.elements.get("recovery-complete");
+  const proofSection = ui.elements.get("recovery-proof");
+  const statusArea = ui.elements.get("status");
+  assert.ok(emailField);
+  assert.ok(codeField);
+  assert.ok(beginButton);
+  assert.ok(completeButton);
+  assert.ok(proofSection);
+  assert.ok(statusArea);
+  emailField.value = "owner@example.test";
+  codeField.value = "BCDF-GHJK";
   await script.start(ui.window);
-  ui.elements.get("recovery-begin")!.fire("click");
+  beginButton.fire("click");
   await settle();
-  assert.equal(ui.elements.get("recovery-proof")!.hidden, false);
+  assert.equal(proofSection.hidden, false);
   assert.equal(
-    ui.elements.get("status")!.textContent,
+    statusArea.textContent,
     "If this address is eligible for recovery and the message can be delivered, you will receive a code. Otherwise, try again later. Enter the code before creating a replacement passkey.",
   );
-  ui.elements.get("recovery-complete")!.fire("click");
+  completeButton.fire("click");
   await settle();
   assert.deepEqual(ui.assigned, []);
-  ui.elements.get("recovery-complete")!.fire("click");
+  completeButton.fire("click");
   await settle();
   const completed = seen.filter((call) => call.path.endsWith("/recovery/complete"));
   assert.equal(completed.length, 2);
@@ -2115,7 +2130,7 @@ test("recovery uses email proof and a bound replacement ceremony, retries its co
     "a retry does not create another replacement credential",
   );
   assert.equal(seen[0]?.body.method, "emailCode");
-  assert.equal(ui.elements.get("recovery-code")!.value, "");
+  assert.equal(codeField.value, "");
   assert.equal(ui.window.localStorage.getItem("af.installation"), null);
   assert.deepEqual(ui.assigned, ["/api/account/sign-in"]);
   assert.equal(
@@ -2158,12 +2173,18 @@ test("the lifecycle download uses verified page bytes and a local JSON blob with
       revokeObjectURL: (url: string) => revoked.push(url),
     },
   });
-  Object.assign(ui.elements.get("lifecycle")!.dataset, {
+  const root = ui.elements.get("lifecycle");
+  const downloadButton = ui.elements.get("export-account");
+  const downloadLink = ui.elements.get("export-download");
+  assert.ok(root);
+  assert.ok(downloadButton);
+  assert.ok(downloadLink);
+  Object.assign(root.dataset, {
     csrf: "C".repeat(43),
     exportTarget: "e".repeat(64),
   });
   await script.start(ui.window);
-  ui.elements.get("export-account")!.fire("click");
+  downloadButton.fire("click");
   await settle();
   assert.equal(seen[0]?.body.operationClass, "identity.exportAccount");
   assert.equal(seen[0]?.body.targetHash, "e".repeat(64));
@@ -2171,7 +2192,7 @@ test("the lifecycle download uses verified page bytes and a local JSON blob with
   assert.equal(blobs[0]?.type, "application/json");
   assert.equal(await blobs[0]?.text(), new TextDecoder().decode(body));
   assert.deepEqual(revoked, ["blob:account-export"]);
-  assert.equal(ui.elements.get("export-download")!.clicked, 1);
-  assert.equal(ui.elements.get("export-download")!.href, "");
-  assert.equal(ui.elements.get("export-account")!.disabled, false);
+  assert.equal(downloadLink.clicked, 1);
+  assert.equal(downloadLink.href, "");
+  assert.equal(downloadButton.disabled, false);
 });
