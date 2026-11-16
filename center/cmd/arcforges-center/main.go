@@ -49,7 +49,7 @@ commands:
                                    expand checked schema10/11 in offline maintenance with a verified backup and writer fence
   admin ensure-database            create the center's database if it does not exist
   admin backup-logical --archive <new path> --metadata <new path>
-                                   capture a checked full 0011/0012 backup and its trusted snapshot metadata
+                                   capture a checked full 0010/0011/0012 backup and its trusted snapshot metadata
   admin restore-logical-backup --archive <path> --sha256 <digest> --metadata <path> --metadata-sha256 <digest>
                                    restore a supported trusted backup to an explicitly named new, isolated database
   admin restore-legacy-logical-backup --archive <path> --sha256 <digest> --provenance <path> --provenance-sha256 <digest>

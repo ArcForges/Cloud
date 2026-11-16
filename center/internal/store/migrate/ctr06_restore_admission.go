@@ -29,6 +29,7 @@ type restoreCapability struct {
 	secret             [32]byte
 	active             bool
 	managementArtifact string
+	managementSource   int
 }
 
 func newRestoreCapability(ctx context.Context, conn *pgx.Conn, archive, metadata string) (*restoreCapability, error) {

@@ -74,7 +74,7 @@ func finishManagementRestore(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, run
  UPDATE fleet.node SET connection_id=NULL;`); err != nil {
 		return err
 	}
-	a := &managementAdmission{conn: conn, source: 0, backupDigest: c.metadataSHA256, artifactDigest: c.managementArtifact,
+	a := &managementAdmission{conn: conn, source: c.managementSource, backupDigest: c.metadataSHA256, artifactDigest: c.managementArtifact,
 		retiredDigest: ctr06SHA([]byte("V2 restored target excludes source runtime generation:" + sourceRole + ":" + runtimeRole)), active: true}
 	defer func() { a.active = false }()
 	return recordManagement(ctx, tx, conn, Options{RuntimeRole: runtimeRole, management: a})

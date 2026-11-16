@@ -107,6 +107,17 @@ func guardManagementSchema11(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, rol
 	if err := checkManagementSnapshot(ctx, tx, conn, a); err != nil {
 		return err
 	}
+	if a.recovery != nil {
+		if !a.recovery.active || a.recovery.conn != conn || a.recovery.archiveSHA256 != a.backup.ArchiveSHA256 || a.recovery.metadataSHA256 != a.backupDigest || requireCTR06RestoreIsolation(ctx, tx) != nil {
+			return ErrManagementTransitionRequired
+		}
+		if err := createManagementRoles(ctx, tx, role); err != nil {
+			return err
+		}
+		retired, err := managementRestoreWriterClosure(ctx, tx, role, a)
+		a.retiredDigest = retired
+		return err
+	}
 	if err := requireManagementSchema10Source(ctx, tx, a.oldRole); err != nil {
 		return err
 	}
@@ -122,7 +133,7 @@ func guardManagementSchema11(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, rol
 }
 
 func recordManagementSchema11Floor(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, role string, a *managementAdmission, recovery *restoreCapability) error {
-	if a == nil || !a.active || a.conn != conn || a.source != 10 || a.targetRole != role || a.retiredDigest == "" || a.legacyRoleOID == 0 {
+	if a == nil || !a.active || a.conn != conn || a.source != 10 || a.targetRole != role || a.retiredDigest == "" || (a.recovery == nil && a.legacyRoleOID == 0) || a.recovery != recovery {
 		return ErrManagementTransitionRequired
 	}
 	identity, err := managementDatabaseIdentity(ctx, tx)
@@ -137,12 +148,18 @@ func recordManagementSchema11Floor(ctx context.Context, tx pgx.Tx, conn *pgx.Con
  DELETE FROM platform.runtime_credential;`); err != nil {
 		return err
 	}
+	var legacyRole, legacyOID any
+	if recovery == nil {
+		legacyRole, legacyOID = a.oldRole, a.legacyRoleOID
+	} else if !recovery.active || recovery.conn != conn || requireCTR06RestoreIsolation(ctx, tx) != nil {
+		return ErrManagementTransitionRequired
+	}
 	proof, _ := json.Marshal(struct{ Kind, Database, Artifact, Backup, Writers, Runtime string }{"same-invocation finite maintenance v2", identity, a.artifactDigest, a.backupDigest, a.retiredDigest, role})
 	tag, err := tx.Exec(ctx, `INSERT INTO platform.ctr06_runtime_floor
  (singleton,cluster_system_identifier,database_oid,owner_oid,runtime_role,runtime_role_oid,legacy_role,legacy_role_oid,bridge_revision,bridge_image_id,promotion_digest)
  SELECT true,(SELECT system_identifier::text FROM pg_control_system()),d.oid,d.datdba,r.rolname,r.oid,$2,$3,$4,$5,$6
  FROM pg_database d,pg_roles r WHERE d.datname=current_database() AND r.rolname=$1 AND d.datdba=(SELECT oid FROM pg_roles WHERE rolname=current_user)`,
-		role, a.oldRole, a.legacyRoleOID, "afv2-maintenance/"+a.sourceLabel, "native-sha256:"+a.executableDigest, ctr06SHA(proof))
+		role, legacyRole, legacyOID, "afv2-maintenance/"+a.sourceLabel, "native-sha256:"+a.executableDigest, ctr06SHA(proof))
 	if err != nil || tag.RowsAffected() != 1 {
 		return ErrManagementTransitionRequired
 	}
@@ -160,6 +177,12 @@ func guardManagementAfterSchema11(ctx context.Context, tx pgx.Tx, conn *pgx.Conn
 	identity, err := managementDatabaseIdentity(ctx, tx)
 	if err != nil || identity != a.databaseIdentity {
 		return ErrManagementTransitionRequired
+	}
+	if a.recovery != nil {
+		if options.localRestore != a.recovery {
+			return ErrManagementTransitionRequired
+		}
+		return managementPendingRestore(ctx, tx, conn, options.RuntimeRole, a.recovery)
 	}
 	_, _, err = readyCTR06Admission(ctx, tx, options.RuntimeRole)
 	return err

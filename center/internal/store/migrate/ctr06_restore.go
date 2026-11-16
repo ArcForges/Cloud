@@ -305,7 +305,7 @@ type RestoreReport struct {
 	RestoreReceipt     string `json:"restoreReceipt"`
 }
 
-// RestoreLogical admits only a supported 0011/0012 backup with its protected
+// RestoreLogical admits only a supported 0010/0011/0012 backup with its protected
 // same-snapshot metadata. The original archive is never modified, and a
 // destination is created only after the complete preflight checks succeed.
 func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expected, metadataPath, metadataDigest, runner string) (report RestoreReport, finalErr error) {
@@ -337,7 +337,7 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 		return report, err
 	}
 	version := metadata.SourceSchemaVersion
-	if (version != 11 && version != 12) || version > len(build) {
+	if (version != 10 && version != 11 && version != 12) || version > len(build) {
 		return report, errors.New("unsupported backup schema")
 	}
 	build = build[:version]
@@ -382,9 +382,12 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 		return report, err
 	}
 	restoreSchemas, _ := schema.AtVersion(version)
-	selected, err := restoreList(raw, restoreSchemas)
-	if err != nil {
-		return report, err
+	selected := raw
+	if version != 10 {
+		selected, err = restoreList(raw, restoreSchemas)
+		if err != nil {
+			return report, err
+		}
 	}
 	if version == 12 {
 		selected, err = managementRestoreList(selected)
@@ -413,6 +416,9 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 		return report, errors.New("the destination recovery identity could not be established")
 	}
 	defer capability.destroy()
+	if version == 10 {
+		return restoreManagementSchema10(ctx, conn, cfg, metadata, metadataDigest, runner, tool, childEnv, archive, listPath, capability)
+	}
 	if version == 12 {
 		capability.managementArtifact, err = managementArtifact(runner, build[11])
 		if err != nil {

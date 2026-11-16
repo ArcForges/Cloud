@@ -44,6 +44,7 @@ type managementAdmission struct {
 	sourceLabel      string
 	legacyRoleOID    uint32
 	floorEstablished bool
+	recovery         *restoreCapability
 }
 
 func requireManagementReady(ctx context.Context, q Querier) error {

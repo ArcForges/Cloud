@@ -74,6 +74,18 @@ real H-22 fresh migration at `c0d9a62c`. Source archives cannot supply their own
 definition oracle. Capture checks every table, sequence and large object in its
 exported snapshot; restore rechecks them against the actual quarantined target.
 
+A checked schema10 archive restores first into a new quarantined database with
+no source ACL or login authority. The manager verifies every original table,
+sequence, large object and applied checksum before the unchanged 0011 and 0012
+transactions run. Its same-invocation capability binds the target database,
+archive, metadata and actual executable. New NOLOGIN roles are created inside
+0011; the target floor remains PENDING until the transformed closed catalogue,
+retained rows and legacy tombstones are checked. Target READY and its cutover
+receipt commit together. Restoring another database never revokes cluster roles
+still serving the source. Inconsistent history or a later fault preserves the
+quarantined target; an ordinary command or a later invocation cannot adopt it
+by name. Preserve it and the original backup for explicit investigation.
+
 V2 restore excludes the source cutover receipt's data and preserves the target's
 native floor/admission. The private same-invocation restore capability completes
 the target-specific cutover and original restore admission atomically. Old
