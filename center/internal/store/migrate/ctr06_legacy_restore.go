@@ -20,7 +20,6 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/bridgeproof"
 	"github.com/ArcForges/Cloud/center/internal/config"
-	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -123,7 +122,7 @@ func RestoreLegacy(ctx context.Context, cfg config.Migration, archivePath, expec
 	if err != nil {
 		return report, err
 	}
-	build, err := Load(schema.Migrations())
+	build, err := loadCTR06Build()
 	if err != nil || len(build) != 11 || build[9].Name != "0010_fleet_routed_call.sql" || build[10].Name != "0011_fleet_routed_files.sql" {
 		return report, errors.New("the supported migration build is unavailable")
 	}

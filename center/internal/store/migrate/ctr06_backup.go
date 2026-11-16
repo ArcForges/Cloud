@@ -290,12 +290,16 @@ func ctr06ReadMetadata(path, digest string) (ctr06BackupMetadata, error) {
 }
 
 func ctr06ValidateMetadata(meta ctr06BackupMetadata, build []Migration) error {
+	inventory, catalogue, definitionErr := backupDefinition(len(build))
+	if definitionErr != nil {
+		return definitionErr
+	}
 	if meta.Version != ctr06BackupMetadataVersion || meta.Procedure != "checked-full-pg-dump-exported-snapshot-v1" ||
 		meta.ArchiveLength <= 0 || !restoreDigest.MatchString(meta.ArchiveSHA256) || !restoreDigest.MatchString(meta.ArchiveTOCSHA256) ||
 		!ctr06ClusterID.MatchString(meta.SourceCluster) || !ctr06SnapshotID.MatchString(meta.SourceSnapshot) ||
-		meta.SourceServerMajor != TestedMajor || meta.SourceSchemaVersion != 11 || len(meta.SourceMigrations) != 11 ||
+		meta.SourceServerMajor != TestedMajor || meta.SourceSchemaVersion != len(build) || len(meta.SourceMigrations) != len(build) ||
 		ValidRoleName(meta.SourceRuntimeRole) != nil ||
-		len(build) != 11 || meta.SourceCatalogueSHA256 != ctr06Schema11CatalogueSHA {
+		meta.SourceCatalogueSHA256 != catalogue {
 		return errors.New("unsupported or incomplete trusted backup metadata")
 	}
 	for i, migration := range meta.SourceMigrations {
@@ -303,7 +307,7 @@ func ctr06ValidateMetadata(meta ctr06BackupMetadata, build []Migration) error {
 			return errors.New("backup migration checksums do not match the supported schema")
 		}
 	}
-	tables, err := ctr06RequiredTables()
+	tables, err := ctr06RequiredTablesFrom(inventory)
 	if err != nil || len(meta.Tables) != len(tables) {
 		return errors.New("backup table inventory is incomplete")
 	}
@@ -546,7 +550,7 @@ func ctr06VerifyRestoredData(ctx context.Context, conn *pgx.Conn, meta ctr06Back
 		return "", errors.New("the restored target inspection settings are unavailable")
 	}
 	applied, exists, err := ReadApplied(ctx, tx)
-	if err != nil || !exists || len(applied) != 11 {
+	if err != nil || !exists || len(applied) != len(build) {
 		return "", errors.New("the restored migration history is incomplete")
 	}
 	comparison := Compare(build, applied)
@@ -556,11 +560,15 @@ func ctr06VerifyRestoredData(ctx context.Context, conn *pgx.Conn, meta ctr06Back
 	if err := ctr06CheckSchemaOwnership(ctx, tx); err != nil {
 		return "", err
 	}
+	inventory, expectedCatalogue, err := backupDefinition(len(build))
+	if err != nil {
+		return "", err
+	}
 	catalogue, err := ctr06CatalogueSHA(ctx, tx)
-	if err != nil || catalogue != meta.SourceCatalogueSHA256 || catalogue != ctr06Schema11CatalogueSHA {
+	if err != nil || catalogue != meta.SourceCatalogueSHA256 || catalogue != expectedCatalogue {
 		return "", errors.New("the restored catalogue does not match the supported source")
 	}
-	names, err := ctr06RequiredTables()
+	names, err := ctr06RequiredTablesFrom(inventory)
 	if err != nil {
 		return "", err
 	}
@@ -569,7 +577,7 @@ func ctr06VerifyRestoredData(ctx context.Context, conn *pgx.Conn, meta ctr06Back
 		return "", errors.New("the restored table data could not be checked")
 	}
 	for i := range data {
-		if data[i].Name == "platform.ctr06_runtime_floor" || data[i].Name == "platform.ctr06_restore_admission" {
+		if data[i].Name == "platform.ctr06_runtime_floor" || data[i].Name == "platform.ctr06_restore_admission" || (len(build) == 12 && data[i].Name == "management.cutover_receipt") {
 			continue
 		}
 		if data[i] != meta.Tables[i] {

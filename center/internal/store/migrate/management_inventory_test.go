@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package migrate
+
+import (
+	"context"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/ArcForges/Cloud/center/internal/pgtest"
+)
+
+// This captures candidate schema facts, not an archive-admission oracle. Review
+// and pin the generated closed inventory before the V2 restore accepts it.
+func TestManagementInventoryForBackup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	url, name := pgtest.Database(t)
+	owner := pgtest.Connect(t, url)
+	if _, err := Apply(ctx, owner, centerBuild(t), Options{Runner: "isolated-inventory-fixture", RuntimeRole: name + "_runtime"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, "SET search_path=pg_catalog; SET TIME ZONE 'UTC'"); err != nil {
+		t.Fatal("inventory session settings failed")
+	}
+	catalogue, err := ctr06CatalogueSHA(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := os.Getenv("ARCFORGES_CENTER01_INVENTORY_DIR")
+	if base == "" {
+		base = t.TempDir()
+	} else if !filepath.IsAbs(base) {
+		t.Fatal("inventory output root must be absolute")
+	}
+	dir, err := os.MkdirTemp(base, "management-schema12-")
+	if err != nil {
+		t.Fatal("private inventory output unavailable")
+	}
+	dump, err := ctr06NativeTool("pg_dump")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore, err := ctr06NativeTool("pg_restore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := restorePGEnvironment(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := os.OpenFile(filepath.Join(dir, "source.dump"), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatal("private inventory archive unavailable")
+	}
+	defer archive.Close()
+	cmd := exec.CommandContext(ctx, dump, "--format=custom")
+	cmd.Env = env
+	cmd.Stdout = archive
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		t.Fatal("native inventory dump failed")
+	}
+	if archive.Sync() != nil {
+		t.Fatal("inventory dump sync failed")
+	}
+	raw, err := runRestoreTool(ctx, restore, env, archive, "--list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inventory []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if line == "" || strings.HasPrefix(line, ";") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 7 {
+			t.Fatal("ambiguous native object inventory")
+		}
+		if fields[3] == "ACL" {
+			continue
+		}
+		inventory = append(inventory, strings.Join(fields[3:len(fields)-1], " "))
+	}
+	sort.Strings(inventory)
+	canonical := strings.Join(inventory, "\n") + "\n"
+	if err := ctr06ArchiveInventoryFor(raw, canonical, nil); err != nil {
+		t.Fatal(err)
+	}
+	if os.WriteFile(filepath.Join(dir, "schema12-inventory.txt"), []byte(canonical), 0o600) != nil || os.WriteFile(filepath.Join(dir, "schema12-catalogue-sha256.txt"), []byte(catalogue+"\n"), 0o600) != nil {
+		t.Fatal("inventory evidence write failed")
+	}
+	t.Logf("Schema12 candidate facts: catalogue=%s inventorySHA256=%s objects=%d output=%s; not yet archive admission", catalogue, ctr06SHA([]byte(canonical)), len(inventory), dir)
+}

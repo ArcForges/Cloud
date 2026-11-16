@@ -31,6 +31,9 @@ func apply(t *testing.T, url string, build []Migration, options Options) (Result
 	if options.BridgeProof != nil {
 		// Exercise the old signed-promotion mechanics only in this isolated
 		// historical fixture. The public Apply entry refuses the old proof.
+		if len(build) > 11 {
+			build = build[:11]
+		}
 		return applyMigrations(ctx, conn, build, options)
 	}
 	return Apply(ctx, conn, build, options)
@@ -516,7 +519,7 @@ VALUES(true,$1,7,clock_timestamp(),clock_timestamp(),clock_timestamp()+interval 
 func TestCTR06RuntimeFloorStillRejectsElevatedRole(t *testing.T) {
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	role := name + "_runtime"
 	result, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: role})
 	if err != nil || result.Version != 11 || result.Grants != "reconciled" {

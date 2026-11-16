@@ -31,12 +31,18 @@ func RequireCTR06SecurityBridge() error { return ErrCTR06SecurityBridgeUnbound }
 // bridge manager; a published release, slot row, password rotation or claimed
 // application name is not enough. This check shares 0011's transaction and lock, so a failed check
 // leaves no file schema, trigger, grant or migration record behind.
-func guardCTR06Schema(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, runtimeRole, runner string, proof *bridgeproof.Verified, local *localBridgeAdmission) error {
+func guardCTR06Schema(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, runtimeRole, runner string, proof *bridgeproof.Verified, local *localBridgeAdmission, maintenance *managementAdmission) error {
 	// Drain transactions that may have written either old receipts or the hub
 	// lease. Access-exclusive locks also prevent new table privilege changes and
 	// write transactions until this gate and 0011 commit or roll back together.
 	if _, err := tx.Exec(ctx, "LOCK TABLE fleet.routed_call, fleet.hub_lease IN ACCESS EXCLUSIVE MODE"); err != nil {
 		return err
+	}
+	if maintenance != nil && maintenance.source == 10 {
+		if proof != nil || local != nil {
+			return ErrCTR06RetirementUnproven
+		}
+		return guardManagementSchema11(ctx, tx, conn, runtimeRole, maintenance)
 	}
 	if local != nil {
 		if proof != nil || !local.validFor(conn, runtimeRole, runner) {

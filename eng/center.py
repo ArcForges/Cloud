@@ -271,8 +271,13 @@ def check_tests(linux: bool) -> None:
         arguments.insert(2, "-race")
         with Postgres("tests", ("shared_preload_libraries=pg_stat_statements", "log_statement=all",
                                 "log_min_duration_statement=0")) as server:
-            go(*arguments, "./...", env={**ENV, "ARCFORGES_TEST_POSTGRES_URL": server.url(), "ARCFORGES_TEST_POSTGRES_REQUIRED": "1",
-                                          "ARCFORGES_TEST_POSTGRES_CONTAINER": server.name})
+            with tempfile.TemporaryDirectory() as directory:
+                tool_dir = Path(directory)
+                restore_drill_tool(tool_dir, server, "pg_dump")
+                restore_drill_tool(tool_dir, server, "pg_restore")
+                go(*arguments, "./...", env={**ENV, "PATH": str(tool_dir) + os.pathsep + ENV.get("PATH", ""),
+                                              "ARCFORGES_TEST_POSTGRES_URL": server.url(), "ARCFORGES_TEST_POSTGRES_REQUIRED": "1",
+                                              "ARCFORGES_TEST_POSTGRES_CONTAINER": server.name})
     go("go", "run", "./cmd/center-gen", "worker-tables", "-check")
 
 

@@ -27,6 +27,9 @@ const migration0003SHA256 = "acc92fe98fdc5976d711f7cd393cdaf6781cc79029824559210
 func schemasAndGrantsAt(version int) ([]string, []schema.Grant) {
 	var schemas []string
 	for _, name := range schema.Schemas {
+		if version < 12 && name == "management" {
+			continue
+		}
 		if version >= 3 || name != "entitlement" {
 			schemas = append(schemas, name)
 		}
@@ -41,6 +44,7 @@ func schemasAndGrantsAt(version int) ([]string, []schema.Grant) {
 		case version < 8 && grant.Schema == "fleet" && grant.Table == "hub_lease":
 		case version < 10 && grant.Schema == "fleet" && (grant.Table == "routed_call" || grant.Table == "refusal_code"):
 		case version < 11 && grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_file_target" || grant.Table == "routed_command_id"):
+		case version < 12 && grant.Schema == "management":
 		default:
 			grants = append(grants, grant)
 		}

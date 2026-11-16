@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 
-	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,7 +17,7 @@ import (
 func revokeLocalBridge(ctx context.Context, tx pgx.Tx, database, group, login string) error {
 	for _, role := range []string{group, login} {
 		quoted := pgx.Identifier{role}.Sanitize()
-		for _, name := range schema.Schemas {
+		for _, name := range ctr06Schemas() {
 			s := pgx.Identifier{name}.Sanitize()
 			for _, sql := range []string{
 				"REVOKE ALL ON ALL TABLES IN SCHEMA " + s + " FROM " + quoted,

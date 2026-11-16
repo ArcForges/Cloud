@@ -23,15 +23,9 @@ func TestCTR06HistoricalPreparationIssuesNewLeastPrivilegeCredentialWithoutChang
 	if err != nil {
 		t.Fatal(err)
 	}
-	var grants []schema.Grant
-	for _, g := range schema.RuntimeGrants {
-		if g.Schema == "fleet" && (g.Table == "routed_file_call" || g.Table == "routed_command_id" || g.Table == "routed_file_target") {
-			continue
-		}
-		grants = append(grants, g)
-	}
+	schemas, grants := schema.AtVersion(10)
 	legacy := name + "_runtime"
-	if _, err := migrate.Apply(ctx, owner, build[:10], migrate.Options{RuntimeRole: legacy, Grants: grants, Schemas: schema.Schemas}); err != nil {
+	if _, err := migrate.Apply(ctx, owner, build[:10], migrate.Options{RuntimeRole: legacy, Grants: grants, Schemas: schemas}); err != nil {
 		t.Fatal(err)
 	}
 	old, err := Rotate(ctx, owner, Options{Group: legacy, DirectURL: url})
@@ -81,15 +75,9 @@ func TestCTR06HistoricalPreparationWithdrawsOnlyRolesCreatedInThatFailedCall(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	var grants []schema.Grant
-	for _, g := range schema.RuntimeGrants {
-		if g.Schema == "fleet" && (g.Table == "routed_file_call" || g.Table == "routed_command_id" || g.Table == "routed_file_target") {
-			continue
-		}
-		grants = append(grants, g)
-	}
+	schemas, grants := schema.AtVersion(10)
 	legacy := name + "_runtime"
-	if _, err := migrate.Apply(ctx, owner, build[:10], migrate.Options{RuntimeRole: legacy, Grants: grants, Schemas: schema.Schemas}); err != nil {
+	if _, err := migrate.Apply(ctx, owner, build[:10], migrate.Options{RuntimeRole: legacy, Grants: grants, Schemas: schemas}); err != nil {
 		t.Fatal(err)
 	}
 	other := name + "_c06_other"

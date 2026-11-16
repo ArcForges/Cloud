@@ -126,18 +126,29 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, errors.New("the source snapshot settings could not be established")
 	}
 	build, err := Load(schema.Migrations())
-	if err != nil || len(build) != 11 {
+	if err != nil || len(build) < 11 {
 		return report, errors.New("the supported migration catalogue is unavailable")
 	}
 	applied, exists, err := ReadApplied(ctx, tx)
-	if err != nil || !exists || len(applied) != 11 {
-		return report, errors.New("only a supported complete 0011 source can be captured")
+	if err != nil || !exists || (len(applied) != 10 && len(applied) != 11 && len(applied) != 12) || len(applied) > len(build) {
+		return report, errors.New("only a supported complete 0010,0011 or 0012 source can be captured")
+	}
+	version := len(applied)
+	build = build[:version]
+	inventory, expectedCatalogue, err := backupDefinition(version)
+	if err != nil {
+		return report, err
 	}
 	comparison := Compare(build, applied)
 	if len(comparison.Pending) != 0 || len(comparison.Problems) != 0 {
 		return report, errors.New("the source migration history is incompatible")
 	}
-	sourceRole, _, err := readyCTR06Admission(ctx, tx, cfg.RuntimeRole)
+	sourceRole := cfg.RuntimeRole
+	if version == 10 {
+		err = requireManagementSchema10Source(ctx, tx, cfg.RuntimeRole)
+	} else {
+		sourceRole, _, err = readyCTR06Admission(ctx, tx, cfg.RuntimeRole)
+	}
 	if err != nil {
 		return report, errors.New("the source runtime floor or admission is untrusted")
 	}
@@ -146,7 +157,10 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if err := tx.QueryRow(ctx, "SELECT system_identifier::text,current_setting('server_version_num')::int FROM pg_catalog.pg_control_system()").Scan(&sourceCluster, &serverVersion); err != nil || !ctr06ClusterID.MatchString(sourceCluster) || serverVersion/10000 != TestedMajor {
 		return report, errors.New("the source cluster identity or PostgreSQL major is unsupported")
 	}
-	tables, err := ctr06RequiredTables()
+	if version == 12 && requireManagementReady(ctx, tx) != nil {
+		return report, ErrManagementTransitionRequired
+	}
+	tables, err := ctr06RequiredTablesFrom(inventory)
 	if err != nil {
 		return report, err
 	}
@@ -161,8 +175,14 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if _, err := tx.Exec(ctx, "LOCK TABLE "+strings.Join(quoted, ",")+" IN SHARE MODE"); err != nil {
 		return report, errors.New("source writers could not be drained for a complete backup")
 	}
-	if checkedRole, _, err := readyCTR06Admission(ctx, tx, sourceRole); err != nil || checkedRole != sourceRole {
-		return report, errors.New("the source admission changed during backup preparation")
+	if version == 10 {
+		if err := requireManagementSchema10Source(ctx, tx, sourceRole); err != nil {
+			return report, err
+		}
+	} else {
+		if checkedRole, _, err := readyCTR06Admission(ctx, tx, sourceRole); err != nil || checkedRole != sourceRole {
+			return report, errors.New("the source admission changed during backup preparation")
+		}
 	}
 	var malformedHistory bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM platform.runtime_credential
@@ -177,7 +197,7 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, err
 	}
 	catalogue, err := ctr06CatalogueSHA(ctx, tx)
-	if err != nil || catalogue != ctr06Schema11CatalogueSHA {
+	if err != nil || catalogue != expectedCatalogue {
 		return report, errors.New("the source schema definitions are not the supported catalogue")
 	}
 	data, err := ctr06SnapshotData(ctx, tx, tables)
@@ -218,11 +238,14 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if err != nil {
 		return report, err
 	}
-	if err := ctr06ArchiveInventory(raw, objects); err != nil {
+	if err := ctr06ArchiveInventoryFor(raw, inventory, objects); err != nil {
 		return report, err
 	}
-	if _, err := restoreList(raw, schema.Schemas); err != nil {
-		return report, err
+	backupSchemas, _ := schema.AtVersion(version)
+	if version != 10 {
+		if _, err := restoreList(raw, backupSchemas); err != nil {
+			return report, err
+		}
 	}
 	archiveSequence, err := ctr06ArchiveFacts(ctx, restore, childEnv, archive, build)
 	if err != nil || !reflect.DeepEqual(sequences, archiveSequence) {
@@ -248,7 +271,7 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	}
 	meta := ctr06BackupMetadata{Version: ctr06BackupMetadataVersion, Procedure: "checked-full-pg-dump-exported-snapshot-v1",
 		ArchiveLength: info.Size(), ArchiveSHA256: hex.EncodeToString(digester.Sum(nil)), ArchiveTOCSHA256: ctr06SHA(raw),
-		SourceCluster: sourceCluster, SourceSnapshot: snapshot, SourceRuntimeRole: sourceRole, SourceServerMajor: serverVersion / 10000, SourceSchemaVersion: 11,
+		SourceCluster: sourceCluster, SourceSnapshot: snapshot, SourceRuntimeRole: sourceRole, SourceServerMajor: serverVersion / 10000, SourceSchemaVersion: version,
 		SourceMigrations: migrations, SourceCatalogueSHA256: catalogue, Tables: data, Sequences: sequences, LargeObjects: objects}
 	if err := ctr06ValidateMetadata(meta, build); err != nil {
 		return report, err
@@ -268,5 +291,5 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, err
 	}
 	return BackupCaptureReport{ArchiveSHA256: meta.ArchiveSHA256, ArchiveLength: meta.ArchiveLength,
-		MetadataSHA256: ctr06SHA(encoded), SchemaVersion: 11}, nil
+		MetadataSHA256: ctr06SHA(encoded), SchemaVersion: version}, nil
 }

@@ -20,14 +20,16 @@ import (
 // digest is bound to the target floor in 0011, but the digest is not authority
 // to complete a restore after this capability has been lost.
 type restoreCapability struct {
-	conn           *pgx.Conn
-	cluster        string
-	databaseOID    uint32
-	ownerOID       uint32
-	archiveSHA256  string
-	metadataSHA256 string
-	secret         [32]byte
-	active         bool
+	conn               *pgx.Conn
+	cluster            string
+	databaseOID        uint32
+	ownerOID           uint32
+	archiveSHA256      string
+	metadataSHA256     string
+	secret             [32]byte
+	active             bool
+	managementArtifact string
+	managementSource   int
 }
 
 func newRestoreCapability(ctx context.Context, conn *pgx.Conn, archive, metadata string) (*restoreCapability, error) {
@@ -82,14 +84,8 @@ func (g *ctr06RestoreBridgeGrant) valid(ctx context.Context, q Querier, conn *pg
 		options.RuntimeRole != g.roles.BridgeRole || requireCTR06RestoreIsolation(ctx, q) != nil {
 		return false
 	}
-	expected := make([]schema.Grant, 0, len(schema.RuntimeGrants))
-	for _, grant := range schema.RuntimeGrants {
-		if grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_command_id" || grant.Table == "routed_file_target") {
-			continue
-		}
-		expected = append(expected, grant)
-	}
-	if !reflect.DeepEqual(options.Grants, expected) || !reflect.DeepEqual(options.Schemas, schema.Schemas) ||
+	schemas, expected := schema.AtVersion(10)
+	if !reflect.DeepEqual(options.Grants, expected) || !reflect.DeepEqual(options.Schemas, schemas) ||
 		g.roles.DatabaseOID != g.restore.databaseOID || g.roles.OwnerOID != g.restore.ownerOID ||
 		g.roles.ClusterSystemIdentifier != g.restore.cluster {
 		return false
@@ -239,6 +235,11 @@ func finalizeCTR06Restore(ctx context.Context, conn *pgx.Conn, runtimeRole, sour
  WHERE singleton AND kind='restore' AND state='PENDING' AND capability_sha256=$2 AND receipt_sha256 IS NULL`, receipt, c.tokenDigest())
 		if err != nil || tag.RowsAffected() != 1 {
 			return ErrCTR06RetirementUnproven
+		}
+		if c.managementArtifact != "" {
+			if err := finishManagementRestore(ctx, tx, conn, runtimeRole, sourceRole, c); err != nil {
+				return err
+			}
 		}
 		var database string
 		if err := tx.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {

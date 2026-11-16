@@ -112,7 +112,7 @@ func schemaTestBridge(t *testing.T, ctx context.Context, owner *pgx.Conn, url, n
 }
 
 func TestMigration0011SharedCommandNamespace(t *testing.T) {
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	if len(build) < 11 || build[10].Name != "0011_fleet_routed_files.sql" || build[10].SHA256 != migration0011SHA256 {
 		t.Fatal("missing or changed 0011 migration")
 	}
@@ -213,7 +213,8 @@ func TestMigration0011SharedCommandNamespace(t *testing.T) {
 	if err = insertNamespace(ctx, runtime, f, platform.NewID(), false, 1, 10, false); err != nil {
 		t.Fatal(store.Sanitize("old runtime writes with old grants", err))
 	}
-	if err = reconcile(ctx, owner, Options{RuntimeRole: bridgeRole, Schemas: schema.Schemas, Grants: schema.RuntimeGrants}); err != nil {
+	schemas11, grants11 := schemasAndGrantsAt(11)
+	if err = reconcile(ctx, owner, Options{RuntimeRole: bridgeRole, Schemas: schemas11, Grants: grants11}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -291,7 +292,7 @@ func TestMigration0011SharedCommandNamespace(t *testing.T) {
 }
 
 func TestHistoricalMigration0011WaitsForAnOldWriterAndBackfillsItsCommit(t *testing.T) {
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	url, name := pgtest.Database(t)

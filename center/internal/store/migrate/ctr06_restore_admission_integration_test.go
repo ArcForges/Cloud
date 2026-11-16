@@ -13,11 +13,22 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// ctr06FixtureBuild pins the historical qualification input to immutable0011.
+// New V2 tests explicitly use centerBuild and qualify0012 separately.
+func ctr06FixtureBuild(t *testing.T) []Migration {
+	t.Helper()
+	build, err := loadCTR06Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return build
+}
+
 func TestCTR06FreshAdmissionIsAtomicAndRequired(t *testing.T) {
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
 	conn := pgtest.Connect(t, url)
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	role := name + "_runtime"
 	result, err := Apply(ctx, conn, build, Options{Runner: "test", RuntimeRole: role})
 	if err != nil || result.Version != 11 || result.Grants != "reconciled" {
@@ -51,7 +62,7 @@ func TestCTR06PendingAdmissionCannotBeAdoptedOrUsed(t *testing.T) {
 	if _, err := conn.Exec(ctx, "REVOKE CONNECT, TEMPORARY ON DATABASE "+pgx.Identifier{name}.Sanitize()+" FROM PUBLIC"); err != nil {
 		t.Fatal(err)
 	}
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	role := name + "_runtime"
 	if _, err := conn.Exec(ctx, "COMMENT ON DATABASE "+pgx.Identifier{name}.Sanitize()+" IS '"+ctr06RestoreIsolationMarker+"'"); err != nil {
 		t.Fatal(err)
@@ -105,7 +116,7 @@ func TestCTR06AdmissionMismatchRollsBackEntire0011(t *testing.T) {
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
 	conn := pgtest.Connect(t, url)
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	if _, err := conn.Exec(ctx, "COMMENT ON DATABASE "+pgx.Identifier{name}.Sanitize()+" IS '"+ctr06RestoreIsolationMarker+"'"); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +146,7 @@ func TestCTR06BackupCatalogueOnFreshSchema(t *testing.T) {
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
 	conn := pgtest.Connect(t, url)
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	if _, err := Apply(ctx, conn, build, Options{Runner: "test", RuntimeRole: name + "_runtime"}); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +166,7 @@ func TestCTR06BackupCatalogueOnLegacySchema(t *testing.T) {
 	ctx := context.Background()
 	url, _ := pgtest.Database(t)
 	conn := pgtest.Connect(t, url)
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	if _, err := Apply(ctx, conn, build[:10], Options{Runner: "test"}); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +186,7 @@ func TestCTR06CanonicalMigrationWithoutFloorNeverCommits(t *testing.T) {
 	ctx := context.Background()
 	url, _ := pgtest.Database(t)
 	conn := pgtest.Connect(t, url)
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	if _, err := Apply(ctx, conn, build, Options{Runner: "test"}); !errors.Is(err, ErrCTR06RetirementUnproven) {
 		t.Fatalf("canonical 0011 committed without a runtime floor: %v", err)
 	}
@@ -196,7 +207,7 @@ func TestCTR06BackupCatalogueRefusesDisabledTriggerAndRowSecurity(t *testing.T) 
 			ctx := context.Background()
 			url, name := pgtest.Database(t)
 			conn := pgtest.Connect(t, url)
-			build := centerBuild(t)
+			build := ctr06FixtureBuild(t)
 			if _, err := Apply(ctx, conn, build, Options{Runner: "test", RuntimeRole: name + "_runtime"}); err != nil {
 				t.Fatal(err)
 			}
@@ -244,7 +255,7 @@ func TestCTR06RestoreIsolationMarkerOnlyRefusesAndRequiresExactPrivateBinding(t 
 	}
 	defer capability.destroy()
 	comment(ctr06RestoreIsolationPrefix + "changed")
-	result, err := Apply(ctx, conn, centerBuild(t), Options{Runner: "test", RuntimeRole: name + "_runtime", localRestore: capability})
+	result, err := Apply(ctx, conn, ctr06FixtureBuild(t), Options{Runner: "test", RuntimeRole: name + "_runtime", localRestore: capability})
 	if !errors.Is(err, ErrCTR06RetirementUnproven) || result.State != StateRefused {
 		t.Fatalf("changed marker accepted by an existing capability: %+v %v", result, err)
 	}
@@ -262,15 +273,9 @@ func TestCTR06LegacyRestoreGrantRequiresLiveSameInvocationCapability(t *testing.
 	ctx := context.Background()
 	url, name := pgtest.Database(t)
 	conn := pgtest.Connect(t, url)
-	build := centerBuild(t)
+	build := ctr06FixtureBuild(t)
 	legacy := name + "_runtime"
-	grants := make([]schema.Grant, 0, len(schema.RuntimeGrants))
-	for _, item := range schema.RuntimeGrants {
-		if item.Schema == "fleet" && (item.Table == "routed_file_call" || item.Table == "routed_command_id" || item.Table == "routed_file_target") {
-			continue
-		}
-		grants = append(grants, item)
-	}
+	schemas, grants := schema.AtVersion(10)
 	if _, err := Apply(ctx, conn, build[:10], Options{Runner: "test", RuntimeRole: legacy, Grants: grants}); err != nil {
 		t.Fatalf("prepare real schema-10 source: %v", err)
 	}
@@ -287,7 +292,7 @@ func TestCTR06LegacyRestoreGrantRequiresLiveSameInvocationCapability(t *testing.
 		t.Fatal(err)
 	}
 	grant := &ctr06RestoreBridgeGrant{restore: capability, roles: roles, active: true}
-	options := Options{Runner: "test", RuntimeRole: roles.BridgeRole, Grants: grants, Schemas: schema.Schemas}
+	options := Options{Runner: "test", RuntimeRole: roles.BridgeRole, Grants: grants, Schemas: schemas}
 	if _, err := Apply(ctx, conn, build[:10], options); !errors.Is(err, ErrCTR06RetirementUnproven) {
 		t.Fatalf("ordinary pre-11 apply accepted a restore marker: %v", err)
 	}

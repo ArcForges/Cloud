@@ -25,7 +25,7 @@ func Migrations() fs.FS {
 
 // Schemas are the module schemas the migrations own, in creation order. platform is created by the runner before the first
 // migration (it holds platform.schema_migration).
-var Schemas = []string{"platform", "audit", "fleet", "identity", "device", "entitlement"}
+var Schemas = []string{"platform", "audit", "fleet", "identity", "device", "entitlement", "management"}
 
 // Privilege is one table privilege of the runtime role.
 type Privilege string
@@ -109,8 +109,43 @@ var RuntimeGrants = []Grant{
 	{"fleet", "routed_file_call", []Privilege{Select, Insert, Update}},
 	{"fleet", "routed_file_target", []Privilege{Select, Insert}},
 	{"fleet", "routed_command_id", []Privilege{Select}},
+	// AFV2-CENTER-01: exact content-free runtime closure. Catalogue/cutover
+	// evidence remain owned by the migration role, and identities are insert-only.
+	{"management", "node_protocol", []Privilege{Select, Insert, Update}},
+	{"management", "method_catalogue", []Privilege{Select}},
+	{"management", "command_identity", []Privilege{Select, Insert}},
+	{"management", "remote_operation", []Privilege{Select, Insert, Update}},
+	{"management", "legacy_outcome", []Privilege{Select}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted
 // above or listed here; a test refuses a table with neither decision.
-var MigrationOnly = []string{"platform.runtime_credential", "platform.ctr06_runtime_floor", "platform.ctr06_restore_admission", "platform.ctr06_legacy_runtime_credential"}
+var MigrationOnly = []string{"platform.runtime_credential", "platform.ctr06_runtime_floor", "platform.ctr06_restore_admission", "platform.ctr06_legacy_runtime_credential", "management.cutover_receipt"}
+
+// AtVersion retains the exact historical grant/schema closure for the finite
+// 0011 backup/restore path. It never adds tables which that build does not own.
+func AtVersion(version int) ([]string, []Grant) {
+	var schemas []string
+	for _, name := range Schemas {
+		if version < 3 && name == "entitlement" || version < 12 && name == "management" {
+			continue
+		}
+		schemas = append(schemas, name)
+	}
+	var grants []Grant
+	for _, grant := range RuntimeGrants {
+		switch {
+		case version < 3 && (grant.Schema == "entitlement" || grant.Schema == "identity" && grant.Table == "operator"):
+		case version < 4 && grant.Schema == "fleet" && grant.Table != "signing_key":
+		case version < 6 && grant.Schema == "identity" && grant.Table == "mobile_authorization":
+		case version < 7 && grant.Schema == "entitlement" && grant.Table == "definitions_current":
+		case version < 8 && grant.Schema == "fleet" && grant.Table == "hub_lease":
+		case version < 10 && grant.Schema == "fleet" && (grant.Table == "routed_call" || grant.Table == "refusal_code"):
+		case version < 11 && grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_file_target" || grant.Table == "routed_command_id"):
+		case version < 12 && grant.Schema == "management":
+		default:
+			grants = append(grants, grant)
+		}
+	}
+	return schemas, grants
+}

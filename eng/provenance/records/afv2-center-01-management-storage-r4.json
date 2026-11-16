@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "afv2-center-01-management-storage-r4",
+  "kind": "source",
+  "sourceRepository": "https://github.com/ArcForges/ArcForges-Design",
+  "sourceCommit": "493022fbf643b484665b2713c9eb8670f2fb2234",
+  "sourcePaths": [
+    "docs/data/cloud-store.sql",
+    "docs/data/cloud-store.md",
+    "docs/contracts/proto/arcforges/sandbox/v2/platform.proto"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Root reviewed the exact original Design source grant on 2026-11-16. Management-only DDL adaptation remains inside the same AGPL project boundary; no account-lifecycle or commerce implementation copied."
+      }
+    ],
+    "scope": "Management PostgreSQL DDL and original owner guards only. Immutable applied0001..0011 and their legal terms remain intact.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright ArcForges contributors. AGPL-3.0-only. Adapted management storage specification from ArcForges-Design493022fb; full licence and corresponding source remain available."
+  ],
+  "targets": [
+    {
+      "path": "center/internal/schema/migrations/0012_management_storage.sql",
+      "sha256": "69c5496cb533c1b5edd56aaab3cce65c04608874ad29646b84df72d8321d85e5",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Improve",
+  "verification": {
+    "kind": "source-adaptation-and-real-postgresql",
+    "command": "Compare Design493022fb Git objects; run the real PostgreSQL fresh/valid11 migration, grants, tombstone and restore fixtures through the direct migrator. A refused unqualified schema10 path is negative evidence, never an upgrade pass.",
+    "expected": "Management shape matches Design; identity, uncertainty, delivery and final results are SQL-enforced. Source/artifact/backup/target identities remain explicit.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Management PostgreSQL specification adapted from ArcForges-Design493022fb. Copyright ArcForges contributors. AGPL-3.0-only; full licence and corresponding source accompany applicable distribution.",
+    "files": [
+      "eng/provenance/NOTICE.txt",
+      "LICENSE"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "Preserve the original same-project AGPL source terms and attribution."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Center storage maintainer",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "supersedes": "afv2-center-01-management-storage-r3",
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "OpenAI Codex root under maintainer implementation authorization",
+    "reviewedOn": "2026-11-16",
+    "decision": "approved",
+    "rationale": "Coordinator source-grant review on 2026-11-16 retains the exact Design493 AGPL grant. Real H-22 PostgreSQL reproduced that an existing UNKNOWN could not settle after protocol revocation. Permit only its definite final observation under the current hub with original identity/owner/digest/channel and unchanged delivery count. Increased delivery count or channel change still requires active protocol even when state remains UNKNOWN. New admission, final-result immutability and all current-hub checks remain. Used r1/r2/r3 are immutable; final independent implementation review remains required.",
+    "baselineCommit": "418b89e2bc99ac3f73b4ddcea739f045ba258149",
+    "reconciliation": false
+  }
+}
