@@ -11,16 +11,16 @@ import (
 
 // The closed schema13 inventory and definition fingerprint were captured from
 // the real PostgreSQL18.7 canonical fresh migration on H-22 at source
-// cba8a20b887e266ffe9f359770dc9ec6573f5d3f. The native artifact contains 381
-// non-ACL objects (inventory SHA256 0f26a23b7e39b4b4f9ab8f859e647f822e6e39eac41c1383028d484121972578).
+// e62dac9b80bc40e4d364cddff39efce370f9609a. The native artifact contains 382
+// non-ACL objects (inventory SHA256 4f3eea6a132861d604ff1a94cf53aa320eef9e6bdec546e0ce43be677fa5531e).
 // This is a source oracle, not an archive's claim or a passed restore receipt.
 //
 //go:embed lifecycle_schema13_inventory.txt
 var lifecycleSchema13Inventory string
 
-const lifecycleSchema13CatalogueSHA = "5fb4f156d72ed7040d839e76d82028ffb3e769a085e319bf501fbe18871ff30b"
+const lifecycleSchema13CatalogueSHA = "ba0db874e2abf564139893cd5009c14873d9e57ea54a1d381d9e2318fbbb1530"
 
-const lifecycleSchema13MigrationSHA = "9936d566131f26aa470bf63494f0167391a76c0824b2a57c99ef01f4dcde5d4e"
+const lifecycleSchema13MigrationSHA = "1014d5163065ff585e51bc7ef901c44a10356f53f3597c3be122017d41bde946"
 
 func lifecycleBackupDefinition() (string, string, error) {
 	build, err := Load(schema.Migrations())

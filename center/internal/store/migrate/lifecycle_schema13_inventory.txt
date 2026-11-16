@@ -198,6 +198,7 @@ INDEX fleet routed_file_call_refusal_code
 INDEX fleet routed_file_target_enrollment
 INDEX fleet signing_key_purpose_validity
 INDEX identity auth_flow_expires_at
+INDEX identity auth_flow_lifecycle_operation
 INDEX identity auth_flow_session
 INDEX identity auth_flow_user
 INDEX identity auth_identity_user
