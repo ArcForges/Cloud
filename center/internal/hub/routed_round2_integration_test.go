@@ -172,7 +172,7 @@ func TestARevocationDuringAnInFlightCallAnswersResendsUnknown(t *testing.T) {
 // TestAResendOverTheQuotaKeepsItsPair (R3): a resend of a record that may have reached the node, refused by the account's routed-call
 // quota before routing, keeps the catalogue pair of rate_limited (AFTER_TIME): it asks for the same command later.
 func TestAResendOverTheQuotaKeepsItsPair(t *testing.T) {
-	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", policy: `{"routedCallsAccountLimit": 1}`,
+	h := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", policy: `{"routedCallsAccountLimit": 1}`,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 	user := h.db.Account(1)
 	node := h.enrollIn(user)

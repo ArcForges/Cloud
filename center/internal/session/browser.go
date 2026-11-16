@@ -60,7 +60,7 @@ func (v *Verifier) ResolveSession(ctx context.Context, cookie string) (*BrowserS
 	}
 	now := v.clock()
 	if row.revoked || !now.Before(row.expiresAt) || row.idleExpiresAt == nil || !now.Before(*row.idleExpiresAt) || row.origin == nil ||
-		*row.origin != v.origin || (row.state != 1 && row.state != 2) {
+		*row.origin != v.origin || !(AccountSecurity{State: row.state}).AdmitsScope(Scope(row.scope)) {
 		return nil, nil
 	}
 	return &BrowserSession{
@@ -81,10 +81,25 @@ func Renew(ctx context.Context, db *store.DB, policy config.IdentityPolicy, hand
 	var idle time.Time
 	err := db.InTx(ctx, "renew a browser session", store.TxOptions{Timeout: 5 * time.Second, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
 		idle = time.Time{}
-		err := tx.QueryRow(ctx, `UPDATE identity.session SET idle_expires_at = greatest(idle_expires_at, least($2::timestamptz, expires_at)),
+		var userID platform.ID
+		if err := tx.QueryRow(ctx, `SELECT user_id FROM identity.session WHERE browser_handle_hash = $1 AND credential_kind = 2`, digest[:]).Scan(&userID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		security, err := LockAccountSecurity(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		err = tx.QueryRow(ctx, `UPDATE identity.session s SET idle_expires_at = greatest(idle_expires_at, least($2::timestamptz, expires_at)),
     last_activity_at = greatest(last_activity_at, $3), rev = rev + 1
 WHERE browser_handle_hash = $1 AND credential_kind = 2 AND revoked_at IS NULL AND expires_at > $3 AND idle_expires_at > $3
-RETURNING idle_expires_at`, digest[:], now.Add(policy.BrowserIdle), now).Scan(&idle)
+    AND auth_epoch = $4 AND recovery_generation = $5
+    AND ($6::smallint IN (1,2) OR ($6 = 4 AND scope = 1))
+    AND EXISTS (SELECT 1 FROM device.device d JOIN device.installation i ON i.device_id = d.device_id
+        WHERE d.device_id = s.device_id AND i.installation_id = s.installation_id AND d.revoked_at IS NULL AND i.revoked_at IS NULL)
+RETURNING idle_expires_at`, digest[:], now.Add(policy.BrowserIdle), now, security.AuthEpoch, security.RecoveryGeneration, security.State).Scan(&idle)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

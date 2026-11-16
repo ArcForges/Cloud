@@ -18,6 +18,10 @@ import (
 )
 
 func managementCommand(args []string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
+	return transitionCommand(args, lookup, stdout, stderr, false)
+}
+
+func transitionCommand(args []string, lookup func(string) (string, bool), stdout, stderr io.Writer, lifecycle bool) int {
 	values, ok := restoreFlags(args, true)
 	if !ok {
 		_, _ = fmt.Fprintln(stderr, "management transition requires --archive <new absolute path> --metadata <new absolute path>")
@@ -43,7 +47,13 @@ func managementCommand(args []string, lookup func(string) (string, bool), stdout
 		_, _ = fmt.Fprintln(stderr, "management migration catalogue was refused")
 		return exitFailure
 	}
-	result, err := migrate.ApplyManagement(ctx, conn, build, migrate.Options{Runner: revision(), RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout}, cfg, values["--archive"], values["--metadata"])
+	options := migrate.Options{Runner: revision(), RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout}
+	var result migrate.Result
+	if lifecycle {
+		result, err = migrate.ApplyLifecycle(ctx, conn, build, options, cfg, values["--archive"], values["--metadata"])
+	} else {
+		result, err = migrate.ApplyManagement(ctx, conn, build, options, cfg, values["--archive"], values["--metadata"])
+	}
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "management transition refused:", err)
 		return exitFailure

@@ -71,4 +71,9 @@ export function stepUp(options: {
   targetHash: string;
 }): Promise<unknown>;
 export function signOut(options: { api: Api }): Promise<unknown>;
+export function readAccountExport(options: {
+  api: Api;
+  operationId: string;
+  total: number;
+}): Promise<Uint8Array[]>;
 export function start(window: unknown): Promise<unknown> | undefined;

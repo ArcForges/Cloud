@@ -28,7 +28,8 @@ import (
 )
 
 // The WebBrowserSession routes (Contracts web-browser.schema.json x-arcforges-routes at 62ccef1): bootstrap, authentication begin
-// and complete, enrollment complete, step-up begin and complete, and logout. Recovery and the provider callback are AF-ID-02's.
+// and complete, enrollment complete, step-up begin and complete, and logout.
+// AFV2-ID-01's recovery is in recovery.go; the provider callback stays unserved.
 
 // fail answers an error of a domain call: a refusal as its ArcError, anything else as the API maps it.
 func (e *exchange) fail(err error) {
@@ -58,6 +59,10 @@ func (e *exchange) guard(needSession bool, field string) (*session.BrowserSessio
 	}
 	if !e.checkCSRF(resolved, !needSession, field) {
 		e.refuse(refuse(arc.PermissionDenied(e.route.ID), http.StatusForbidden))
+		return nil, false
+	}
+	if needSession && resolved.Credential.Caller.AccountState == 4 && !access.PendingDeletionPage(e.route.ID) {
+		e.fail(arc.PermissionDenied(e.route.ID))
 		return nil, false
 	}
 	return resolved, true
@@ -162,7 +167,7 @@ func (e *exchange) signedIn(result identity.SignedIn, purpose string) {
 	}
 	view := sessionProjection{
 		SessionID: uuidText(issued.SessionID), ExpiresAt: formatInstant(issued.ExpiresAt), IdleExpiresAt: formatInstant(issued.IdleExpiresAt),
-		UserID: uuidText(result.UserID), DeviceID: uuidText(result.Device.DeviceID), WorkspaceIDs: []string{}, RecoveryGeneration: "0", Purpose: purpose,
+		UserID: uuidText(result.UserID), DeviceID: uuidText(result.Device.DeviceID), WorkspaceIDs: []string{}, RecoveryGeneration: strconv.FormatInt(issued.RecoveryGeneration, 10), Purpose: purpose,
 	}
 	e.writeJSON(view, e.cookieFor(issued))
 }

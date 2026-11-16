@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1 id="heading" tabindex="-1">Account data and deletion</h1>
+<noscript><p>Confirmation, cancellation and export require JavaScript and a passkey.</p></noscript>
+<p id="status" role="status" aria-live="polite"></p>
+<section aria-labelledby="deletion-heading" id="lifecycle" data-csrf="{{.CSRF}}" data-export-target="{{.Lifecycle.ExportTarget}}">
+<h2 id="deletion-heading">Account deletion</h2>
+<p>Deletion revokes account sessions and remote enrollments. Your local Sandboxes, files and running processes stay on their computers.</p>
+<p>Billing, security audit and unresolved operation records are retained while their required cleanup or retention policy is unresolved. Provider cancellation and final purge are separate steps.</p>
+{{with .Lifecycle.Operation}}
+<dl><dt>Operation</dt><dd>{{.OperationID}}</dd><dt>State</dt><dd>{{.State}}</dd>
+<dt>Active subscriptions</dt><dd>{{.ActiveSubscriptions}}</dd><dt>Unresolved remote operations</dt><dd>{{.UnresolvedOperations}}</dd></dl>
+{{if eq .State "processing"}}<p>Deletion is pending. Final cleanup is blocked until provider and retention requirements are settled. You may cancel after proving this operation with a passkey.</p>{{end}}
+{{if eq .State "awaitingProof"}}<p>The plan expires at <time datetime="{{.ExpiresAt}}">{{.ExpiresAt}}</time>.</p>
+<button type="button" id="confirm-deletion" data-plan-id="{{.OperationID}}" data-plan-revision="{{.PlanRevision}}" data-target="{{.ConfirmTarget}}" disabled>Confirm account deletion</button>{{end}}
+{{if or (eq .State "awaitingProof") (eq .State "processing") (eq .State "confirmed")}}
+<button type="button" id="cancel-deletion" data-plan-id="{{.OperationID}}" data-target="{{.CancelTarget}}" disabled>Cancel account deletion</button>{{end}}
+{{end}}
+{{if not .Lifecycle.Pending}}<p><button type="button" id="prepare-deletion" disabled>Prepare a deletion plan</button></p>{{end}}
+</section>
+{{if not .Lifecycle.Pending}}<section aria-labelledby="export-heading">
+<h2 id="export-heading">Export account data</h2>
+<p>The JSON export includes public account, credential, device, security, entitlement and billing facts. It excludes tokens, recovery secrets, Node logs and local Sandbox files. Its receipt expires after a short time; every download read checks your current account authorization.</p>
+<p><button type="button" id="export-account" disabled>Verify and download account JSON</button></p>
+<a id="export-download" download="arcforges-account.json" hidden>Download account JSON</a>
+</section>{{end}}
+{{end}}

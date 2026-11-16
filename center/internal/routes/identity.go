@@ -28,8 +28,11 @@ type IdentityMethod struct {
 
 // IdentityMethods are the IdentityService and DeviceService methods AF-CTR-03 serves, in registration order: A1a's sign-in, refresh
 // and reads, then A1b's step-up, profile, passkey registration, credential, sign-out and revocation, and device management. Every
-// other method of the two services (and every WorkspaceService method) stays unregistered: the center answers UNIMPLEMENTED and the
-// Worker table has no row for it (AF-ID-02's recovery, deletion, export and e-mail change among them).
+// AFV2-ID-01 adds BeginRecovery, CompleteRecovery and GetAccountDeletion. Other
+// methods remain unregistered. In particular the published legacy deletion
+// mutations cannot express the complete plan/revision/proof binding, so deletion
+// mutations and export use the exact typed page protocol. Email change stays
+// unsupported; a proto declaration alone creates no route or Worker authority.
 func IdentityMethods() []IdentityMethod {
 	return []IdentityMethod{
 		{publicapiv1connect.IdentityServiceBeginAuthenticationProcedure, false, identityRequestBytes},
@@ -37,9 +40,12 @@ func IdentityMethods() []IdentityMethod {
 		{publicapiv1connect.IdentityServiceRequestEmailCodeProcedure, false, identityRequestBytes},
 		{publicapiv1connect.IdentityServiceRedeemEmailCodeProcedure, false, identityRequestBytes},
 		{publicapiv1connect.IdentityServiceCompleteEnrollmentProcedure, false, identityCeremonyBytes},
+		{publicapiv1connect.IdentityServiceBeginRecoveryProcedure, false, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceCompleteRecoveryProcedure, false, identityCeremonyBytes},
 		{publicapiv1connect.IdentityServiceListAuthProvidersProcedure, false, identityRequestBytes},
 		{publicapiv1connect.IdentityServiceRefreshSessionProcedure, false, identityRequestBytes},
 		{publicapiv1connect.IdentityServiceGetProfileProcedure, true, identityRequestBytes},
+		{publicapiv1connect.IdentityServiceGetAccountDeletionProcedure, true, identityRequestBytes},
 		{publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure, true, identityRequestBytes},
 		{publicapiv1connect.IdentityServiceListSessionsProcedure, true, identityRequestBytes},
 		{publicapiv1connect.DeviceServiceListProcedure, true, identityRequestBytes},

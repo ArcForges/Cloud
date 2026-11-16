@@ -20,11 +20,22 @@ func TestEveryPageRouteHasItsRowAndEveryRowItsRoute(t *testing.T) {
 		t.Fatalf("%d rows for %d routes", len(PageOperations()), len(served))
 	}
 	for name, mutate := range map[string]func([]routes.PageRoute) []routes.PageRoute{
-		"a route without a row":          func(rows []routes.PageRoute) []routes.PageRoute { rows[0].ID = "webBrowser.other"; return rows },
-		"a row without a route":          func(rows []routes.PageRoute) []routes.PageRoute { return rows[1:] },
-		"a cookie the row does not read": func(rows []routes.PageRoute) []routes.PageRoute { rows[7].Cookie = true; return rows },
+		"a route without a row": func(rows []routes.PageRoute) []routes.PageRoute { rows[0].ID = "webBrowser.other"; return rows },
+		"a row without a route": func(rows []routes.PageRoute) []routes.PageRoute { return rows[1:] },
+		"a cookie the row does not read": func(rows []routes.PageRoute) []routes.PageRoute {
+			for i := range rows {
+				if rows[i].ID == "page.signIn" {
+					rows[i].Cookie = true
+				}
+			}
+			return rows
+		},
 		"a session the row cannot set": func(rows []routes.PageRoute) []routes.PageRoute {
-			rows[4].SetCookie = routes.SetCookieSession
+			for i := range rows {
+				if rows[i].ID == "webBrowser.beginStepUp" {
+					rows[i].SetCookie = routes.SetCookieSession
+				}
+			}
 			return rows
 		},
 		"a row that reads no cookie": func(rows []routes.PageRoute) []routes.PageRoute { rows[0].Cookie = false; return rows },
@@ -39,7 +50,7 @@ func TestEveryPageRouteHasItsRowAndEveryRowItsRoute(t *testing.T) {
 // of which has a row (and so a scope rule, a restricted rule, step-up evidence and a receipt as the API has).
 func TestEveryMethodAPageCallsHasAnOperationRow(t *testing.T) {
 	calls := PageCalls()
-	if len(calls) != 21 { // the operations surface's routes call no method of the table; the fleet surface's call its four account methods
+	if len(calls) != 24 { // Includes recovery and the deletion status read; lifecycle mutations have their own center rows.
 		t.Fatalf("the pages call %d methods: %v", len(calls), calls)
 	}
 	for _, path := range calls {
@@ -48,7 +59,7 @@ func TestEveryMethodAPageCallsHasAnOperationRow(t *testing.T) {
 			t.Errorf("%s has no operation row", path)
 			continue
 		}
-		if !operation.Session && !strings.Contains(path, "Authentication") && !strings.Contains(path, "Enrollment") {
+		if !operation.Session && !strings.Contains(path, "Authentication") && !strings.Contains(path, "Enrollment") && !strings.Contains(path, "Recovery") {
 			t.Errorf("%s is anonymous but not a sign-in step", path)
 		}
 	}
@@ -108,7 +119,7 @@ func TestTheOperationsPagesPerformACenterDefinedOperation(t *testing.T) {
 		}
 	}
 	operations := CenterOperations()
-	if len(operations) != 2 || operations[0].ID != "center.operatorGrant" || operations[0].Risk != "R4" || operations[0].StepUp != Evidence ||
+	if len(operations) != 7 || operations[0].ID != "center.operatorGrant" || operations[0].Risk != "R4" || operations[0].StepUp != Evidence ||
 		operations[0].Target != TargetRequest || !operations[0].Receipt || operations[0].Audit != AuditInTransaction || operations[0].Restricted {
 		t.Fatalf("%+v", operations)
 	}
@@ -148,7 +159,9 @@ func TestTheOperationsPagesPerformACenterDefinedOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range PageOperations() {
-		if row.Center != "" && row.Center != OperatorGrantClass && row.Center != MobileAuthorizationClass {
+		if row.Center != "" && row.Center != OperatorGrantClass && row.Center != MobileAuthorizationClass &&
+			row.Center != "identity.prepareAccountDeletion" && row.Center != "identity.confirmAccountDeletion" &&
+			row.Center != "identity.cancelAccountDeletion" && row.Center != "identity.exportAccount" && row.Center != "identity.readAccountExport" {
 			t.Errorf("%s performs %q", row.ID, row.Center)
 		}
 	}

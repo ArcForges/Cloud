@@ -4,5 +4,7 @@
 <p id="needs-script" class="help">This page needs its script. If this line stays, reload the page or allow scripts for it.</p>
 <p id="status" role="status" aria-live="polite"></p>
 <p><button type="button" id="sign-in" class="primary" disabled>Sign in with a passkey</button></p>
+<p><input type="checkbox" id="fresh-installation"> <label for="fresh-installation">Use a new browser installation after recovery or pending deletion</label></p>
+<p><a href="{{.Base}}/account/recovery">Recover with a verified email address</a> · <a href="{{.Base}}/account/lifecycle">Check or cancel pending deletion</a></p>
 <p id="signed-in" hidden>You are signed in. <a href="{{.Base}}/account/passkeys">Open your account</a>.</p>
 {{end}}

@@ -38,9 +38,8 @@ type Database struct {
 	Name       string
 }
 
-// New retains the schema11 runtime fixture for historical V1 service tests.
-// V2 storage tests exercise their own finite transition and least-privilege role;
-// these fixtures do not assert that a retired V1 route works on a V2 database.
+// New uses the complete current schema and the deployed runtime privileges.
+// It is not a substitute for the finite predecessor/restore migration drills.
 func New(t *testing.T) *Database {
 	t.Helper()
 	url, name := pgtest.Database(t)
@@ -48,9 +47,6 @@ func New(t *testing.T) *Database {
 	build, err := migrate.Load(schema.Migrations())
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(build) > 11 {
-		build = build[:11]
 	}
 	// A native Windows run against remote TLS PostgreSQL took about 44s to migrate and 16s to rotate.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -64,6 +60,34 @@ func New(t *testing.T) *Database {
 		t.Fatal(err)
 	}
 	return &Database{T: t, Migration: migration, Runtime: store.New(pgtest.Pool(t, rotation.RuntimeURL, 8)), URL: url, RuntimeURL: rotation.RuntimeURL, Name: name}
+}
+
+// NewLegacyRouting is only the retained V1 routing regression fixture. It uses
+// real current PostgreSQL schema, account authority and cryptography, but its
+// test owner removes exactly the three retirement triggers so historical V1
+// dispatch can still be exercised. It proves neither V2 route availability nor
+// the production retirement/migration boundary. Ordinary/security tests use New.
+func NewLegacyRouting(t *testing.T) *Database {
+	t.Helper()
+	d := New(t)
+	ctx := context.Background()
+	for _, item := range [][2]string{{"routed_call", "legacy_task_frozen"}, {"routed_file_call", "legacy_file_frozen"}, {"routed_file_target", "legacy_target_frozen"}} {
+		var owned bool
+		err := d.Migration.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_trigger t
+ JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+ JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace f ON f.oid=p.pronamespace
+ WHERE n.nspname='fleet' AND c.relname=$1 AND t.tgname=$2 AND NOT t.tgisinternal AND t.tgtype=31
+ AND t.tgenabled='O' AND f.nspname='management' AND p.proname='legacy_frozen' AND NOT p.prosecdef
+ AND c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)
+ AND p.proowner=c.relowner AND n.nspowner=c.relowner AND f.nspowner=c.relowner)`, item[0], item[1]).Scan(&owned)
+		if err != nil || !owned {
+			t.Fatal("historical routing fixture requires the exact migration-owner retirement trigger")
+		}
+		if _, err := d.Migration.Exec(ctx, "DROP TRIGGER "+pgx.Identifier{item[1]}.Sanitize()+" ON "+pgx.Identifier{"fleet", item[0]}.Sanitize()); err != nil {
+			t.Fatal("historical routing fixture could not remove its owned retirement trigger")
+		}
+	}
+	return d
 }
 
 // Exec runs statements as the migration role.

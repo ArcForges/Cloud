@@ -47,9 +47,11 @@ commands:
                                    anything; configured by ARCFORGES_CENTER_MIGRATION_DATABASE_URL (docs/postgres-store.md)
   migrate management --archive <new path> --metadata <new path>
                                    expand checked schema10/11 in offline maintenance with a verified backup and writer fence
+  migrate lifecycle --archive <new path> --metadata <new path>
+                                   expand checked schema12 to13 with a verified backup, seven-schema fence and new runtime roles
   admin ensure-database            create the center's database if it does not exist
   admin backup-logical --archive <new path> --metadata <new path>
-                                   capture a checked full 0010/0011/0012 backup and its trusted snapshot metadata
+                                   capture a checked full 0010/0011/0012/0013 backup and its trusted snapshot metadata
   admin restore-logical-backup --archive <path> --sha256 <digest> --metadata <path> --metadata-sha256 <digest>
                                    restore a supported trusted backup to an explicitly named new, isolated database
   admin restore-legacy-logical-backup --archive <path> --sha256 <digest> --provenance <path> --provenance-sha256 <digest>
@@ -63,6 +65,8 @@ commands:
   admin revoke-sessions --account <uuid> | --all
                                    revoke every unrevoked session of one account, or of every account, whatever its scope
                                    (audited as identity.sessions.revoked_by_operator); prints the counts per scope
+  admin finish-account-deletion --operation <uuid>
+                                   finish a confirmed, unblocked account deletion with the migration role; keep retained evidence
   admin grant-operator --account <uuid> --reason <text> [--days N]
                                    make an active account an operator for N days (1 to 90, default 30): it may then issue operator
                                    grants of features on an official-hosted center (audited as identity.operator.granted)
@@ -108,6 +112,9 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	if len(arguments) >= 2 && arguments[0] == "migrate" && arguments[1] == "management" {
 		return managementCommand(arguments[2:], lookup, stdout, stderr)
 	}
+	if len(arguments) >= 2 && arguments[0] == "migrate" && arguments[1] == "lifecycle" {
+		return transitionCommand(arguments[2:], lookup, stdout, stderr, true)
+	}
 	command := "serve"
 	if len(arguments) > 0 {
 		command = arguments[0]
@@ -124,6 +131,9 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	}
 	if command == "admin" && sub == "backup-logical" {
 		return backupCommand(arguments[2:], lookup, stdout, stderr)
+	}
+	if command == "admin" && sub == "finish-account-deletion" {
+		return finishAccountDeletion(arguments[2:], lookup, stdout, stderr)
 	}
 	if command == "admin" && sub == "restore-legacy-logical-backup" {
 		return legacyRestoreCommand(arguments[2:], lookup, stdout, stderr)

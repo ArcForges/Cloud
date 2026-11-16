@@ -40,7 +40,7 @@ func unknownSameCommand(failure *foundationv1.ArcError) bool {
 // admission (still audited fleet.routed.refused), and the hub's own bound refusing the resend's attempt, which leaves the record UNKNOWN
 // (the earlier attempt may have reached the node) without a lost settlement.
 func TestAResendThatMayHaveReachedTheNodeIsNeverDidNotHappen(t *testing.T) {
-	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes",
+	h := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes",
 		tune: func(s *hub.Settings) {
 			s.Heartbeat, s.HeartbeatDeadline, s.MaxInFlightCalls = time.Second, 30*time.Second, 1
 		}})

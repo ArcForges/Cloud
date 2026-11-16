@@ -66,12 +66,14 @@ type harness struct {
 }
 
 type settings struct {
-	mode     config.Mode
-	plan     config.PlanConfiguration
-	surfaces string
-	policy   string
-	disabled string
-	tune     func(*hub.Settings)
+	// Only retained V1 dispatch regressions opt into the owner-relaxed routing fixture.
+	legacyRouting bool
+	mode          config.Mode
+	plan          config.PlanConfiguration
+	surfaces      string
+	policy        string
+	disabled      string
+	tune          func(*hub.Settings)
 	// maxConnections sets the center's request connection bound (the routed long-poll bound is half of it).
 	maxConnections string
 	clock          func() time.Time
@@ -89,7 +91,12 @@ func testSettings() hub.Settings {
 
 func newHarness(t *testing.T, options settings) *harness {
 	t.Helper()
-	db := dbtest.New(t)
+	var db *dbtest.Database
+	if options.legacyRouting {
+		db = dbtest.NewLegacyRouting(t)
+	} else {
+		db = dbtest.New(t)
+	}
 	values := map[string]string{
 		config.EnvMode: string(config.SelfHosted), config.EnvPublicBaseURL: publicBaseURL, config.EnvDatabaseURL: db.RuntimeURL,
 		config.EnvSurfaces: "identity,pages,fleet,relay", config.EnvIdentityPolicy: options.policy, config.EnvClientIPHeader: config.ClientIPHeader,

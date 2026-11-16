@@ -163,9 +163,9 @@ func normalizeRouted(p *channelPlaceholders, nodeID platform.ID, fixed map[strin
 // TestRoutedExchangeCapture captures the routed methods' cases (E2-26). ARCFORGES_UPDATE_EXCHANGES=1 rewrites the directory.
 func TestRoutedExchangeCapture(t *testing.T) {
 	main := routedHarness(t)
-	gated := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", disabled: "center.execute,remote.view,remote.control",
+	gated := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", disabled: "center.execute,remote.view,remote.control",
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
-	quota := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", policy: `{"routedCallsAccountLimit": 1}`,
+	quota := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", policy: `{"routedCallsAccountLimit": 1}`,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 	fixed := map[string]bool{}
 	for _, b := range []byte{0x51, 0x52, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97} {

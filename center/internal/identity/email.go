@@ -137,10 +137,12 @@ WHERE a.provider_id = 'email' AND a.subject = $1 AND a.revoked_at IS NULL`, norm
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
 			return err
-		case UserState(state).MaySignIn():
+		case UserState(state).MayAuthenticateAccount():
 			recipient = &userID
 		}
-		if _, err = tx.Exec(ctx, `UPDATE identity.auth_flow SET code_hash = $2, code_salt = $3, sends = sends + 1, user_id = $4 WHERE flow_id = $1`,
+		if _, err = tx.Exec(ctx, `UPDATE identity.auth_flow SET code_hash = $2, code_salt = $3, sends = sends + 1, user_id = $4,
+    account_auth_epoch = (SELECT auth_epoch FROM identity.account_security_state WHERE user_id = $4),
+    account_recovery_generation = (SELECT recovery_generation FROM identity.account_security_state WHERE user_id = $4) WHERE flow_id = $1`,
 			flowID, hash, salt, recipient); err != nil {
 			return err
 		}

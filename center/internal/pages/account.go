@@ -13,6 +13,7 @@ import (
 	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/identity"
@@ -50,6 +51,10 @@ func (e *exchange) protected() (*session.BrowserSession, bool) {
 		return nil, false
 	}
 	if resolved != nil {
+		if resolved.Credential.Caller.AccountState == 4 && !access.PendingDeletionPage(e.route.ID) {
+			e.fail(arc.PermissionDenied(e.route.ID))
+			return nil, false
+		}
 		idle, renewed, err := session.Renew(e.r.Context(), e.h.options.DB, e.h.options.Policy, resolved.Handle, e.h.options.Clock())
 		if err != nil {
 			e.internal(err)

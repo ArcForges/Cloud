@@ -547,7 +547,7 @@ func TestCTR06ReplayFenceRecheckedAfterQueuedWriterWait(t *testing.T) {
 	var offset atomic.Int64
 	clock := func() time.Time { return time.Now().UTC().Add(time.Duration(offset.Load())) }
 	window := 10 * time.Second // test-only configuration, not a change to product limits
-	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
+	h := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
@@ -697,7 +697,7 @@ func TestCTR06SignedMutationResultBindsCommandAndReceipt(t *testing.T) {
 }
 
 func TestCTR06RelayedHumanAuthorizationPrecedesOfficialEntitlement(t *testing.T) {
-	h := newHarness(t, settings{mode: config.OfficialHosted, plan: config.PlanDevelopmentFixtures, surfaces: "identity,pages,fleet,relay,nodes"})
+	h := newHarness(t, settings{legacyRouting: true, mode: config.OfficialHosted, plan: config.PlanDevelopmentFixtures, surfaces: "identity,pages,fleet,relay,nodes"})
 	user := h.db.Account(1)
 	h.grant(user, "center.nodes")
 	node := h.enrollIn(user)
@@ -838,7 +838,7 @@ func TestCTR06ReplayFenceRecheckedAfterDeliveredBeforeWrite(t *testing.T) {
 	var offset atomic.Int64
 	clock := func() time.Time { return time.Now().UTC().Add(time.Duration(offset.Load())) }
 	window := 10 * time.Second // test-only configuration, not a change to product limits
-	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
+	h := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
@@ -916,7 +916,7 @@ func TestCTR06ReplaySucceedsInsideWindowWithFixedSignedExpiry(t *testing.T) {
 	var offset atomic.Int64
 	clock := func() time.Time { return time.Now().UTC().Add(time.Duration(offset.Load())) }
 	window := 10 * time.Second // test-only configuration, not a change to product limits
-	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
+	h := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
@@ -979,7 +979,7 @@ func TestCTR06ReplayNearDefaultAndMaximumWindow(t *testing.T) {
 			var offset atomic.Int64
 			clock := func() time.Time { return time.Now().UTC().Add(time.Duration(offset.Load())) }
 			window := scenario.window
-			h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
+			h := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", clock: clock, replayWindow: window,
 				tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 			user := h.db.Account(1)
 			node := h.enrollIn(user)

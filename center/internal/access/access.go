@@ -185,9 +185,12 @@ func Operations() []Operation {
 		{Path: publicapiv1connect.IdentityServiceRequestEmailCodeProcedure, ID: "identity.requestEmailCode", Risk: "R1"},
 		{Path: publicapiv1connect.IdentityServiceRedeemEmailCodeProcedure, ID: "identity.redeemEmailCode", Risk: "R1"},
 		{Path: publicapiv1connect.IdentityServiceCompleteEnrollmentProcedure, ID: "identity.completeEnrollment", Risk: "R1"},
+		{Path: publicapiv1connect.IdentityServiceBeginRecoveryProcedure, ID: "identity.beginRecovery", Risk: "R1"},
+		{Path: publicapiv1connect.IdentityServiceCompleteRecoveryProcedure, ID: "identity.completeRecovery", Risk: "R3", Receipt: true, Audit: AuditInTransaction},
 		{Path: publicapiv1connect.IdentityServiceListAuthProvidersProcedure, ID: "identity.listAuthProviders", Risk: "R1"},
 		{Path: publicapiv1connect.IdentityServiceRefreshSessionProcedure, ID: "identity.refreshSession", Risk: "R1"},
 		{Path: publicapiv1connect.IdentityServiceGetProfileProcedure, ID: "identity.getProfile", Risk: "R1", Session: true},
+		{Path: publicapiv1connect.IdentityServiceGetAccountDeletionProcedure, ID: "identity.getAccountDeletion", Risk: "R1", Session: true, MobileLimited: Upgrade, Restricted: true},
 		{Path: publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure, ID: "identity.listAuthIdentities", Risk: "R1", Session: true, Restricted: true},
 		{Path: publicapiv1connect.IdentityServiceListSessionsProcedure, ID: "identity.listSessions", Risk: "R1", Session: true, Restricted: true},
 		{Path: publicapiv1connect.DeviceServiceListProcedure, ID: "device.list", Risk: "R1", Session: true, Restricted: true},
@@ -343,7 +346,25 @@ func CenterOperations() []CenterOperation {
 	return []CenterOperation{
 		{ID: OperatorGrantClass, Risk: "R4", StepUp: Evidence, Target: TargetRequest, Receipt: true, Audit: AuditInTransaction},
 		{ID: MobileAuthorizationClass, Risk: "R3", StepUp: EvidenceOnApprove, Target: TargetFlow, Restricted: true, Audit: AuditInTransaction},
+		{ID: "identity.prepareAccountDeletion", Risk: "R2", Receipt: true, Restricted: true, Audit: AuditInTransaction},
+		{ID: "identity.confirmAccountDeletion", Risk: "R4", StepUp: Evidence, Target: TargetFlow, Receipt: true, Restricted: true, Audit: AuditInTransaction},
+		{ID: "identity.cancelAccountDeletion", Risk: "R3", StepUp: Evidence, Target: TargetFlow, Receipt: true, Restricted: true, Audit: AuditInTransaction},
+		{ID: "identity.exportAccount", Risk: "R3", StepUp: Evidence, Target: TargetAccount, Receipt: true, Restricted: true, Audit: AuditInTransaction},
+		{ID: "identity.readAccountExport", Risk: "R2", Restricted: true},
 	}
+}
+
+// pendingDeletionOperation is deliberately narrower than the restricted account
+// rule. The core also binds a pending account's step-up to its cancellation.
+func pendingDeletionOperation(path string) bool {
+	switch path {
+	case publicapiv1connect.IdentityServiceGetAccountDeletionProcedure,
+		publicapiv1connect.IdentityServiceBeginStepUpProcedure,
+		publicapiv1connect.IdentityServiceCompleteStepUpProcedure,
+		publicapiv1connect.IdentityServiceRevokeSessionProcedure:
+		return true
+	}
+	return false
 }
 
 // CenterOperationOf is the center-defined operation of an ID.
@@ -459,11 +480,15 @@ func CheckRow(operation Operation) error {
 	inconsistent := func(why string) error {
 		return fmt.Errorf("the operation row of %s is inconsistent: %s", operation.Path, why)
 	}
+	// Recovery has no session authority. Its one-use channel proof supplies the
+	// account binding, and its core owns the flow-scoped receipt and audit.
+	recovery := operation.Path == publicapiv1connect.IdentityServiceCompleteRecoveryProcedure && operation.ID == "identity.completeRecovery" &&
+		operation.Risk == "R3" && operation.Receipt && operation.Audit == AuditInTransaction
 	switch {
 	case (operation.StepUp != NoEvidence) != (operation.Target != ""):
 		return inconsistent("evidence and its target go together")
-	case !operation.Session && (operation.StepUp != NoEvidence || operation.Receipt || operation.MobileLimited != Allowed || operation.Restricted ||
-		len(operation.Scopes) > 0 || operation.Object != "" || operation.Audit != NoAudit):
+	case !operation.Session && (operation.StepUp != NoEvidence || operation.MobileLimited != Allowed || operation.Restricted ||
+		len(operation.Scopes) > 0 || operation.Object != "" || (operation.Receipt || operation.Audit != NoAudit) && !recovery):
 		// A gated row is audited before the call, so it is caught here as well.
 		return inconsistent("an anonymous row needs no caller")
 	case operation.Feature != "" && !feature.IsGated(operation.Feature):
@@ -758,6 +783,8 @@ func (a *Authorizer) AuthorizeRelayed(ctx context.Context, call *ingress.Call, s
 	switch {
 	case !known:
 		return operation, relay, a.refuse(ctx, call, operation, "scope")
+	case caller.AccountState == 4 && !pendingDeletionOperation(operation.Path):
+		return operation, relay, a.refuse(ctx, call, operation, "restricted")
 	case caller.AccountState == restrictedState && !operation.Restricted:
 		return operation, relay, a.refuse(ctx, call, operation, "restricted")
 	case operation.MobileLimited == Upgrade && operation.NeedsUpgrade(caller, false):

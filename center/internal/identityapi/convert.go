@@ -60,7 +60,7 @@ func nativeSession(signedIn identity.SignedIn) *publicapiv1.NativeSession {
 	return &publicapiv1.NativeSession{
 		SessionId: id(issued.SessionID), AccessToken: proto.String(issued.AccessToken), AccessExpiresAt: arc.Instant(issued.AccessExpiresAt),
 		RefreshToken: proto.String(issued.RefreshToken), RefreshExpiresAt: arc.Instant(issued.RefreshExpiresAt), Device: deviceView(signedIn.Device),
-		RecoveryGeneration: proto.Uint64(0), Purpose: publicapiv1.AuthPurpose(issued.Purpose).Enum(),
+		RecoveryGeneration: proto.Uint64(uint64(issued.RecoveryGeneration)), Purpose: publicapiv1.AuthPurpose(issued.Purpose).Enum(),
 	}
 }
 

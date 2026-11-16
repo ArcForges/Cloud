@@ -33,6 +33,7 @@ const (
 	FlowPasskeyRegistration FlowKind = 2
 	FlowEnrollment          FlowKind = 3
 	FlowEmailCode           FlowKind = 4
+	FlowRecovery            FlowKind = 5
 )
 
 // Purpose is a flow's purpose (the contract's AuthPurpose): authenticate or enroll.
@@ -42,6 +43,7 @@ type Purpose int16
 const (
 	PurposeAuthenticate Purpose = 1
 	PurposeEnroll       Purpose = 2
+	PurposeRecover      Purpose = 4
 )
 
 // The flow outcomes (identity.flow_outcome).
@@ -55,25 +57,27 @@ const passkeyAttempts = 1
 
 // flow is a stored ceremony.
 type flow struct {
-	ID          platform.ID
-	Channel     Channel
-	Kind        FlowKind
-	Purpose     Purpose
-	UserID      *platform.ID
-	SessionID   *platform.ID
-	Label       *string
-	Origin      *string
-	Challenge   []byte
-	UserHandle  []byte
-	EmailHash   []byte
-	CodeHash    []byte
-	CodeSalt    []byte
-	Sends       int16
-	Claim       *device.Claim
-	Attempts    int16
-	MaxAttempts int16
-	CreatedAt   time.Time
-	ExpiresAt   time.Time
+	ID                                          platform.ID
+	Channel                                     Channel
+	Kind                                        FlowKind
+	Purpose                                     Purpose
+	UserID                                      *platform.ID
+	SessionID                                   *platform.ID
+	Label                                       *string
+	Origin                                      *string
+	Challenge                                   []byte
+	UserHandle                                  []byte
+	EmailHash                                   []byte
+	CodeHash                                    []byte
+	CodeSalt                                    []byte
+	Sends                                       int16
+	Claim                                       *device.Claim
+	Attempts                                    int16
+	MaxAttempts                                 int16
+	CreatedAt                                   time.Time
+	ExpiresAt                                   time.Time
+	LifecycleOperationID                        *platform.ID
+	AccountAuthEpoch, AccountRecoveryGeneration *int64
 }
 
 func (s *Service) insertFlow(ctx context.Context, tx pgx.Tx, row flow) error {
@@ -84,16 +88,17 @@ func (s *Service) insertFlow(ctx context.Context, tx pgx.Tx, row flow) error {
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO identity.auth_flow (flow_id, channel, kind, purpose, user_id, session_id, label, origin, challenge,
     webauthn_user_handle, email_hash, code_hash, code_salt, sends, installation_id, installation_product, installation_platform, installation_version,
-    attempts, max_attempts, created_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 0, $19, $20, $21)`,
+    attempts, max_attempts, created_at, expires_at, lifecycle_operation_id, account_auth_epoch, account_recovery_generation)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 0, $19, $20, $21, $22, $23, $24)`,
 		row.ID, int16(row.Channel), int16(row.Kind), int16(row.Purpose), row.UserID, row.SessionID, row.Label, row.Origin, row.Challenge, row.UserHandle,
-		row.EmailHash, row.CodeHash, row.CodeSalt, row.Sends, installation, product, platformText, version, row.MaxAttempts, row.CreatedAt, row.ExpiresAt)
+		row.EmailHash, row.CodeHash, row.CodeSalt, row.Sends, installation, product, platformText, version, row.MaxAttempts, row.CreatedAt, row.ExpiresAt,
+		row.LifecycleOperationID, row.AccountAuthEpoch, row.AccountRecoveryGeneration)
 	return err
 }
 
 const flowColumns = `flow_id, channel, kind, purpose, user_id, session_id, label, origin, challenge, webauthn_user_handle, email_hash, code_hash,
     code_salt, sends, installation_id, installation_product, installation_platform, installation_version, attempts, max_attempts, created_at,
-    expires_at`
+    expires_at, lifecycle_operation_id, account_auth_epoch, account_recovery_generation`
 
 func scanFlow(row pgx.Row) (flow, error) {
 	var item flow
@@ -102,7 +107,7 @@ func scanFlow(row pgx.Row) (flow, error) {
 	var product, platformText, version *string
 	err := row.Scan(&item.ID, &channel, &kind, &purpose, &item.UserID, &item.SessionID, &item.Label, &item.Origin, &item.Challenge, &item.UserHandle,
 		&item.EmailHash, &item.CodeHash, &item.CodeSalt, &item.Sends, &installation, &product, &platformText, &version, &item.Attempts,
-		&item.MaxAttempts, &item.CreatedAt, &item.ExpiresAt)
+		&item.MaxAttempts, &item.CreatedAt, &item.ExpiresAt, &item.LifecycleOperationID, &item.AccountAuthEpoch, &item.AccountRecoveryGeneration)
 	if err != nil {
 		return flow{}, err
 	}
