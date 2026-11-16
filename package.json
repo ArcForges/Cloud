@@ -67,7 +67,7 @@
     "typescript": "7.0.2",
     "wrangler": "4.162.0",
     "blake3-wasm": "3.0.0",
-    "unenv": "2.0.0-rc.24"
+    "unenv": "2.0.0-rc.25"
   },
   "overrides": {
     "@c4312/blake3-internal": "3.0.0",
