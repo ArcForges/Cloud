@@ -4,6 +4,7 @@ package identityapi_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"strings"
@@ -33,6 +34,7 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 	other := h.issue(who.id, session.ScopeAccount, false)
 	credential := h.credentialIDs(who.id)[0]
 	requests := map[string]proto.Message{
+		"/arcforges.publicapi.v1.IdentityService/GetAccountDeletion": &publicapiv1.IdentityServiceGetAccountDeletionRequest{Meta: meta()},
 		updateProfilePath: &publicapiv1.IdentityServiceUpdateProfileRequest{Meta: command(), Patch: &publicapiv1.ProfileUpdate{
 			DisplayName: proto.String("Limited")}},
 		beginRegisterPath: &publicapiv1.IdentityServiceBeginPasskeyRegistrationRequest{Meta: meta(), DisplayName: proto.String("Phone")},
@@ -74,8 +76,8 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 	for path := range requests {
 		t.Errorf("%s has a request, but the operation table opens it to mobile.limited", path)
 	}
-	if checked != 9 {
-		t.Fatalf("%d methods need the upgrade, want 9", checked)
+	if checked != 10 {
+		t.Fatalf("%d methods need the upgrade, want 10", checked)
 	}
 
 	// Its own session and device need neither the upgrade nor evidence.
@@ -268,7 +270,7 @@ func TestAStepUpChallengeBindsItsMethodSessionAndProof(t *testing.T) {
 
 // TestARemovalSpendsTheEvidenceProvedBeforeIt (B3): evidence is consumed under the account's row lock, the lock a credential
 // removal moves the authentication epoch under, so a removal whose evidence was proved before a concurrent removal reads the moved
-// epoch and is refused with AUTHENTICATION/step_up_required, whether the first removal is parked after its epoch move (at its
+// epoch and is refused with AUTHENTICATION/credential_revoked, whether the first removal is parked after its epoch move (at its
 // audit) or before it (at its credential's row).
 func TestARemovalSpendsTheEvidenceProvedBeforeIt(t *testing.T) {
 	for _, parked := range []string{"at its audit", "at its credential"} {
@@ -297,6 +299,7 @@ func TestARemovalSpendsTheEvidenceProvedBeforeIt(t *testing.T) {
 			}
 			results := make([]string, 2)
 			var wait sync.WaitGroup
+			defer func() { _ = lock.tx.Rollback(context.Background()); wait.Wait() }()
 			wait.Go(func() { results[0] = remove(ids[1]) })
 			if !lock.waitFor(1) {
 				t.Fatal("the first removal never reached the hold")
@@ -307,7 +310,7 @@ func TestARemovalSpendsTheEvidenceProvedBeforeIt(t *testing.T) {
 			}
 			lock.release(false)
 			wait.Wait()
-			if results[0] != "" || results[1] != "AUTHENTICATION/step_up_required" || len(h.credentialIDs(who.id)) != 2 {
+			if results[0] != "" || results[1] != "AUTHENTICATION/credential_revoked" || len(h.credentialIDs(who.id)) != 2 {
 				t.Fatalf("two removals of evidence proved before both: %q, %d live credentials", results, len(h.credentialIDs(who.id)))
 			}
 			h.verifyAudit()

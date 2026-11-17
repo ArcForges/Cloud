@@ -3,6 +3,7 @@
 package identity
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -22,6 +23,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/ratelimit"
+	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
@@ -179,6 +181,15 @@ func (s *Service) BeginStepUp(ctx context.Context, caller Caller, in StepUpBegin
 	var recipient string
 	err = s.db.InTx(ctx, "begin a step-up", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		recipient = ""
+		security, err := lockCurrentCaller(ctx, tx, caller, now, false, true)
+		if err != nil {
+			return err
+		}
+		if security.State == int16(StatePendingDeletion) {
+			if err = admitDeletionProof(ctx, tx, caller.UserID, class, target); err != nil {
+				return err
+			}
+		}
 		passkeys, email, err := accountMethods(ctx, tx, caller.UserID)
 		if err != nil {
 			return err
@@ -227,6 +238,7 @@ type stepUpChallenge struct {
 	attempts                      int16
 	expiresAt                     time.Time
 	authEpoch, recoveryGeneration int64
+	target                        []byte
 }
 
 // classifyStepUp explains why a challenge could not take an attempt: unknown or of another session (not_found), proved with
@@ -263,9 +275,9 @@ func (s *Service) takeStepUpAttempt(ctx context.Context, id platform.ID, caller 
 		var storedMethod int16
 		err := tx.QueryRow(ctx, `UPDATE identity.step_up_challenge SET attempt_count = attempt_count + 1, rev = rev + 1
 WHERE challenge_id = $1 AND session_id = $2 AND user_id = $3 AND method = $4 AND state = 1 AND expires_at > $5 AND attempt_count < $6
-RETURNING operation_id, method, challenge, code_hash, code_salt, attempt_count, expires_at, auth_epoch, recovery_generation`,
+RETURNING operation_id, method, challenge, code_hash, code_salt, attempt_count, expires_at, auth_epoch, recovery_generation, target_hash`,
 			id, caller.SessionID, caller.UserID, int16(method), now, s.maxStepUpAttempts(method)).Scan(&item.class, &storedMethod, &item.challenge,
-			&item.codeHash, &item.codeSalt, &item.attempts, &item.expiresAt, &item.authEpoch, &item.recoveryGeneration)
+			&item.codeHash, &item.codeSalt, &item.attempts, &item.expiresAt, &item.authEpoch, &item.recoveryGeneration, &item.target)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return classifyStepUp(ctx, tx, id, caller, method, now)
 		}
@@ -355,7 +367,7 @@ func (s *Service) CompleteStepUp(ctx context.Context, caller Caller, challengeID
 		if found, err = s.findPasskey(ctx, proof.Passkey.CredentialID); err != nil {
 			return Evidence{}, err
 		}
-		if found == nil || found.userID != caller.UserID || !found.state.MaySignIn() {
+		if found == nil || found.userID != caller.UserID || !found.state.MayAuthenticateAccount() {
 			return refuse("unknown_credential")
 		}
 		if verified, err = s.rp.VerifyAssertion(row.challenge, *proof.Passkey, found.stored, row.expiresAt); err != nil {
@@ -379,17 +391,29 @@ func (s *Service) CompleteStepUp(ctx context.Context, caller Caller, challengeID
 	err = s.db.InTx(ctx, "prove a step-up", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		evidence, upgraded = Evidence{}, false
 		now := s.now()
+		security, err := lockCurrentCaller(ctx, tx, caller, now, false, true)
+		if err != nil {
+			return err
+		}
+		if !security.AdmitsScope(session.ScopeAccount) {
+			return arc.Unauthenticated()
+		}
+		if security.State == int16(StatePendingDeletion) {
+			if err = admitDeletionProof(ctx, tx, caller.UserID, row.class, row.target); err != nil {
+				return err
+			}
+		}
 		var scope int16
 		var authEpoch, recoveryGeneration int64
 		var live bool
-		err := tx.QueryRow(ctx, `SELECT scope, auth_epoch, recovery_generation, revoked_at IS NULL FROM identity.session
+		err = tx.QueryRow(ctx, `SELECT scope, auth_epoch, recovery_generation, revoked_at IS NULL FROM identity.session
 WHERE session_id = $1 AND user_id = $2 FOR UPDATE`, caller.SessionID, caller.UserID).Scan(&scope, &authEpoch, &recoveryGeneration, &live)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows), err == nil && !live:
 			return arc.CredentialRevoked()
 		case err != nil:
 			return err
-		case authEpoch != row.authEpoch || recoveryGeneration != row.recoveryGeneration:
+		case authEpoch != row.authEpoch || recoveryGeneration != row.recoveryGeneration || authEpoch != security.AuthEpoch || recoveryGeneration != security.RecoveryGeneration:
 			return arc.Expired() // the account's credentials changed since the challenge began
 		}
 		expiresAt := now.Add(s.policy.StepUpEvidenceTTL)
@@ -488,15 +512,27 @@ func ConsumeEvidence(ctx context.Context, tx pgx.Tx, caller Caller, class string
 // ConsumeEvidenceFor is ConsumeEvidence for an operation whose target is named by a hash that is not TargetHash's: the center-defined
 // operations, whose target is the SHA-256 of their canonical request (the operator grant, SEC-10). The rules are the same.
 func ConsumeEvidenceFor(ctx context.Context, tx pgx.Tx, caller Caller, class string, target []byte, now time.Time) error {
+	return consumeEvidenceFor(ctx, tx, caller, class, target, now, nil)
+}
+
+func consumeEvidenceFor(ctx context.Context, tx pgx.Tx, caller Caller, class string, target []byte, now time.Time, consumedID *platform.ID) error {
 	var err error
 	if _, err = tx.Exec(ctx, "SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", caller.UserID); err != nil {
 		return err
+	}
+	security, err := session.LockAccountSecurity(ctx, tx, caller.UserID)
+	if err != nil {
+		return err
+	}
+	if security.AuthEpoch != caller.AuthEpoch || security.RecoveryGeneration != caller.RecoveryGeneration {
+		return arc.CredentialRevoked()
 	}
 	var challengeID platform.ID
 	err = tx.QueryRow(ctx, `SELECT c.challenge_id FROM identity.step_up_challenge c JOIN identity.session s ON s.session_id = c.session_id
 WHERE c.session_id = $1 AND c.user_id = $2 AND c.operation_id = $3 AND c.target_hash = $4 AND c.state = 2 AND c.expires_at > $5
     AND s.revoked_at IS NULL AND s.auth_epoch = c.auth_epoch AND s.recovery_generation = c.recovery_generation
-ORDER BY c.proved_at, c.challenge_id LIMIT 1 FOR UPDATE OF c`, caller.SessionID, caller.UserID, class, target, now).Scan(&challengeID)
+    AND s.auth_epoch = $6 AND s.recovery_generation = $7 AND s.expires_at > $5
+ORDER BY c.proved_at, c.challenge_id LIMIT 1 FOR UPDATE OF c`, caller.SessionID, caller.UserID, class, target, now, security.AuthEpoch, security.RecoveryGeneration).Scan(&challengeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return arc.StepUpRequired()
 	}
@@ -510,6 +546,41 @@ ORDER BY c.proved_at, c.challenge_id LIMIT 1 FOR UPDATE OF c`, caller.SessionID,
 	}
 	if tag.RowsAffected() != 1 {
 		return arc.StepUpRequired()
+	}
+	if consumedID != nil {
+		*consumedID = challengeID
+	}
+	return nil
+}
+
+func consumeLifecycleEvidence(ctx context.Context, tx pgx.Tx, caller Caller, class string, targetID platform.ID, now time.Time) (platform.ID, error) {
+	target, err := hex.DecodeString(TargetHash(class, caller.UserID, targetID))
+	if err != nil {
+		return platform.ID{}, err
+	}
+	var id platform.ID
+	err = consumeEvidenceFor(ctx, tx, caller, class, target, now, &id)
+	return id, err
+}
+
+func admitDeletionProof(ctx context.Context, tx pgx.Tx, userID platform.ID, class string, target []byte) error {
+	if class != ClassCancelDeletion {
+		return arc.PermissionDenied(class)
+	}
+	var operationID platform.ID
+	err := tx.QueryRow(ctx, `SELECT operation_id FROM identity.lifecycle_operation WHERE user_id=$1 AND kind=2 AND state=3`, userID).Scan(&operationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return arc.PermissionDenied(class)
+	}
+	if err != nil {
+		return err
+	}
+	want, err := hex.DecodeString(TargetHash(class, userID, operationID))
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(target, want) {
+		return arc.PermissionDenied(class)
 	}
 	return nil
 }

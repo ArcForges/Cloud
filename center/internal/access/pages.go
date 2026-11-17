@@ -43,6 +43,18 @@ type PageOperation struct {
 	Center string
 }
 
+// PendingDeletionPage is the exact authenticated browser remediation surface.
+// Confirmation admits only an existing successful receipt read in its handler.
+// Pre-session authentication and static pages confer no account authority.
+func PendingDeletionPage(id string) bool {
+	switch id {
+	case "page.lifecycle", "page.signOut", "webBrowser.bootstrap", "webBrowser.beginStepUp", "webBrowser.completeStepUp",
+		"webBrowser.logout", "account.deletion.cancel", "account.deletion.confirm":
+		return true
+	}
+	return false
+}
+
 // PageOperations is the closed table of the page routes. The composition refuses to start when a page route has no row, a row has
 // no route, a row's credential contradicts its route's cookie rule, or a method it calls has no operation row.
 func PageOperations() []PageOperation {
@@ -52,10 +64,19 @@ func PageOperations() []PageOperation {
 		{"webBrowser.beginAuthentication", PagePreSession, []string{publicapiv1connect.IdentityServiceBeginAuthenticationProcedure}, ""},
 		{"webBrowser.completeAuthentication", PagePreSession, []string{publicapiv1connect.IdentityServiceCompleteAuthenticationProcedure}, ""},
 		{"webBrowser.completeEnrollment", PagePreSession, []string{publicapiv1connect.IdentityServiceCompleteEnrollmentProcedure}, ""},
+		{"webBrowser.beginRecovery", PagePreSession, []string{publicapiv1connect.IdentityServiceBeginRecoveryProcedure}, ""},
+		{"webBrowser.completeRecovery", PagePreSession, []string{publicapiv1connect.IdentityServiceCompleteRecoveryProcedure}, ""},
+		{"account.deletion.prepare", PageSession, nil, "identity.prepareAccountDeletion"},
+		{"account.deletion.confirm", PageSession, nil, "identity.confirmAccountDeletion"},
+		{"account.deletion.cancel", PageSession, nil, "identity.cancelAccountDeletion"},
+		{"account.export.prepare", PageSession, nil, "identity.exportAccount"},
+		{"account.export.read", PageSession, nil, "identity.readAccountExport"},
 		{"webBrowser.beginStepUp", PageSession, []string{publicapiv1connect.IdentityServiceBeginStepUpProcedure}, ""},
 		{"webBrowser.completeStepUp", PageSession, []string{publicapiv1connect.IdentityServiceCompleteStepUpProcedure}, ""},
 		{"webBrowser.logout", PageSession, []string{publicapiv1connect.IdentityServiceRevokeSessionProcedure}, ""},
 		{"page.signIn", PageNoCredential, nil, ""},
+		{"page.recovery", PageNoCredential, nil, ""},
+		{"page.lifecycle", PageSession, []string{publicapiv1connect.IdentityServiceGetAccountDeletionProcedure}, ""},
 		{"page.bootstrap", PageNoCredential, nil, ""},
 		{"page.passkeys", PageSession, []string{profile, publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure}, ""},
 		{"page.sessions", PageSession, []string{publicapiv1connect.IdentityServiceListSessionsProcedure}, ""},

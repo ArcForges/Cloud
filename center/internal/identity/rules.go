@@ -42,6 +42,10 @@ const (
 // (a restricted account reaches only its security operations); every other state is refused exactly like an unknown credential.
 func (s UserState) MaySignIn() bool { return s == StateActive || s == StateRestricted }
 
+// MayAuthenticateAccount also admits a new account-only authentication for a
+// pending deletion's status/cancellation. It grants no remote sign-in authority.
+func (s UserState) MayAuthenticateAccount() bool { return s.MaySignIn() || s == StatePendingDeletion }
+
 // MayAddCredential reports whether a new credential is admitted: only for an active account.
 func (s UserState) MayAddCredential() bool { return s == StateActive }
 

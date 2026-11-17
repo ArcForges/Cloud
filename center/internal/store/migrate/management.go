@@ -127,8 +127,17 @@ func ApplyManagement(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 	if options.BridgeProof != nil || cfg.CTR06BridgeExecutable != "" || cfg.CTR06ProofFile != "" {
 		return Result{State: StateRefused}, ErrManagementSuccessorUnqualified
 	}
-	if len(build) != 12 || build[11].Name != "0012_management_storage.sql" {
+	if len(build) < 12 || build[11].Name != "0012_management_storage.sql" {
 		return Result{State: StateRefused}, ErrRefused
+	}
+	// This finite transition always ends at its originally qualified schema12.
+	// A later lifecycle transition needs its own source12 snapshot and fence.
+	build = build[:12]
+	if options.Schemas == nil {
+		options.Schemas, _ = schema.AtVersion(12)
+	}
+	if options.Grants == nil {
+		_, options.Grants = schema.AtVersion(12)
 	}
 	options.defaults()
 	if err := lock(ctx, conn, options); err != nil {
@@ -312,6 +321,10 @@ func recordManagement(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Op
 }
 
 func fenceManagementWriters(ctx context.Context, tx pgx.Tx, group string) (string, error) {
+	return fenceManagementWritersIn(ctx, tx, group, []string{"platform", "audit", "fleet", "identity", "device", "entitlement"})
+}
+
+func fenceManagementWritersIn(ctx context.Context, tx pgx.Tx, group string, schemas []string) (string, error) {
 	if err := RequirePlainRole(ctx, tx, group, false); err != nil {
 		return "", err
 	}
@@ -365,14 +378,14 @@ func fenceManagementWriters(ctx context.Context, tx pgx.Tx, group string) (strin
  OR EXISTS(SELECT 1 FROM reach JOIN pg_roles actor ON actor.oid=reach.actor JOIN pg_roles reachable ON reachable.oid=reach.memberof
  WHERE actor.rolname<>current_user AND actor.rolname !~ '^pg_' AND NOT actor.rolsuper AND NOT actor.oid=ANY($2::oid[])
  AND (reachable.rolsuper OR reachable.rolname=current_user OR reachable.oid=ANY($2::oid[]) OR EXISTS(
- SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=ANY($3::text[])
- AND c.relkind IN('r','p') AND (has_table_privilege(reachable.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') OR has_any_column_privilege(reachable.oid,c.oid,'INSERT,UPDATE')))))`, names[1:], oids, []string{"platform", "audit", "fleet", "identity", "device", "entitlement"}, groupOID).Scan(&unsafe)
+	SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=ANY($3::text[])
+	AND c.relkind IN('r','p') AND (has_table_privilege(reachable.oid,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') OR has_any_column_privilege(reachable.oid,c.oid,'INSERT,UPDATE')))))`, names[1:], oids, schemas, groupOID).Scan(&unsafe)
 	if err != nil || unsafe {
 		return "", ErrManagementTransitionRequired
 	}
 	for _, name := range names {
 		quoted := pgx.Identifier{name}.Sanitize()
-		for _, s := range []string{"platform", "audit", "fleet", "identity", "device", "entitlement"} {
+		for _, s := range schemas {
 			schemaName := pgx.Identifier{s}.Sanitize()
 			for _, statement := range []string{"REVOKE ALL ON ALL TABLES IN SCHEMA " + schemaName + " FROM " + quoted, "REVOKE ALL ON ALL SEQUENCES IN SCHEMA " + schemaName + " FROM " + quoted, "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA " + schemaName + " FROM " + quoted, "REVOKE ALL ON SCHEMA " + schemaName + " FROM " + quoted} {
 				if _, err := tx.Exec(ctx, statement); err != nil {

@@ -30,6 +30,7 @@ type restoreCapability struct {
 	active             bool
 	managementArtifact string
 	managementSource   int
+	lifecycleArtifact  string
 }
 
 func newRestoreCapability(ctx context.Context, conn *pgx.Conn, archive, metadata string) (*restoreCapability, error) {
@@ -238,6 +239,11 @@ func finalizeCTR06Restore(ctx context.Context, conn *pgx.Conn, runtimeRole, sour
 		}
 		if c.managementArtifact != "" {
 			if err := finishManagementRestore(ctx, tx, conn, runtimeRole, sourceRole, c); err != nil {
+				return err
+			}
+		}
+		if c.lifecycleArtifact != "" {
+			if err := finishLifecycleRestore(ctx, tx, conn, runtimeRole, sourceRole, c); err != nil {
 				return err
 			}
 		}

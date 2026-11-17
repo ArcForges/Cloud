@@ -15,8 +15,72 @@ data/cloud-store.md §2 and §6). It lands in parts, each deployable dark:
   It adds no migration: the browser session, device and installation rows were migration 0002's.
 - **B:** feature availability (AD-0021 §13a) and the operator commands.
 
-Recovery, account deletion and export, e-mail change, recovery codes, API tokens and the security activity list are AF-ID-02's;
-those methods stay unregistered.
+AFV2-ID-01 adds the bounded recovery, account deletion and export lifecycle described below. Email change, recovery codes,
+API tokens, the security activity list and provider callbacks remain unsupported. Historical AF-CTR/AF-ID delivery labels in
+this document describe their original implementation; they are not V2 acceptance results.
+
+## Account lifecycle (AFV2-ID-01)
+
+Migration `0013_account_lifecycle.sql` adds account security epochs and content-free lifecycle evidence. It preserves prior
+applied migrations and their checksums. `BeginRecovery` and `CompleteRecovery` are anonymous RPCs with bounded email-channel
+proofs; only the email-code recovery method and a replacement passkey are offered. `GetAccountDeletion` is an authenticated
+status RPC. The generated Worker table and `access.Operations` register exactly these additions.
+
+The old `RequestAccountDeletion` message contains only `RequestMeta`; it cannot bind an explicit deletion plan. It and the old
+`CancelAccountDeletion` RPC stay unregistered. The browser's typed lifecycle protocol binds those decisions explicitly, and
+export has no legacy RPC to repurpose. A request to an unsupported RPC remains `UNIMPLEMENTED` and has no Worker row.
+
+The account pages add `/account/recovery` and `/account/lifecycle`, using the existing embedded templates, script, exact Origin,
+cookie and CSRF rules. Browser JSON requests are objects without unknown/repeated fields. UUIDs are canonical lowercase text,
+revisions are positive decimal strings, and byte pages are unpadded base64url. Routes below `/session/v1/web` are:
+
+| POST path                   | Required body fields                                            | Result                                                                              |
+| --------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `/recovery/begin`           | `method: "emailCode"`, `email`, `installation`                  | Non-enumerating recovery challenge with replacement creation options                |
+| `/recovery/complete`        | `flowId`, `commandId`, `proof.emailCode`, `replacement.passkey` | Command receipt metadata; no session or cookie                                      |
+| `/account/deletion/prepare` | `commandId`                                                     | Expiring plan, revision, subscription/unresolved-operation counts and proof targets |
+| `/account/deletion/confirm` | `commandId`, `planId`, `planRevision`                           | Pending deletion metadata and receipt                                               |
+| `/account/deletion/cancel`  | `commandId`, `planId`                                           | Cancellation metadata and receipt                                                   |
+| `/account/export/prepare`   | `commandId`                                                     | Short-lived export receipt metadata and byte count                                  |
+| `/account/export/read`      | `operationId`, integer `offset`, integer `limit` (1–32768)      | One bounded byte page after a fresh authorization check                             |
+
+Recovery sends a one-use code only to an already verified channel. A disabled sender returns the same service-unavailable refusal for every address; a
+recipient-specific delivery failure does not reveal account existence or claim delivery success. Proof verification, bounded
+attempts, replacement WebAuthn verification, epoch/generation increments, credential/session/enrollment revocation, audit,
+outbox and the flow-scoped command receipt use the real core and PostgreSQL. A lost completion reply is reconciled by retrying
+the identical command and ceremony. Recovery returns no old session: sign in again with the replacement passkey and a new
+browser installation. Native and browser session projections carry the actual recovery generation.
+
+Deletion confirmation consumes fresh step-up evidence of class `identity.confirmAccountDeletion`, bound to the plan ID.
+The plan revision, captured subscription/remote-operation facts and account epochs are checked in the effect transaction.
+The same account and command identity replay the recorded result; another intent with that command is refused. Confirmation
+makes the account pending deletion and revokes sessions, installations and remote enrollments. It does not stop Runs or remove
+local Sandbox files. A newly proved account passkey with a fresh installation can read deletion status and cancel; pending
+accounts cannot regain normal account, fleet, export or Node authority. An identical confirmation command may only read an
+already successful receipt after current authentication and operation ownership/epoch checks; a missing or changed command
+cannot execute a new confirmation from the pending state. Their step-up is restricted to
+`identity.cancelAccountDeletion` and the exact pending operation; only their own sign-out remains available. Cancellation
+requires that fresh proof and never reactivates a revoked session or installation.
+
+Deletion remains `processing` while provider cancellation/reconciliation, unresolved remote outcomes or an approved retention
+policy are missing. Metadata and the page state these blockers; they do not promise provider success or final purge.
+Financial/security audit and non-executable operation identities remain retained. `AFV2-HOST-02` and the applicable retention
+and production gates own those external prerequisites.
+
+Export consumes fresh `identity.exportAccount` evidence bound to the account. Canonical JSON is bounded to 256 rows per
+collection and 2 MiB in total; it includes allowlisted account/public credential/device/security/entitlement/billing facts,
+excluding keys, tokens, proofs, recovery secrets, Node logs and local Sandbox data. Only receipt/digest/size/status are stored.
+Every 32 KiB page rechecks current account/session/device authorization, epoch, ownership, expiry and the complete canonical
+digest. Changed source facts refuse the old receipt instead of replacing its content silently. There is no bearer download
+URL, unbounded database blob or temporary filesystem export configuration. Sensitive writes and bounded page reads use
+separate account/source rate-limit keys.
+
+The co-located lifecycle tests cover HTTP Origin/CSRF, plan binding and command conflicts, current-epoch checks, foreign and
+expired exports, recovery replay and the pending account's remediation boundary. Their PostgreSQL cases require the native
+Linux integration profile; a skipped Windows database case is not evidence of a completed journey. Mailbox/domain delivery,
+real browser/authenticator acceptance and provider behavior retain their separate acceptance gates. Deployment remains paused.
+Rollback preserves the migration/backup/receipt evidence and uses the documented store restore path; do not run an older
+schema-12 binary against the schema-13 runtime or edit an applied SQL/checksum.
 
 ## Packages
 
@@ -35,36 +99,39 @@ those methods stay unregistered.
 
 ## Served methods
 
-The center serves exactly these methods (`routes.IdentityMethods`: A1a's eleven and A1b's eleven); every other IdentityService,
+The center serves exactly these methods (`routes.IdentityMethods`: the original 22 plus AFV2-ID-01's three); every other IdentityService,
 DeviceService and WorkspaceService method stays unregistered, so the center answers `UNIMPLEMENTED` and the Worker table has no row
 for it (`TestTheServedMethodsAreExactlyTheIdentitySet` compares the set with the contract's service descriptors). Every identity
 request carries a `RequestMeta`; a `RequestMeta.workspace_id` is refused with `VALIDATION/invalid_argument`
 (`meta.workspace_id: not_admitted`): identity and device methods are account-scoped.
 
-| Method                                      | Operation ID (con-07)                  | Risk | Credential | mobile.limited               | Restricted account | Step-up evidence       | Receipt |
-| ------------------------------------------- | -------------------------------------- | ---- | ---------- | ---------------------------- | ------------------ | ---------------------- | ------- |
-| IdentityService.BeginAuthentication         | `identity.beginAuthentication`         | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.CompleteAuthentication      | `identity.completeAuthentication`      | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.RequestEmailCode            | `identity.requestEmailCode`            | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.RedeemEmailCode             | `identity.redeemEmailCode`             | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.CompleteEnrollment          | `identity.completeEnrollment`          | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.ListAuthProviders           | `identity.listAuthProviders`           | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.RefreshSession              | `identity.refreshSession`              | R1   | anonymous  | —                            | —                  | —                      | —       |
-| IdentityService.GetProfile                  | `identity.getProfile`                  | R1   | session    | allowed                      | refused            | —                      | —       |
-| IdentityService.ListAuthIdentities          | `identity.listAuthIdentities`          | R1   | session    | allowed                      | allowed            | —                      | —       |
-| IdentityService.ListSessions                | `identity.listSessions`                | R1   | session    | allowed                      | allowed            | —                      | —       |
-| DeviceService.List                          | `device.list`                          | R1   | session    | allowed                      | allowed            | —                      | —       |
-| IdentityService.BeginStepUp                 | `identity.beginStepUp`                 | R1   | session    | allowed                      | allowed            | —                      | —       |
-| IdentityService.CompleteStepUp              | `identity.completeStepUp`              | R1   | session    | allowed                      | allowed            | —                      | —       |
-| IdentityService.UpdateProfile               | `identity.updateProfile`               | R2   | session    | upgrade                      | refused            | —                      | yes     |
-| IdentityService.BeginPasskeyRegistration    | `identity.beginPasskeyRegistration`    | R2   | session    | upgrade                      | refused            | account                | —       |
-| IdentityService.CompletePasskeyRegistration | `identity.completePasskeyRegistration` | R2   | session    | upgrade                      | refused            | —                      | yes     |
-| IdentityService.RenameAuthIdentity          | `identity.renameAuthIdentity`          | R2   | session    | upgrade                      | allowed            | —                      | yes     |
-| IdentityService.RemoveAuthIdentity          | `identity.removeAuthIdentity`          | R3   | session    | upgrade                      | allowed            | credential             | yes     |
-| IdentityService.RevokeSession               | `identity.revokeSession`               | R2   | session    | own: allowed; other: upgrade | allowed            | own: —; other: session | yes     |
-| IdentityService.RevokeAllSessions           | `identity.revokeAllSessions`           | R3   | session    | upgrade                      | allowed            | account                | yes     |
-| DeviceService.Rename                        | `device.rename`                        | R1   | session    | upgrade                      | allowed            | —                      | yes     |
-| DeviceService.Revoke                        | `device.revoke`                        | R3   | session    | own: allowed; other: upgrade | allowed            | own: —; other: device  | yes     |
+| Method                                      | Operation ID (con-07)                  | Risk | Credential | mobile.limited               | Restricted account | Step-up evidence                   | Receipt     |
+| ------------------------------------------- | -------------------------------------- | ---- | ---------- | ---------------------------- | ------------------ | ---------------------------------- | ----------- |
+| IdentityService.BeginAuthentication         | `identity.beginAuthentication`         | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.CompleteAuthentication      | `identity.completeAuthentication`      | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.RequestEmailCode            | `identity.requestEmailCode`            | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.RedeemEmailCode             | `identity.redeemEmailCode`             | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.CompleteEnrollment          | `identity.completeEnrollment`          | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.BeginRecovery               | `identity.beginRecovery`               | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.CompleteRecovery            | `identity.completeRecovery`            | R3   | anonymous  | —                            | —                  | email proof + replacement ceremony | flow scoped |
+| IdentityService.ListAuthProviders           | `identity.listAuthProviders`           | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.RefreshSession              | `identity.refreshSession`              | R1   | anonymous  | —                            | —                  | —                                  | —           |
+| IdentityService.GetProfile                  | `identity.getProfile`                  | R1   | session    | allowed                      | refused            | —                                  | —           |
+| IdentityService.GetAccountDeletion          | `identity.getAccountDeletion`          | R1   | session    | upgrade                      | allowed            | —                                  | —           |
+| IdentityService.ListAuthIdentities          | `identity.listAuthIdentities`          | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| IdentityService.ListSessions                | `identity.listSessions`                | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| DeviceService.List                          | `device.list`                          | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| IdentityService.BeginStepUp                 | `identity.beginStepUp`                 | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| IdentityService.CompleteStepUp              | `identity.completeStepUp`              | R1   | session    | allowed                      | allowed            | —                                  | —           |
+| IdentityService.UpdateProfile               | `identity.updateProfile`               | R2   | session    | upgrade                      | refused            | —                                  | yes         |
+| IdentityService.BeginPasskeyRegistration    | `identity.beginPasskeyRegistration`    | R2   | session    | upgrade                      | refused            | account                            | —           |
+| IdentityService.CompletePasskeyRegistration | `identity.completePasskeyRegistration` | R2   | session    | upgrade                      | refused            | —                                  | yes         |
+| IdentityService.RenameAuthIdentity          | `identity.renameAuthIdentity`          | R2   | session    | upgrade                      | allowed            | —                                  | yes         |
+| IdentityService.RemoveAuthIdentity          | `identity.removeAuthIdentity`          | R3   | session    | upgrade                      | allowed            | credential                         | yes         |
+| IdentityService.RevokeSession               | `identity.revokeSession`               | R2   | session    | own: allowed; other: upgrade | allowed            | own: —; other: session             | yes         |
+| IdentityService.RevokeAllSessions           | `identity.revokeAllSessions`           | R3   | session    | upgrade                      | allowed            | account                            | yes         |
+| DeviceService.Rename                        | `device.rename`                        | R1   | session    | upgrade                      | allowed            | —                                  | yes         |
+| DeviceService.Revoke                        | `device.revoke`                        | R3   | session    | own: allowed; other: upgrade | allowed            | own: —; other: device              | yes         |
 
 The table is `access.Operations`, closed: the composition refuses to start when a served method has no row, a row has no served
 method or a row and the method's policy disagree about the session (`checkIdentityComposition`). A session method admits only the
@@ -94,7 +161,7 @@ the call (`access.authorized`, a failed append refuses the call) and the feature
 essential operation with none, so nothing here is gated, and the R3 rows keep appending their audit event in the transaction of
 their effect (`AuditInTransaction`). The gate and its tests are described in [feature availability](center-entitlement.md#the-gate).
 
-The anonymous methods and the queries run under no receipt: the anonymous ones are one-use authentication steps, RefreshSession
+Except for recovery completion's flow-scoped receipt, anonymous methods and the queries run under no receipt: the anonymous ones are one-use authentication steps, RefreshSession
 must never replay tokens. The step-up methods and BeginPasskeyRegistration run under none either: each creates a new challenge or
 flow, so a lost reply is a new begin. Every other write runs under a command receipt ([command receipts](#command-receipts)).
 
@@ -182,7 +249,7 @@ Authentication time is never evidence.
   `patch.*`); an avatar change is `VALIDATION/invalid_argument` (`patch.avatar: not_offered`) until avatars exist.
 - **Credential names and removal.** `RenameAuthIdentity` sets a credential's label by the label rule (field `name`).
   `RemoveAuthIdentity` revokes a credential: it locks the account, so concurrent removals run one after the other, refuses the last
-  live credential with `STATE/invalid_state` (`state.reason = last_credential`; there is no recovery path yet,
+  live credential with `STATE/invalid_state` (`state.reason = last_credential`;
   `TestTheLastCredentialStays`) and moves the authentication epoch of the account's live sessions.
 - **Sessions.** `RevokeSession(session_id)` revokes an `account` or `mobile.limited` session of the account: the caller's own is a
   sign-out without evidence, another needs the session's evidence. A node, push or automation session, another account's and an
@@ -282,10 +349,10 @@ e-mail method is left out of ListAuthProviders and refused with `VALIDATION/inva
 adapter configured it is listed. Tests inject the fake sender and close the loop through it, and through each live adapter against a
 local double (MOCKED).
 
-**Mail delivery** (AF-CTR-03). The sign-in code and the step-up code are the only messages of the identity surface, and both are sent
-by one function, `deliver` (`center/internal/identity/deliver.go`). A send path that AF-ID-02 may add differs in risk (an address a user
-types is not an address the center already holds), so it must decide that for itself and go through `deliver` too. The rules, each with its
-test:
+**Mail delivery** (AF-CTR-03). Sign-in and step-up codes use `deliver`
+(`center/internal/identity/deliver.go`). AFV2-ID-01 recovery uses the same configured bounded sender after its recovery-flow
+transaction, with recovery-specific delivery-state evidence (`deliverRecovery` in `recovery.go`). It only delivers to an
+already verified address; it does not enable email change. The original sign-in/step-up rules, each with its test:
 
 - **The reply never waits for the provider.** The delivery is registered, then run in its own goroutine after the response is built, under
   a 30 s ceiling that no adapter reaches (an adapter's timeout is 10 s by default and 25 s at most). A known and an unknown address get
@@ -416,15 +483,19 @@ the step-up evidence, the rate-limit buckets and the audit events, and the forms
 receipt is a reply shape only: the contract's logout has no command ID, so its reply carries a new one, nothing is stored and
 nothing replays. A page never reads or writes a table.
 
-| Route                                                                                       | Kind | Credential       |
-| ------------------------------------------------------------------------------------------- | ---- | ---------------- |
-| `GET /account/sign-in`, `/account/bootstrap`, `/account/account.js`, `/account/account.css` | page | none             |
-| `GET /account/passkeys`, `/account/sessions`, `/account/devices`, `/account/sign-out`       | page | cookie session   |
-| `POST /account/passkeys/{add,complete,rename,remove}`                                       | form | cookie session   |
-| `POST /account/sessions/{revoke,revoke-all}`, `POST /account/devices/{rename,revoke}`       | form | cookie session   |
-| `GET /session/v1/web/bootstrap`                                                             | JSON | optional session |
-| `POST /session/v1/web/{authentication/begin,authentication/complete,enrollment/complete}`   | JSON | none (see CSRF)  |
-| `POST /session/v1/web/{step-up/begin,step-up/complete,logout}`                              | JSON | cookie session   |
+| Route                                                                                                         | Kind | Credential       |
+| ------------------------------------------------------------------------------------------------------------- | ---- | ---------------- |
+| `GET /account/sign-in`, `/account/bootstrap`, `/account/account.js`, `/account/account.css`                   | page | none             |
+| `GET /account/passkeys`, `/account/sessions`, `/account/devices`, `/account/sign-out`                         | page | cookie session   |
+| `POST /account/passkeys/{add,complete,rename,remove}`                                                         | form | cookie session   |
+| `POST /account/sessions/{revoke,revoke-all}`, `POST /account/devices/{rename,revoke}`                         | form | cookie session   |
+| `GET /session/v1/web/bootstrap`                                                                               | JSON | optional session |
+| `POST /session/v1/web/{authentication/begin,authentication/complete,enrollment/complete}`                     | JSON | none (see CSRF)  |
+| `POST /session/v1/web/{step-up/begin,step-up/complete,logout}`                                                | JSON | cookie session   |
+| `GET /account/recovery`                                                                                       | page | none             |
+| `GET /account/lifecycle`                                                                                      | page | cookie session   |
+| `POST /session/v1/web/recovery/{begin,complete}`                                                              | JSON | pre-session CSRF |
+| `POST /session/v1/web/account/{deletion/prepare,deletion/confirm,deletion/cancel,export/prepare,export/read}` | JSON | cookie session   |
 
 The `operations` surface adds `/operations/grant` and its two forms, the `fleet` surface the six pages `/connect`, `/connect/review`,
 `/connect/decision`, `/activate`, `/activate/review` and `/activate/decision` ([center fleet](center-fleet.md#the-pages)), the
@@ -438,9 +509,10 @@ anything else; it follows a return with a fragment only to `/connect#flow=<flow 
 `/activate#code=XXXX-XXXX`.
 
 All paths are below the public base URL (`/api/...` on the hosted deployments). `/account` itself, profile editing (`UpdateProfile`
-stays an API method), recovery, e-mail change and the provider callback are not pages; recovery and the callback are AF-ID-02's.
+stays an API method), email change and the provider callback are not pages. AFV2-ID-01 adds the recovery/lifecycle pages and
+JSON routes listed in [account lifecycle](#account-lifecycle-afv2-id-01).
 The browser channel offers the passkey method only: e-mail (and password and OIDC) is `not_offered` on it, whether or not a mail
-sender is live, and the pages have no e-mail route; the browser channel refuses e-mail unconditionally. This is a decision (the live
+sender is live, and the sign-in pages have no email sign-in route. Recovery uses its separate verified email channel. This is a decision (the live
 mail adapters do not change it), and it is the API's e-mail method, not the pages, that a live sender opens.
 
 **Cookie.** A sign-in (or the bootstrap) sets exactly one cookie in this byte form, and nothing else sets or reads another:
@@ -651,8 +723,9 @@ virtual authenticator's private key, which signs in as the proof owner (the acco
 environment, step-up included). It is created exclusively and rewritten whole after every assertion (the F14 counter rule needs the
 counters to rise: a restored older copy is refused), it is never printed, logged or committed, and it must be treated as a
 credential: keep it on that machine, and delete it when the owner's rights are retired. Losing the file locks the script out of the
-account: before AR-23 the virtual passkey is the account's only credential (the bootstrap is spent and the e-mail and recovery
-methods are not offered), so nobody can sign in and the total-loss path below is the only way back; after AR-23 the owner can sign
+account: in this historical proof setup before AR-23 the virtual passkey is the account's only credential (the bootstrap is spent
+and no verified recovery channel was enrolled), so nobody can sign in and the total-loss path below is the only way back;
+AFV2-ID-01 recovery never invents an unverified replacement channel. After AR-23 the owner can sign
 in by hand with the Windows Hello passkey and remove the old one.
 
 **After a total loss** (the credential file is gone, or the owner account must be started again) the owner drops the database

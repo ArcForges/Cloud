@@ -36,9 +36,16 @@ func LapsingReason(reason int16) bool { return lapsingReasons[reason] }
 // authentication and recovery epochs are those of the approval. An approval that lapsed is false with no error; an error is a store
 // failure (sanitized).
 func ApprovalStands(ctx context.Context, tx pgx.Tx, approver Approver, userID platform.ID) (bool, error) {
+	security, err := LockAccountSecurity(ctx, tx, userID)
+	if err != nil {
+		return false, err
+	}
+	if !security.AdmitsScope(ScopeNode) || security.AuthEpoch != approver.AuthEpoch || security.RecoveryGeneration != approver.RecoveryGeneration {
+		return false, nil
+	}
 	var reason *int16
 	var epoch, recovery int64
-	err := tx.QueryRow(ctx, `SELECT revoke_reason, auth_epoch, recovery_generation FROM identity.session WHERE session_id = $1 AND user_id = $2
+	err = tx.QueryRow(ctx, `SELECT revoke_reason, auth_epoch, recovery_generation FROM identity.session WHERE session_id = $1 AND user_id = $2
 FOR SHARE`, approver.SessionID, userID).Scan(&reason, &epoch, &recovery)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil

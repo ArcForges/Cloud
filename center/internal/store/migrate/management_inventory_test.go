@@ -16,6 +16,17 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 )
 
+// Historical management acceptance remains on the exact qualified schema12
+// prefix even when the current executable contains later identity expansions.
+func managementBuild(t *testing.T) []Migration {
+	t.Helper()
+	build := centerBuild(t)
+	if len(build) < 12 || build[11].Name != "0012_management_storage.sql" {
+		t.Fatal("qualified schema12 prefix unavailable")
+	}
+	return build[:12]
+}
+
 // This captures candidate schema facts, not an archive-admission oracle. Review
 // and pin the generated closed inventory before the V2 restore accepts it.
 func TestManagementInventoryForBackup(t *testing.T) {
@@ -23,7 +34,7 @@ func TestManagementInventoryForBackup(t *testing.T) {
 	defer cancel()
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
-	if _, err := Apply(ctx, owner, centerBuild(t), Options{Runner: "isolated-inventory-fixture", RuntimeRole: name + "_runtime"}); err != nil {
+	if _, err := Apply(ctx, owner, managementBuild(t), Options{Runner: "isolated-inventory-fixture", RuntimeRole: name + "_runtime"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := owner.Exec(ctx, "SET search_path=pg_catalog; SET TIME ZONE 'UTC'"); err != nil {

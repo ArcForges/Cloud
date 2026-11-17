@@ -48,9 +48,11 @@ type verified struct {
 
 const verifyColumns = `SELECT s.session_id, s.user_id, s.device_id, s.installation_id, s.credential_kind, s.scope, s.auth_method, u.state,
     s.product_id, s.authenticated_at, s.expires_at, s.access_expires_at, s.idle_expires_at, s.browser_origin, s.auth_epoch,
-    s.recovery_generation, s.revoked_at IS NOT NULL OR d.revoked_at IS NOT NULL OR i.revoked_at IS NOT NULL, s.purpose
+    s.recovery_generation, s.revoked_at IS NOT NULL OR d.revoked_at IS NOT NULL OR i.revoked_at IS NOT NULL
+    OR s.auth_epoch <> a.auth_epoch OR s.recovery_generation <> a.recovery_generation, s.purpose
 FROM identity.session s
 JOIN identity.user u ON u.user_id = s.user_id
+JOIN identity.account_security_state a ON a.user_id = s.user_id
 JOIN device.device d ON d.device_id = s.device_id
 JOIN device.installation i ON i.installation_id = s.installation_id
 `
@@ -114,7 +116,7 @@ func (v *Verifier) VerifyNative(ctx context.Context, token string) (*ingress.Cal
 		return nil, time.Time{}, ingress.ErrCredentialRevoked
 	case row.accessExpiresAt == nil || !now.Before(*row.accessExpiresAt) || !now.Before(row.expiresAt):
 		return nil, time.Time{}, ingress.ErrTokenExpired
-	case row.state != 1 && row.state != 2:
+	case !(AccountSecurity{State: row.state}).AdmitsScope(Scope(row.scope)):
 		return nil, time.Time{}, nil
 	}
 	return row.caller(ingress.CredentialNativeBearer), minTime(*row.accessExpiresAt, row.expiresAt), nil
@@ -160,7 +162,7 @@ func (v *Verifier) Recheck(ctx context.Context, sessionID platform.ID) (Standing
 		return 0, time.Time{}, err
 	case !found || row.revoked:
 		return Revoked, time.Time{}, nil
-	case row.state != 1 && row.state != 2:
+	case !(AccountSecurity{State: row.state}).AdmitsScope(Scope(row.scope)):
 		return Barred, time.Time{}, nil
 	case row.accessExpiresAt == nil:
 		return Live, row.expiresAt, nil

@@ -257,7 +257,9 @@ func TestAnAccountCannotReachAnotherAccountsObjects(t *testing.T) {
 // receipt keeps that refusal (B16): its replay answers it even once the account has a second credential. Two concurrent removals of
 // an account's two credentials are ordered by the account's row lock, which evidence consumption takes (B3, B15): the first is
 // parked at its credential's row while it holds that lock, the second waits behind it and then finds its evidence spent by the
-// first's epoch move, so one credential stays; a fresh step-up then meets the last-credential rule.
+// first's epoch move: its already-resolved caller is credential_revoked, so one
+// credential stays. A new ingress resolution and fresh step-up then meet the
+// last-credential rule.
 func TestTheLastCredentialStays(t *testing.T) {
 	h := newHarness(t, settings{policy: writePolicy})
 	only := h.seedAccount(1, "")
@@ -300,6 +302,7 @@ FROM identity.auth_identity WHERE user_id = $3 AND method = 1`, platform.NewID()
 	lock := h.holding("SELECT 1 FROM identity.auth_identity WHERE auth_identity_id = $1 FOR UPDATE", ids[0])
 	results := make([]*foundationv1.ArcError, 2)
 	var wait sync.WaitGroup
+	defer func() { _ = lock.tx.Rollback(context.Background()); wait.Wait() }()
 	wait.Go(func() { results[0] = remove(signedIn, command(), ids[0]) })
 	if !lock.waitFor(1) {
 		t.Fatal("the first removal never reached its credential's row")
@@ -310,9 +313,12 @@ FROM identity.auth_identity WHERE user_id = $3 AND method = 1`, platform.NewID()
 	}
 	lock.release(false)
 	wait.Wait()
-	if results[0] != nil || failure(results[1]) != "AUTHENTICATION/step_up_required" || len(h.credentialIDs(both.id)) != 1 {
+	if results[0] != nil || failure(results[1]) != "AUTHENTICATION/credential_revoked" || len(h.credentialIDs(both.id)) != 1 {
 		t.Fatalf("two concurrent removals: %v, %v, %d live credentials", results[0], results[1], len(h.credentialIDs(both.id)))
 	}
+	// A new request resolves the live session at its advanced account epoch,
+	// but the old evidence still cannot authorize removal.
+	expect(t, "the old evidence after a fresh ingress resolution", remove(signedIn, command(), ids[1]), "AUTHENTICATION/step_up_required")
 	// The passkey is gone, so the fresh evidence is proved by e-mail.
 	h.stepUpByEmail(both, signedIn, identity.ClassRemoveCredential, ids[1])
 	lastCredential("the remaining credential with fresh evidence", remove(signedIn, command(), ids[1]))
@@ -442,6 +448,36 @@ func TestNoReceiptHoldsAnAddress(t *testing.T) {
 		t.Fatalf("UpdateProfile's replay after the address was removed: %v", answer)
 	}
 
+	// Recovery's anonymous command receipt is produced by the actual verified
+	// mailbox proof and a replacement WebAuthn ceremony, never a dummy result.
+	recoveryAddress := "c1.recovery@example.org"
+	recoveryOwner := h.seedAccount(1, recoveryAddress)
+	h.remember(recoveryAddress)
+	recoverySession := h.signIn(recoveryOwner, newClaim(t), caller{})
+	begun := rpc(h, "/arcforges.publicapi.v1.IdentityService/BeginRecovery", &publicapiv1.IdentityServiceBeginRecoveryRequest{
+		Meta: meta(), Method: publicapiv1.RecoveryMethod_RECOVERY_METHOD_EMAIL_CODE.Enum(), Email: proto.String(recoveryAddress), Installation: newClaim(t)},
+		caller{}, &publicapiv1.IdentityServiceBeginRecoveryResponse{})
+	expect(t, "begin recovery for the receipt scan", begun.GetError(), "")
+	recoveryChallenge := begun.GetValue().GetChallenge()
+	if recoveryChallenge.GetOptions() == nil || len(recoveryChallenge.GetOptions().GetUserHandle()) != 32 || len(recoveryChallenge.GetChallenge()) != 32 {
+		t.Fatal("recovery did not return a bound replacement ceremony")
+	}
+	replacement, _ := virtual.New(rpID, origin).Create(recoveryChallenge.GetChallenge(), recoveryChallenge.GetOptions().GetUserHandle())
+	recoveryCommand := command()
+	recoveryRequest := &publicapiv1.IdentityServiceCompleteRecoveryRequest{Meta: recoveryCommand, FlowId: recoveryChallenge.GetFlowId(),
+		Proof:       &publicapiv1.AuthProof{Proof: &publicapiv1.AuthProof_EmailCode{EmailCode: h.lastCode(recoveryAddress)}},
+		Replacement: &publicapiv1.CredentialReplacement{Replacement: &publicapiv1.CredentialReplacement_Passkey{Passkey: creationOf(replacement)}}}
+	recovered := rpc(h, "/arcforges.publicapi.v1.IdentityService/CompleteRecovery", recoveryRequest, caller{}, &publicapiv1.IdentityServiceCompleteRecoveryResponse{})
+	expect(t, "complete recovery for the receipt scan", recovered.GetError(), "")
+	if recovered.GetValue().GetReceipt() == nil || !proto.Equal(recovered.GetValue().GetReceipt().GetCommandId(), recoveryCommand.GetCommandId()) ||
+		h.live(sessionIDOf(recoverySession)) || h.count("SELECT count(*) FROM identity.lifecycle_operation WHERE user_id=$1 AND kind=1 AND state=4", recoveryOwner.id) != 1 {
+		t.Fatal("recovery did not commit its receipt, epoch revocation and operation")
+	}
+	replayed := rpc(h, "/arcforges.publicapi.v1.IdentityService/CompleteRecovery", recoveryRequest, caller{}, &publicapiv1.IdentityServiceCompleteRecoveryResponse{})
+	if replayed.GetError() != nil || !proto.Equal(replayed.GetValue(), recovered.GetValue()) {
+		t.Fatalf("the recovery receipt replay: %v", replayed)
+	}
+
 	rows, err := h.migration.Query(context.Background(), "SELECT operation, result FROM platform.command_receipt")
 	if err != nil {
 		t.Fatal(err)
@@ -454,9 +490,17 @@ func TestNoReceiptHoldsAnAddress(t *testing.T) {
 		if err = rows.Scan(&operation, &result); err != nil {
 			t.Fatal(err)
 		}
-		operations["/"+strings.TrimPrefix(operation, "/")] = true
-		if bytes.Contains(bytes.ToLower(result), []byte(address)) {
-			t.Errorf("the receipt of %s holds the address", operation)
+		key := "/" + strings.TrimPrefix(operation, "/")
+		if operation == "identity.completeRecovery" {
+			// The flow-scoped core receipt names its center-defined operation;
+			// its one published RPC is still pinned by the operation table.
+			key = "/arcforges.publicapi.v1.IdentityService/CompleteRecovery"
+		}
+		operations[key] = true
+		for _, clearAddress := range []string{address, recoveryAddress} {
+			if bytes.Contains(bytes.ToLower(result), []byte(clearAddress)) {
+				t.Errorf("the receipt of %s holds an address", operation)
+			}
 		}
 	}
 	if err = rows.Err(); err != nil {
@@ -557,8 +601,8 @@ func TestADuplicateOfARunningRegistrationIsBusy(t *testing.T) {
 type registrationAnswer = *publicapiv1.IdentityServiceCompletePasskeyRegistrationResponse
 
 // racedRegistration runs one CompletePasskeyRegistration command twice so that the duplicate's receipt lookup runs before the first
-// execution committed and its attempt after it: the first execution parks on the account's row, a table lock queued behind it on a
-// second connection parks the duplicate's attempt, and the account's row is then released. committed runs once the first execution
+// execution committed and its attempt after it: the first execution parks at its audit, after the current account recheck and
+// flow consumption. A table lock queued behind its flow lock parks the duplicate's attempt, then the audit hold is released. committed runs once the first execution
 // answered and the table lock is granted, before the duplicate's attempt goes on. It returns both answers, the command (to send it
 // again) and the new credential's subject.
 func racedRegistration(t *testing.T, h *harness, committed func(ctx context.Context), alter ...func(*publicapiv1.IdentityServiceCompletePasskeyRegistrationRequest)) (first,
@@ -589,32 +633,58 @@ func racedRegistration(t *testing.T, h *harness, committed func(ctx context.Cont
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = other.Close(context.Background()) })
-	account := h.holding("SELECT 1 FROM identity.user WHERE user_id = $1 FOR UPDATE", who.id)
+	audit := h.holding("SELECT 1 FROM audit.chain_head WHERE singleton FOR UPDATE")
 	firsts := make(chan registrationAnswer, 1)
-	go func() { firsts <- complete() }()
-	if !account.waitFor(1) {
-		t.Fatal("the first completion never reached the account's row")
+	duplicates := make(chan registrationAnswer, 1)
+	queued := make(chan error, 1)
+	var wait sync.WaitGroup
+	var table pgx.Tx
+	queueStarted, queueDrained := false, false
+	defer func() {
+		// Release the first execution before joining the table-lock statement.
+		// Never Rollback a pgx transaction while its Exec is still running.
+		_ = audit.tx.Rollback(ctx)
+		if queueStarted && !queueDrained {
+			<-queued
+		}
+		if table != nil {
+			_ = table.Rollback(ctx)
+		}
+		wait.Wait()
+	}()
+	wait.Go(func() {
+		var answer registrationAnswer
+		defer func() { firsts <- answer }()
+		answer = complete()
+	})
+	if !audit.waitFor(1) {
+		t.Fatal("the first completion never reached its audit after consuming the flow")
 	}
-	table, err := other.Begin(ctx)
+	table, err = other.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	queued := make(chan error, 1)
-	go func() {
+	queueStarted = true
+	wait.Go(func() {
 		_, err := table.Exec(ctx, "LOCK TABLE identity.auth_flow IN ACCESS EXCLUSIVE MODE")
 		queued <- err
-	}()
-	if !account.waitFor(2) {
+	})
+	if !audit.waitFor(2) {
 		t.Fatal("the table lock never queued behind the first completion")
 	}
-	duplicates := make(chan registrationAnswer, 1)
-	go func() { duplicates <- sendDuplicate() }()
-	if !account.waitFor(3) {
+	wait.Go(func() {
+		var answer registrationAnswer
+		defer func() { duplicates <- answer }()
+		answer = sendDuplicate()
+	})
+	if !audit.waitFor(3) {
 		t.Fatal("the duplicate's attempt never queued behind the table lock")
 	}
-	account.release(false)
+	audit.release(false)
 	first = <-firsts
-	if err = <-queued; err != nil {
+	err = <-queued
+	queueDrained = true
+	if err != nil {
 		t.Fatal(err)
 	}
 	if committed != nil {
@@ -623,7 +693,9 @@ func racedRegistration(t *testing.T, h *harness, committed func(ctx context.Cont
 	if err = table.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	return first, <-duplicates, complete, base64.RawURLEncoding.EncodeToString(creation.CredentialID)
+	duplicate = <-duplicates
+	wait.Wait()
+	return first, duplicate, complete, base64.RawURLEncoding.EncodeToString(creation.CredentialID)
 }
 
 // TestADuplicateRefusedAfterItsFirstCommittedAnswersTheReceipt (B4, E1): a duplicate CompletePasskeyRegistration whose receipt

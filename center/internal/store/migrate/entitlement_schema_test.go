@@ -23,33 +23,11 @@ const migration0003SHA256 = "acc92fe98fdc5976d711f7cd393cdaf6781cc79029824559210
 
 // schemasAndGrantsAt are the schemas and the runtime role's grants as the build at a migration version has them: 0003 adds the
 // entitlement schema and, in the identity schema, the operator table; 0004 adds the fleet tables node, node_sign_in and
-// device_authorization (the fleet schema itself exists since 0001).
+// device_authorization (the fleet schema itself exists since 0001). Use the same
+// exact version closure as the finite migration/backup managers so a new current
+// grant cannot leak into a historical prefix fixture.
 func schemasAndGrantsAt(version int) ([]string, []schema.Grant) {
-	var schemas []string
-	for _, name := range schema.Schemas {
-		if version < 12 && name == "management" {
-			continue
-		}
-		if version >= 3 || name != "entitlement" {
-			schemas = append(schemas, name)
-		}
-	}
-	var grants []schema.Grant
-	for _, grant := range schema.RuntimeGrants {
-		switch {
-		case version < 3 && (grant.Schema == "entitlement" || grant.Schema == "identity" && grant.Table == "operator"):
-		case version < 4 && grant.Schema == "fleet" && grant.Table != "signing_key":
-		case version < 6 && grant.Schema == "identity" && grant.Table == "mobile_authorization":
-		case version < 7 && grant.Schema == "entitlement" && grant.Table == "definitions_current":
-		case version < 8 && grant.Schema == "fleet" && grant.Table == "hub_lease":
-		case version < 10 && grant.Schema == "fleet" && (grant.Table == "routed_call" || grant.Table == "refusal_code"):
-		case version < 11 && grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_file_target" || grant.Table == "routed_command_id"):
-		case version < 12 && grant.Schema == "management":
-		default:
-			grants = append(grants, grant)
-		}
-	}
-	return schemas, grants
+	return schema.AtVersion(version)
 }
 
 // TestMigration0003LandsWholeOverVersion2 rehearses the production step of 0003 as TestMigration0002LandsWholeOverVersion1 does for

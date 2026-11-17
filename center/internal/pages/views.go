@@ -24,7 +24,7 @@ var (
 // fleet-node.gohtml).
 var pageNames = []string{"sign-in", "bootstrap", "sign-out", "passkeys", "sessions", "devices", "register", "error", "operations-grant", "operations-review",
 	"operations-done", "connect", "connect-review", "connect-done", "activate", "activate-review", "activate-done", "mobile-authorize",
-	"mobile-authorize-review", "mobile-authorize-done", "app-callback"}
+	"mobile-authorize-review", "mobile-authorize-done", "app-callback", "lifecycle", "recovery"}
 
 // views are the parsed templates and the static files.
 type views struct {
@@ -97,6 +97,9 @@ type pageData struct {
 
 	// The mobile pages.
 	Mobile mobileView
+
+	// Account lifecycle plans carry no reusable authorization or private export data.
+	Lifecycle lifecycleView
 }
 
 type profileView struct {

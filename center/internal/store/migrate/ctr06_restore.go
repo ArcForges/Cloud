@@ -337,7 +337,7 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 		return report, err
 	}
 	version := metadata.SourceSchemaVersion
-	if (version != 10 && version != 11 && version != 12) || version > len(build) {
+	if (version != 10 && version != 11 && version != 12 && version != 13) || version > len(build) {
 		return report, errors.New("unsupported backup schema")
 	}
 	build = build[:version]
@@ -389,7 +389,7 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 			return report, err
 		}
 	}
-	if version == 12 {
+	if version >= 12 {
 		selected, err = managementRestoreList(selected)
 		if err != nil {
 			return report, err
@@ -419,8 +419,14 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 	if version == 10 {
 		return restoreManagementSchema10(ctx, conn, cfg, metadata, metadataDigest, runner, tool, childEnv, archive, listPath, capability)
 	}
-	if version == 12 {
+	if version >= 12 {
 		capability.managementArtifact, err = managementArtifact(runner, build[11])
+		if err != nil {
+			return report, err
+		}
+	}
+	if version == 13 {
+		capability.lifecycleArtifact, err = managementArtifact(runner, build[12])
 		if err != nil {
 			return report, err
 		}

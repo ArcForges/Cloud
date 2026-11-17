@@ -286,7 +286,7 @@ func (s *Service) completePasskey(ctx context.Context, request Request, channel 
 	if found == nil {
 		return refuse("unknown_credential")
 	}
-	if !found.state.MaySignIn() {
+	if !found.state.MayAuthenticateAccount() {
 		return refuse("account_state")
 	}
 	verified, err := s.rp.VerifyAssertion(row.Challenge, assertion, found.stored, row.ExpiresAt)
@@ -320,18 +320,21 @@ func (s *Service) signIn(ctx context.Context, request Request, row flow, userID 
 	err := s.db.InTx(ctx, "complete a sign-in", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		result = SignedIn{}
 		now := s.now()
+		security, err := session.LockAccountSecurity(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		if !UserState(security.State).MayAuthenticateAccount() {
+			return arc.Unauthenticated()
+		}
+		if row.AccountAuthEpoch != nil && (*row.AccountAuthEpoch != security.AuthEpoch || row.AccountRecoveryGeneration == nil || *row.AccountRecoveryGeneration != security.RecoveryGeneration) {
+			return arc.Expired()
+		}
 		if err := consume(ctx, tx, row.ID, now); err != nil {
 			return err
 		}
 		if err := changes(ctx, tx, now); err != nil {
 			return err
-		}
-		var state int16
-		if err := tx.QueryRow(ctx, "SELECT state FROM identity.user WHERE user_id = $1 FOR SHARE", userID).Scan(&state); err != nil {
-			return err
-		}
-		if !UserState(state).MaySignIn() {
-			return arc.Unauthenticated()
 		}
 		issued, err := s.issueSession(ctx, tx, userID, *row.Claim, row.Channel, session.PurposeAuthenticate, method, request.DeviceName, now)
 		if err != nil {

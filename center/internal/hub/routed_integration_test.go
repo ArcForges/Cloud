@@ -43,7 +43,7 @@ import (
 // routedHarness is a center with the nodes surface; its channels answer heartbeats while a test waits for calls.
 func routedHarness(t *testing.T) *harness {
 	t.Helper()
-	return newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes",
+	return newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes",
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 }
 
@@ -209,7 +209,7 @@ func TestASubmitIsRoutedRecordedAndReplayedByTheNode(t *testing.T) {
 // PostgreSQL are real; the catalogue and proved step-up are synthetic. The account has no center.execute grant, and no node channel
 // is connected: the authorization gate must refuse before the offline handler can run or consume the proved challenge.
 func TestOfficialSubmitWithoutAGrantIsGatedBeforeRouting(t *testing.T) {
-	h := newHarness(t, settings{mode: config.OfficialHosted, plan: config.PlanDevelopmentFixtures, surfaces: "identity,pages,fleet,relay,nodes"})
+	h := newHarness(t, settings{legacyRouting: true, mode: config.OfficialHosted, plan: config.PlanDevelopmentFixtures, surfaces: "identity,pages,fleet,relay,nodes"})
 	user := h.db.Account(1)
 	node := h.enrollIn(user)
 	issued := h.accountSession(user, session.ScopeAccount)
@@ -795,7 +795,7 @@ func TestTheRoutedReadsAreForwardedWithoutARecord(t *testing.T) {
 // connections (ARCFORGES_CENTER_MAX_CONNECTIONS 8: four); a fifth is RESOURCE/overloaded before it is routed, and a slot frees when a
 // wait ends. A per-account in-flight bound over half of the connections refuses to start the center.
 func TestTheLongPollsHoldAtMostHalfTheConnections(t *testing.T) {
-	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", maxConnections: "8", policy: `{"routedInFlightPerAccount": 4}`,
+	h := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", maxConnections: "8", policy: `{"routedInFlightPerAccount": 4}`,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 	release := make(chan struct{})
 	waiting := make(chan struct{}, 16)

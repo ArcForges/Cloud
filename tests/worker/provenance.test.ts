@@ -707,6 +707,8 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/afv2-center-01-r1.json",
     "eng/policy/dependency-reviews/afv2-center-01-r2.json",
     "eng/policy/dependency-reviews/afv2-center-01-r3.json",
+    "eng/policy/dependency-reviews/afv2-id-01-r1.json",
+    "eng/policy/dependency-reviews/afv2-id-01-r2.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -717,19 +719,21 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     assert.ok(block);
     assert.match(
       String(block.description),
-      file.includes("afv2-center-01-")
-        ? /^AFV2-CENTER-01: /u
-        : file.includes("afv2-base-01-")
-          ? /^AFV2-BASE-01: /u
-          : file.includes("afv2-env-01-")
-            ? /^AFV2-ENV-01: /u
-            : file.includes("af-ctr-06-")
-              ? /^AF-CTR-06: /u
-              : file.includes("af-ctr-05-")
-                ? /^AF-CTR-05: /u
-                : file.includes("af-ctr-04-")
-                  ? /^AF-CTR-04: /u
-                  : /^AF-CTR-03: /u,
+      file.includes("afv2-id-01-")
+        ? /^AFV2-ID-01: /u
+        : file.includes("afv2-center-01-")
+          ? /^AFV2-CENTER-01: /u
+          : file.includes("afv2-base-01-")
+            ? /^AFV2-BASE-01: /u
+            : file.includes("afv2-env-01-")
+              ? /^AFV2-ENV-01: /u
+              : file.includes("af-ctr-06-")
+                ? /^AF-CTR-06: /u
+                : file.includes("af-ctr-05-")
+                  ? /^AF-CTR-05: /u
+                  : file.includes("af-ctr-04-")
+                    ? /^AF-CTR-04: /u
+                    : /^AF-CTR-03: /u,
     );
     assert.equal(block.regexTarget, "line");
     assert.deepEqual(block.paths, [`^${regexText(file)}$`]);
@@ -746,6 +750,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       "eng/policy/dependency-reviews/af-ctr-06-r31.json",
       "eng/policy/dependency-reviews/af-ctr-06-bridge-r2.json",
       "eng/policy/dependency-reviews/afv2-center-01-r4.json",
+      "eng/policy/dependency-reviews/afv2-id-01-r3.json",
     ])
       assert.ok(!exempt.test(other), other);
     // Positive control: the rows match exactly the lines that name the two records, and every row matches one.

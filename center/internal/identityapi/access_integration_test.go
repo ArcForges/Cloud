@@ -99,6 +99,7 @@ func sessionReads() map[string]proto.Message {
 // given session and device, and the writes name the given credential, so a call admitted by mistake would take effect.
 func sessionRequests(who account, credential, target platform.ID, targetDevice platform.ID) map[string]proto.Message {
 	requests := sessionReads()
+	requests["/arcforges.publicapi.v1.IdentityService/GetAccountDeletion"] = &publicapiv1.IdentityServiceGetAccountDeletionRequest{Meta: meta()}
 	requests[beginStepUpPath] = &publicapiv1.IdentityServiceBeginStepUpRequest{Meta: meta(), OperationClass: proto.String(identity.ClassRevokeAllSessions),
 		Method: publicapiv1.AuthMethod_AUTH_METHOD_PASSKEY.Enum(), TargetHash: proto.String(identity.TargetHash(identity.ClassRevokeAllSessions, who.id, who.id))}
 	requests[completeStepUpPath] = &publicapiv1.IdentityServiceCompleteStepUpRequest{Meta: meta(), FlowId: idOf(platform.NewID()),
@@ -412,6 +413,7 @@ func TestTheServedMethodsAreExactlyTheIdentitySet(t *testing.T) {
 	pinned := map[string]bool{}
 	for _, name := range []string{"IdentityService/BeginAuthentication", "IdentityService/CompleteAuthentication", "IdentityService/RequestEmailCode",
 		"IdentityService/RedeemEmailCode", "IdentityService/CompleteEnrollment", "IdentityService/ListAuthProviders", "IdentityService/RefreshSession",
+		"IdentityService/BeginRecovery", "IdentityService/CompleteRecovery", "IdentityService/GetAccountDeletion",
 		"IdentityService/GetProfile", "IdentityService/ListAuthIdentities", "IdentityService/ListSessions", "DeviceService/List",
 		"IdentityService/BeginStepUp", "IdentityService/CompleteStepUp", "IdentityService/UpdateProfile", "IdentityService/BeginPasskeyRegistration",
 		"IdentityService/CompletePasskeyRegistration", "IdentityService/RenameAuthIdentity", "IdentityService/RemoveAuthIdentity",

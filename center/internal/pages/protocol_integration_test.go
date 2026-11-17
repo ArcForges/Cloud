@@ -107,7 +107,7 @@ func TestEveryRouteRefusesAQueryAnAuthorizationHeaderAndABody(t *testing.T) {
 		}
 	}
 	// A path the pages do not serve is the pipeline's 404.
-	for _, path := range []string{"/account", "/account/", "/account/nothing", "/account//sign-in", "/account/sign-in/", "/session/v1/web", "/session/v1/web/recovery/begin",
+	for _, path := range []string{"/account", "/account/", "/account/nothing", "/account//sign-in", "/account/sign-in/", "/session/v1/web", "/session/v1/web/email/change",
 		"/session/v1/web/providers/x/callback", "/account/%61ccount.js", "/account/../account/sign-in"} {
 		if reply := h.do(request{method: http.MethodGet, path: path}); reply.status != 404 {
 			t.Errorf("%s: %d", path, reply.status)

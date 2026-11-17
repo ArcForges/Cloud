@@ -18,11 +18,29 @@ public sealed class ProductionBundleMarkersTests
         "var a = 1;\n" + string.Join("\n", Pages.Select(path => $"route(\"{path}\");")) + "\n" + string.Join("\n", extra) + "\nexport { CloudContainer };\n";
 
     [Fact]
-    public void TheGeneratedTableListsTheSevenWebBrowserSessionRoutesAndTheTwoNativeMobileRoutes()
+    public void TheGeneratedTableListsTheFourteenWebBrowserSessionRoutesAndTheTwoNativeMobileRoutes()
     {
+        // AFV2-ID-01 adds two recovery and five account lifecycle routes to the original seven browser routes.
+        var browserRoutes = new[]
+        {
+            "/session/v1/web/account/deletion/cancel",
+            "/session/v1/web/account/deletion/confirm",
+            "/session/v1/web/account/deletion/prepare",
+            "/session/v1/web/account/export/prepare",
+            "/session/v1/web/account/export/read",
+            "/session/v1/web/authentication/begin",
+            "/session/v1/web/authentication/complete",
+            "/session/v1/web/bootstrap",
+            "/session/v1/web/enrollment/complete",
+            "/session/v1/web/logout",
+            "/session/v1/web/recovery/begin",
+            "/session/v1/web/recovery/complete",
+            "/session/v1/web/step-up/begin",
+            "/session/v1/web/step-up/complete",
+        };
         // AF-CTR-04 part M: the mobile surface's native begin and token rows lie below the session prefix too (dark in production).
-        Assert.Equal(9, Pages.Count);
-        Assert.Equal(7, Pages.Count(path => path.StartsWith("/session/v1/web/", StringComparison.Ordinal)));
+        Assert.Equal(16, Pages.Count);
+        Assert.Equal(browserRoutes.Order(StringComparer.Ordinal), Pages.Where(path => path.StartsWith("/session/v1/web/", StringComparison.Ordinal)).Order(StringComparer.Ordinal));
         Assert.Equal(new[] { "/session/v1/mobile/begin", "/session/v1/mobile/token" }, Pages.Where(path => !path.StartsWith("/session/v1/web/", StringComparison.Ordinal)).Order(StringComparer.Ordinal));
     }
 

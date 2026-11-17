@@ -102,24 +102,26 @@ type Native struct {
 	SessionID platform.ID
 	// IssuedAt is when these tokens were issued (the rotation instant of a refresh); AccessExpiresAt minus IssuedAt is the access
 	// token's lifetime as issued.
-	IssuedAt         time.Time
-	UserID           platform.ID
-	DeviceID         platform.ID
-	AccessToken      string
-	AccessExpiresAt  time.Time
-	RefreshToken     string
-	RefreshExpiresAt time.Time
-	ExpiresAt        time.Time
-	Purpose          Purpose
+	IssuedAt                      time.Time
+	UserID                        platform.ID
+	DeviceID                      platform.ID
+	AccessToken                   string
+	AccessExpiresAt               time.Time
+	RefreshToken                  string
+	RefreshExpiresAt              time.Time
+	ExpiresAt                     time.Time
+	Purpose                       Purpose
+	AuthEpoch, RecoveryGeneration int64
 }
 
 // Browser is an issued browser session: its cookie handle and CSRF token, shown to the browser once.
 type Browser struct {
-	SessionID     platform.ID
-	Handle        string
-	CSRF          string
-	ExpiresAt     time.Time
-	IdleExpiresAt time.Time
+	SessionID                     platform.ID
+	Handle                        string
+	CSRF                          string
+	ExpiresAt                     time.Time
+	IdleExpiresAt                 time.Time
+	AuthEpoch, RecoveryGeneration int64
 }
 
 func earliest(first time.Time, others ...time.Time) time.Time {
@@ -144,21 +146,29 @@ func LifetimesOf(policy config.IdentityPolicy, scope Scope) config.Lifetimes {
 // IssueNative creates a native bearer session in the caller's transaction: a new family whose first refresh generation is 1, with
 // the lifetimes of its scope (LifetimesOf).
 func IssueNative(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, grant Grant, now time.Time) (Native, error) {
+	security, securityErr := LockAccountSecurity(ctx, tx, grant.UserID)
+	if securityErr != nil {
+		return Native{}, securityErr
+	}
+	if !security.AdmitsScope(grant.Scope) {
+		return Native{}, arc.Unauthenticated()
+	}
 	now = now.UTC().Truncate(time.Microsecond)
 	lifetimes := LifetimesOf(policy, grant.Scope)
 	access, refresh := NewSecret(), NewSecret()
 	issued := Native{SessionID: platform.NewID(), UserID: grant.UserID, DeviceID: grant.DeviceID, AccessToken: access.Token(AccessPrefix),
-		RefreshToken: refresh.Token(RefreshPrefix), ExpiresAt: now.Add(lifetimes.RefreshAbsolute), Purpose: grant.Purpose, IssuedAt: now}
+		RefreshToken: refresh.Token(RefreshPrefix), ExpiresAt: now.Add(lifetimes.RefreshAbsolute), Purpose: grant.Purpose, IssuedAt: now,
+		AuthEpoch: security.AuthEpoch, RecoveryGeneration: security.RecoveryGeneration}
 	issued.RefreshExpiresAt = earliest(now.Add(lifetimes.RefreshIdle), issued.ExpiresAt)
 	issued.AccessExpiresAt = earliest(now.Add(lifetimes.Access), issued.RefreshExpiresAt)
 	accessDigest, refreshDigest := access.Digest(), refresh.Digest()
 	_, err := tx.Exec(ctx, `INSERT INTO identity.session (session_id, user_id, device_id, installation_id, family_id, credential_kind, scope, product_id,
     purpose, auth_method, authenticated_at, issued_at, expires_at, last_activity_at, access_token_hash, access_expires_at, refresh_token_hash,
     refresh_generation, refresh_expires_at, auth_epoch, recovery_generation, session_policy_version, rev)
-VALUES ($1, $2, $3, $4, $1, 1, $5, $6, $7, $8, $9, $10, $11, $10, $12, $13, $14, 1, $15, 0, 0, $16, 1)`,
+VALUES ($1, $2, $3, $4, $1, 1, $5, $6, $7, $8, $9, $10, $11, $10, $12, $13, $14, 1, $15, $17, $18, $16, 1)`,
 		issued.SessionID, grant.UserID, grant.DeviceID, grant.InstallationID, int16(grant.Scope), grant.Product, int16(grant.Purpose), grant.AuthMethod,
 		earliest(grant.AuthenticatedAt.UTC(), now), now, issued.ExpiresAt, accessDigest[:], issued.AccessExpiresAt, refreshDigest[:],
-		issued.RefreshExpiresAt, PolicyVersion)
+		issued.RefreshExpiresAt, PolicyVersion, security.AuthEpoch, security.RecoveryGeneration)
 	if err != nil {
 		return Native{}, store.Sanitize("issue a native session", err)
 	}
@@ -168,17 +178,26 @@ VALUES ($1, $2, $3, $4, $1, 1, $5, $6, $7, $8, $9, $10, $11, $10, $12, $13, $14,
 // IssueBrowser creates a browser cookie session bound to an origin in the caller's transaction (the account pages of AF-CTR-03's
 // browser part use it; its tests use it to authenticate by cookie).
 func IssueBrowser(ctx context.Context, tx pgx.Tx, policy config.IdentityPolicy, grant Grant, origin string, now time.Time) (Browser, error) {
+	security, securityErr := LockAccountSecurity(ctx, tx, grant.UserID)
+	if securityErr != nil {
+		return Browser{}, securityErr
+	}
+	if !security.AdmitsScope(grant.Scope) {
+		return Browser{}, arc.Unauthenticated()
+	}
 	now = now.UTC().Truncate(time.Microsecond)
 	handle := NewSecret()
-	issued := Browser{SessionID: platform.NewID(), Handle: handle.Text(), CSRF: CSRF(handle), ExpiresAt: now.Add(policy.BrowserAbsolute)}
+	issued := Browser{SessionID: platform.NewID(), Handle: handle.Text(), CSRF: CSRF(handle), ExpiresAt: now.Add(policy.BrowserAbsolute),
+		AuthEpoch: security.AuthEpoch, RecoveryGeneration: security.RecoveryGeneration}
 	issued.IdleExpiresAt = earliest(now.Add(policy.BrowserIdle), issued.ExpiresAt)
 	digest := handle.Digest()
 	_, err := tx.Exec(ctx, `INSERT INTO identity.session (session_id, user_id, device_id, installation_id, credential_kind, scope, product_id, purpose,
     auth_method, authenticated_at, issued_at, expires_at, idle_expires_at, last_activity_at, browser_handle_hash, browser_origin, auth_epoch,
     recovery_generation, session_policy_version, rev)
-VALUES ($1, $2, $3, $4, 2, $5, 'arcforges-web', $6, $7, $8, $9, $10, $11, $9, $12, $13, 0, 0, $14, 1)`,
+VALUES ($1, $2, $3, $4, 2, $5, 'arcforges-web', $6, $7, $8, $9, $10, $11, $9, $12, $13, $15, $16, $14, 1)`,
 		issued.SessionID, grant.UserID, grant.DeviceID, grant.InstallationID, int16(grant.Scope), int16(grant.Purpose), grant.AuthMethod,
-		earliest(grant.AuthenticatedAt.UTC(), now), now, issued.ExpiresAt, issued.IdleExpiresAt, digest[:], origin, PolicyVersion)
+		earliest(grant.AuthenticatedAt.UTC(), now), now, issued.ExpiresAt, issued.IdleExpiresAt, digest[:], origin, PolicyVersion,
+		security.AuthEpoch, security.RecoveryGeneration)
 	if err != nil {
 		return Browser{}, store.Sanitize("issue a browser session", err)
 	}
@@ -284,6 +303,22 @@ func Refresh(ctx context.Context, db *store.DB, policy config.IdentityPolicy, to
 	var reuse *Reuse
 	err := db.InTx(ctx, "refresh a session", store.TxOptions{Attempts: admission.Attempts}, func(ctx context.Context, tx pgx.Tx) error {
 		issued, reuse = Native{}, nil
+		// Discover the account without taking a session lock. Recovery/deletion
+		// lock account security before sessions, including the spent-token path.
+		var accountID platform.ID
+		err := tx.QueryRow(ctx, `SELECT user_id FROM identity.session WHERE refresh_token_hash = $1 AND credential_kind = 1
+UNION ALL SELECT s.user_id FROM identity.spent_refresh r JOIN identity.session s ON s.session_id = r.session_id
+WHERE r.token_hash = $1 LIMIT 1`, digest[:]).Scan(&accountID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return arc.Unauthenticated()
+		}
+		if err != nil {
+			return err
+		}
+		security, err := LockAccountSecurity(ctx, tx, accountID)
+		if err != nil {
+			return err
+		}
 		var row struct {
 			sessionID, userID, deviceID, installationID, familyID platform.ID
 			scope, purpose, state                                 int16
@@ -291,15 +326,16 @@ func Refresh(ctx context.Context, db *store.DB, policy config.IdentityPolicy, to
 			expiresAt, refreshExpiresAt                           time.Time
 			revoked                                               bool
 		}
-		err := tx.QueryRow(ctx, `SELECT s.session_id, s.user_id, s.device_id, s.installation_id, s.family_id, s.scope, s.purpose, u.state,
+		err = tx.QueryRow(ctx, `SELECT s.session_id, s.user_id, s.device_id, s.installation_id, s.family_id, s.scope, s.purpose, u.state,
     s.refresh_generation, s.expires_at, s.refresh_expires_at,
     s.revoked_at IS NOT NULL OR d.revoked_at IS NOT NULL OR i.revoked_at IS NOT NULL
+    OR s.auth_epoch <> $2 OR s.recovery_generation <> $3
 FROM identity.session s
 JOIN identity.user u ON u.user_id = s.user_id
 JOIN device.device d ON d.device_id = s.device_id
 JOIN device.installation i ON i.installation_id = s.installation_id
 WHERE s.refresh_token_hash = $1 AND s.credential_kind = 1
-FOR UPDATE OF s`, digest[:]).Scan(&row.sessionID, &row.userID, &row.deviceID, &row.installationID, &row.familyID, &row.scope, &row.purpose,
+FOR UPDATE OF s`, digest[:], security.AuthEpoch, security.RecoveryGeneration).Scan(&row.sessionID, &row.userID, &row.deviceID, &row.installationID, &row.familyID, &row.scope, &row.purpose,
 			&row.state, &row.generation, &row.expiresAt, &row.refreshExpiresAt, &row.revoked)
 		if errors.Is(err, pgx.ErrNoRows) {
 			found, err := revokeReusedFamily(ctx, tx, digest, now, correlationID)
@@ -324,7 +360,7 @@ FOR UPDATE OF s`, digest[:]).Scan(&row.sessionID, &row.userID, &row.deviceID, &r
 			return arc.Unauthenticated()
 		case !admission.admits(Scope(row.scope)):
 			return arc.PermissionDenied(admission.Operation)
-		case row.state != 1 && row.state != 2:
+		case !security.AdmitsScope(Scope(row.scope)):
 			return arc.Unauthenticated()
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO identity.spent_refresh (token_hash, session_id, family_id, generation, consumed_at, family_expires_at)
@@ -334,7 +370,8 @@ VALUES ($1, $2, $3, $4, $5, $6)`, digest[:], row.sessionID, row.familyID, row.ge
 		lifetimes := LifetimesOf(policy, Scope(row.scope))
 		access, refresh := NewSecret(), NewSecret()
 		issued = Native{SessionID: row.sessionID, UserID: row.userID, DeviceID: row.deviceID, AccessToken: access.Token(AccessPrefix),
-			RefreshToken: refresh.Token(RefreshPrefix), ExpiresAt: row.expiresAt, Purpose: Purpose(row.purpose), IssuedAt: now}
+			RefreshToken: refresh.Token(RefreshPrefix), ExpiresAt: row.expiresAt, Purpose: Purpose(row.purpose), IssuedAt: now,
+			AuthEpoch: security.AuthEpoch, RecoveryGeneration: security.RecoveryGeneration}
 		issued.RefreshExpiresAt = earliest(now.Add(lifetimes.RefreshIdle), row.expiresAt)
 		issued.AccessExpiresAt = earliest(now.Add(lifetimes.Access), issued.RefreshExpiresAt)
 		accessDigest, refreshDigest := access.Digest(), refresh.Digest()

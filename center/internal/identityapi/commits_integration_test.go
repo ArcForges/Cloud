@@ -252,6 +252,10 @@ func TestEveryTransactionOfTheSurfaceStatesItsRole(t *testing.T) {
 		"begin a sign-in": effect, "send an e-mail code": effect, "complete a sign-in": effect, "bootstrap the owner": effect,
 		"refresh a session": effect, "begin a step-up": effect, "prove a step-up": effect, "begin a passkey registration": effect,
 		"execute a command under its receipt": effect,
+		// Lifecycle reads lock the current account security fence, so use a
+		// writable transaction; export may persist an expired/revoked receipt.
+		"read account export": effect, "read account deletion": effect, "read lifecycle evidence": effect,
+		"begin account recovery": effect, "record recovery mail outcome": auxiliary,
 		// A2: the browser's sign-out (the pages' logout route).
 		"sign out": effect,
 		// Part B: the entitlement store and the operator grant (package entitlement). The refusal audit is bookkeeping around a

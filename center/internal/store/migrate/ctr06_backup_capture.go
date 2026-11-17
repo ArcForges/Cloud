@@ -130,8 +130,8 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, errors.New("the supported migration catalogue is unavailable")
 	}
 	applied, exists, err := ReadApplied(ctx, tx)
-	if err != nil || !exists || (len(applied) != 10 && len(applied) != 11 && len(applied) != 12) || len(applied) > len(build) {
-		return report, errors.New("only a supported complete 0010,0011 or 0012 source can be captured")
+	if err != nil || !exists || (len(applied) != 10 && len(applied) != 11 && len(applied) != 12 && len(applied) != 13) || len(applied) > len(build) {
+		return report, errors.New("only a supported complete 0010,0011,0012 or 0013 source can be captured")
 	}
 	version := len(applied)
 	build = build[:version]
@@ -157,8 +157,11 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if err := tx.QueryRow(ctx, "SELECT system_identifier::text,current_setting('server_version_num')::int FROM pg_catalog.pg_control_system()").Scan(&sourceCluster, &serverVersion); err != nil || !ctr06ClusterID.MatchString(sourceCluster) || serverVersion/10000 != TestedMajor {
 		return report, errors.New("the source cluster identity or PostgreSQL major is unsupported")
 	}
-	if version == 12 && requireManagementReady(ctx, tx) != nil {
+	if version >= 12 && requireManagementReady(ctx, tx) != nil {
 		return report, ErrManagementTransitionRequired
+	}
+	if version == 13 && requireLifecycleReady(ctx, tx) != nil {
+		return report, ErrLifecycleTransitionRequired
 	}
 	tables, err := ctr06RequiredTablesFrom(inventory)
 	if err != nil {

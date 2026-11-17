@@ -18,8 +18,11 @@ func TestThePageRegistrationIsTheContractsRoutesAndThePages(t *testing.T) {
 	}
 	want := []string{
 		"GET /session/v1/web/bootstrap", "POST /session/v1/web/authentication/begin", "POST /session/v1/web/authentication/complete",
-		"POST /session/v1/web/enrollment/complete", "POST /session/v1/web/step-up/begin", "POST /session/v1/web/step-up/complete", "POST /session/v1/web/logout",
-		"GET /account/sign-in", "GET /account/bootstrap", "GET /account/passkeys", "GET /account/sessions", "GET /account/devices", "GET /account/sign-out",
+		"POST /session/v1/web/enrollment/complete", "POST /session/v1/web/recovery/begin", "POST /session/v1/web/recovery/complete",
+		"POST /session/v1/web/account/deletion/prepare", "POST /session/v1/web/account/deletion/confirm", "POST /session/v1/web/account/deletion/cancel",
+		"POST /session/v1/web/account/export/prepare", "POST /session/v1/web/account/export/read",
+		"POST /session/v1/web/step-up/begin", "POST /session/v1/web/step-up/complete", "POST /session/v1/web/logout",
+		"GET /account/sign-in", "GET /account/recovery", "GET /account/lifecycle", "GET /account/bootstrap", "GET /account/passkeys", "GET /account/sessions", "GET /account/devices", "GET /account/sign-out",
 		"GET /account/account.js", "GET /account/account.css",
 		"POST /account/passkeys/add", "POST /account/passkeys/complete", "POST /account/passkeys/rename", "POST /account/passkeys/remove",
 		"POST /account/sessions/revoke", "POST /account/sessions/revoke-all", "POST /account/devices/rename", "POST /account/devices/revoke",

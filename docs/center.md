@@ -15,6 +15,15 @@ it in two parts:
 AF-CTR-03 adds accounts, sessions and devices behind the `identity` surface switch ([accounts, sessions and
 devices](center-identity.md)).
 
+AFV2-ID-01 adds migration 0013, current account epochs/recovery generations, verified-channel recovery and revision-bound
+deletion/export behind the existing identity/pages surfaces ([account lifecycle](center-identity.md#account-lifecycle-afv2-id-01)).
+The exact RPC additions are `IdentityService.BeginRecovery`, `CompleteRecovery` and `GetAccountDeletion`; mutations whose
+published legacy messages lack plan binding remain unregistered and use the bounded typed page protocol. Pending deletion
+revokes account/remote credentials while local Runs and files remain with their local owner. Provider cleanup and retention
+remain explicitly pending where their prerequisites are absent. These implementation routes do not activate deployment or
+public sales. Schema-13 backup/restore and receipt evidence must be retained; an older schema-12 executable is not its runtime
+rollback path.
+
 The C# Native AOT host stays in the same image as its default entrypoint: setting `ARCFORGES_HELLO_RUNTIME=csharp` through a
 reviewed main push is the Hello rollback (AD-0021 §15, until AF-CTR-09). The `proof` environment (proof.arcforges.com) runs the
 Go center as the acceptance environment since part B.

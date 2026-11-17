@@ -105,6 +105,9 @@ func challengeOf(value *publicapiv1.AuthChallenge) challengeReply {
 		FlowID: uuidText(flow), Method: "passkey", Challenge: b64(value.GetChallenge()), RPID: value.GetRpId(), ExpiresAt: formatInstant(instantOf(value.GetExpiresAt())),
 		ProviderID: value.GetProviderId(), Purpose: purposeNames[value.GetPurpose()],
 	}
+	if value.GetMethod() == publicapiv1.AuthMethod_AUTH_METHOD_EMAIL {
+		result.Method = "emailCode"
+	}
 	if options := value.GetOptions(); options != nil {
 		result.Options = &optionsReply{RPID: options.GetRpId(), UserVerification: options.GetUserVerification(), Algorithms: options.GetAlgorithms()}
 		if handle := options.GetUserHandle(); len(handle) > 0 {

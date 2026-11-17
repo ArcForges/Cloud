@@ -47,7 +47,7 @@ func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
 	if err := Check(policies[1:]); err == nil {
 		t.Fatal("a row without a served method was admitted")
 	}
-	extra, err := ingress.NewUnary("/arcforges.publicapi.v1.IdentityService/BeginRecovery", ingress.Anonymous, ingress.NoScope, 4096, true)
+	extra, err := ingress.NewUnary("/arcforges.publicapi.v1.IdentityService/RequestAccountDeletion", ingress.Anonymous, ingress.NoScope, 4096, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
 	if err = Check(flipped); err == nil {
 		t.Fatal("a session method served anonymously was admitted")
 	}
-	if _, ok := Lookup("/arcforges.publicapi.v1.IdentityService/BeginRecovery"); ok {
+	if _, ok := Lookup("/arcforges.publicapi.v1.IdentityService/RequestAccountDeletion"); ok {
 		t.Fatal("an unserved method has a row")
 	}
 }
@@ -93,9 +93,12 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"identity.requestEmailCode":            "R1 anonymous",
 		"identity.redeemEmailCode":             "R1 anonymous",
 		"identity.completeEnrollment":          "R1 anonymous",
+		"identity.beginRecovery":               "R1 anonymous",
+		"identity.completeRecovery":            "R3 anonymous",
 		"identity.listAuthProviders":           "R1 anonymous",
 		"identity.refreshSession":              "R1 anonymous",
 		"identity.getProfile":                  "R1 allowed none - no-receipt active",
+		"identity.getAccountDeletion":          "R1 upgrade none - no-receipt restricted",
 		"identity.listAuthIdentities":          "R1 allowed none - no-receipt restricted",
 		"identity.listSessions":                "R1 allowed none - no-receipt restricted",
 		"device.list":                          "R1 allowed none - no-receipt restricted",

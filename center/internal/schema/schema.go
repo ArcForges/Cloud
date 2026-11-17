@@ -67,6 +67,8 @@ var RuntimeGrants = []Grant{
 	{"identity", "auth_flow", []Privilege{Select, Insert, Update}},
 	{"identity", "step_up_challenge", []Privilege{Select, Insert, Update}},
 	{"identity", "bootstrap", []Privilege{Select, Insert}},
+	{"identity", "account_security_state", []Privilege{Select, Insert, Update}},
+	{"identity", "lifecycle_operation", []Privilege{Select, Insert, Update}},
 	{"device", "device", []Privilege{Select, Insert, Update}},
 	{"device", "installation", []Privilege{Select, Insert, Update}},
 	// AF-CTR-03 part B (0003): the operator role is written by the migration role only (decision n2, PLT-10). The entitlement
@@ -143,6 +145,7 @@ func AtVersion(version int) ([]string, []Grant) {
 		case version < 10 && grant.Schema == "fleet" && (grant.Table == "routed_call" || grant.Table == "refusal_code"):
 		case version < 11 && grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_file_target" || grant.Table == "routed_command_id"):
 		case version < 12 && grant.Schema == "management":
+		case version < 13 && grant.Schema == "identity" && (grant.Table == "account_security_state" || grant.Table == "lifecycle_operation"):
 		default:
 			grants = append(grants, grant)
 		}

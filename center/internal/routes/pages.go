@@ -205,19 +205,28 @@ func pageSurfaceRoutes() []PageRoute {
 			SetCookie: SetCookieNone}
 	}
 	return []PageRoute{
-		// The WebBrowserSession routes (Contracts web-browser.schema.json x-arcforges-routes) this center serves; its recovery
-		// routes and the provider callback belong to AF-ID-02 and stay unserved.
+		// The browser protocol; AFV2-ID-01 adds recovery and the exact typed
+		// lifecycle routes. The provider callback stays unserved.
 		{Method: "GET", Path: browser("/bootstrap"), ID: "webBrowser.bootstrap", Kind: PageJSONKind, ResponseTypes: jsonReply,
 			MaxResponseBytes: pageBytesBootstrap, Cookie: true, SetCookie: SetCookieNone},
 		post(browser("/authentication/begin"), "webBrowser.beginAuthentication", pageBytesBegin, pageBytesChallenge, true, SetCookieNone),
 		post(browser("/authentication/complete"), "webBrowser.completeAuthentication", pageBytesComplete, pageBytesBootstrap, true, SetCookieSession),
 		post(browser("/enrollment/complete"), "webBrowser.completeEnrollment", pageBytesEnrollment, pageBytesBootstrap, true, SetCookieSession),
+		post(browser("/recovery/begin"), "webBrowser.beginRecovery", pageBytesBegin, pageBytesChallenge, true, SetCookieNone),
+		post(browser("/recovery/complete"), "webBrowser.completeRecovery", pageBytesEnrollment, pageBytesReceiptJSON, true, SetCookieNone),
+		post(browser("/account/deletion/prepare"), "account.deletion.prepare", pageBytesForm, pageBytesReceiptJSON, true, SetCookieNone),
+		post(browser("/account/deletion/confirm"), "account.deletion.confirm", pageBytesForm, pageBytesReceiptJSON, true, SetCookieNone),
+		post(browser("/account/deletion/cancel"), "account.deletion.cancel", pageBytesForm, pageBytesReceiptJSON, true, SetCookieNone),
+		post(browser("/account/export/prepare"), "account.export.prepare", pageBytesForm, pageBytesReceiptJSON, true, SetCookieNone),
+		post(browser("/account/export/read"), "account.export.read", pageBytesForm, pageBytesChallenge, true, SetCookieNone),
 		post(browser("/step-up/begin"), "webBrowser.beginStepUp", pageBytesStepUp, pageBytesChallenge, true, SetCookieNone),
 		post(browser("/step-up/complete"), "webBrowser.completeStepUp", pageBytesComplete, pageBytesStepUp, true, SetCookieNone),
 		{Method: "POST", Path: browser("/logout"), ID: "webBrowser.logout", Kind: PageJSONKind, ResponseTypes: jsonReply,
 			MaxResponseBytes: pageBytesReceiptJSON, Cookie: true, SetCookie: SetCookieClear},
 		// The pages and their assets.
 		page("GET", account("/sign-in"), "page.signIn", false, false),
+		page("GET", account("/recovery"), "page.recovery", false, false),
+		page("GET", account("/lifecycle"), "page.lifecycle", true, true),
 		page("GET", account("/bootstrap"), "page.bootstrap", false, false),
 		page("GET", account("/passkeys"), "page.passkeys", true, true),
 		page("GET", account("/sessions"), "page.sessions", true, true),

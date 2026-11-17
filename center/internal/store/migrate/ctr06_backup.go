@@ -170,9 +170,23 @@ func ctr06SupportedACL(item []string, objects map[string]int) bool {
 		_, ok := objects["SCHEMA - "+item[2]]
 		return ok
 	}
+	// Function signatures may contain argument names and multiword types.
+	// Match the complete native signature to the closed object inventory;
+	// accepting only the function name would admit an unreviewed overload.
+	if len(item) >= 3 && item[1] == "FUNCTION" {
+		signature := strings.Join(item[2:], " ")
+		// PostgreSQL18's native TOC omits argument names from the FUNCTION
+		// object but retains them in this owner's ACL label. This is the one
+		// finite schema13 signature; do not infer identities for arbitrary SQL.
+		if item[0] == "identity" && signature == "finish_account_deletion(p_operation_id uuid, p_now timestamp with time zone)" {
+			signature = "finish_account_deletion(uuid, timestamp with time zone)"
+		}
+		_, ok := objects["FUNCTION "+item[0]+" "+signature]
+		return ok
+	}
 	if len(item) == 3 {
 		typ, schemaName, name := item[1], item[0], strings.Trim(item[2], `"`)
-		if typ == "TABLE" || typ == "FUNCTION" || typ == "SEQUENCE" {
+		if typ == "TABLE" || typ == "SEQUENCE" {
 			_, ok := objects[typ+" "+schemaName+" "+name]
 			return ok
 		}
@@ -577,7 +591,7 @@ func ctr06VerifyRestoredData(ctx context.Context, conn *pgx.Conn, meta ctr06Back
 		return "", errors.New("the restored table data could not be checked")
 	}
 	for i := range data {
-		if data[i].Name == "platform.ctr06_runtime_floor" || data[i].Name == "platform.ctr06_restore_admission" || (len(build) == 12 && data[i].Name == "management.cutover_receipt") {
+		if data[i].Name == "platform.ctr06_runtime_floor" || data[i].Name == "platform.ctr06_restore_admission" || (len(build) >= 12 && data[i].Name == "management.cutover_receipt") {
 			continue
 		}
 		if data[i] != meta.Tables[i] {

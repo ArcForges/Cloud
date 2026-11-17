@@ -6,6 +6,50 @@ the platform tables, the roles, the deployment step and the recovery procedure. 
 (AF-CTR-03 onward). The driver and migration choice (pgx directly, an in-repository runner) and the alternatives it rejected are
 recorded in [engineering controls](engineering-controls.md#postgresql-driver-query-and-migration-tooling-evaluation-for-part-b).
 
+## Current V2 account lifecycle transition (AFV2-ID-01)
+
+The current schema is 13. `0013_account_lifecycle.sql` adds account authority epochs and bounded lifecycle metadata; it never
+rewrites the applied 0001..0012 files, their checksums, or the qualified schema12 backup oracle. Older procedures below retain
+their historical scope. Schema12 runtimes do not enforce account epochs, so ordinary additive compatibility does not authorize
+their credentials after this transition. Stop the old runtime and drain its connections before maintenance.
+
+- A genuinely fresh database uses `arcforges-center migrate apply`. Its private same-invocation admission reserves previously
+  absent runtime roles and checks all seven application schemas before deriving account epochs.
+- An existing schema10 or11 first uses `arcforges-center migrate management --archive <new-absolute-path> --metadata
+<new-absolute-path>`. That finite operation still ends at the exact qualified schema12. Use its returned `runtimeRole` as
+  `ARCFORGES_CENTER_RUNTIME_ROLE` for the next operation. Preserve its actual backup and receipt.
+- An existing schema12 then uses `arcforges-center migrate lifecycle --archive <different-new-absolute-path> --metadata
+<different-new-absolute-path>`. It captures and rechecks the complete source12 snapshot, refuses active old connections or
+  unknown writer paths, fences all seven schemas, retires the old group and both slots, and creates a different runtime group
+  and slot generation. Account epochs are derived only inside that write barrier. The schema12 cutover remains immutable;
+  schema13 appends its own database/artifact/backup/writer receipt. A failed transaction leaves schema12 and its credentials
+  unchanged; the verified backup remains available. Do not reset the database or re-enable a retired generation.
+
+Configure the returned runtime role before ordinary credential rotation. Old credentials, role names, a migration number, or
+the retired bridge proof cannot substitute for this finite admission. `migrate status` reports the actual version and runtime
+role; it does not imply publication or production activation. The hosted deployment remains paused.
+
+Logical capture and isolated restore accept the closed qualified inventories for schemas10,11,12 and13. Each restore verifies
+the native PostgreSQL archive, complete source catalogue, data, sequences and large objects before committing target readiness.
+Source cutover **data** is retained in the source archive and excluded from target authority; the target writes its own receipts.
+Restoring schema10 follows the existing finite expansion to12; restoring11/12 retains that version. Complete the explicit
+schema12-to13 transition before starting the current server. Restoring13 raises current account epochs, revokes old sessions,
+exhausts old ceremonies and export authority, and retains their original lower snapshots and lifecycle identities. Existing
+UNKNOWN operations, financial facts, audit evidence and command identities are preserved without inventing a Node outcome.
+An interrupted restore can remain UNKNOWN and quarantined; preserve that target and inspect the actual receipt rather than
+blindly retrying or deleting it.
+
+`arcforges-center admin finish-account-deletion --operation <uuid>` is the finite migration-owner cleanup for an already
+confirmed deletion. It invokes the identity-owned cleanup in one transaction with its chained audit and outbox event. An
+unresolved provider/subscription or remote outcome returns `completed:false` with bounded blocker metadata. A completed
+operation can be repeated without another completion event. Cleanup retains account/device identity tombstones and necessary
+financial, audit and remote outcome evidence, removes credentials and personal labels, and does not command or erase Node
+Sandbox data. Runtime roles have no DELETE privileges or permission to execute this owner-only function.
+
+The current service fixtures use the complete real schema13 and runtime grants. Only explicitly marked retained V1 routing
+regressions use a test-owner relaxation of the three named routing retirement triggers. Those fixtures retain real PostgreSQL,
+account authority and cryptography, and are not evidence of V2 route availability or production migration acceptance.
+
 ## Model
 
 One schema per module, owned by the migration role. The model follows data/cloud-store.md §6:

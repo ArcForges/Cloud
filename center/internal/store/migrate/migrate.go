@@ -328,6 +328,10 @@ func Inspect(ctx context.Context, conn *pgx.Conn, build []Migration) (Result, er
 		result.State = StateRefused
 		return result, ErrManagementTransitionRequired
 	}
+	if result.Version >= 13 && requireLifecycleReady(ctx, conn) != nil {
+		result.State = StateRefused
+		return result, ErrLifecycleTransitionRequired
+	}
 	return result, nil
 }
 
@@ -367,6 +371,7 @@ type Options struct {
 	localRestore     *restoreCapability
 	localLegacyGrant *ctr06RestoreBridgeGrant
 	management       *managementAdmission
+	lifecycle        *managementAdmission
 	LockTimeout      time.Duration
 	StatementTimeout time.Duration
 	LockWait         time.Duration
@@ -490,13 +495,21 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 		return result, Sanitize("read platform.schema_migration", err)
 	}
 	comparison := result.describe(build, applied, exists)
-	if len(applied) == 0 && len(build) == 12 && build[11].Name == "0012_management_storage.sql" {
+	if len(applied) == 0 && len(build) >= 12 && build[11].Name == "0012_management_storage.sql" {
 		artifact, err := managementArtifact(options.Runner, build[11])
 		if err != nil {
 			return result, err
 		}
 		options.management = &managementAdmission{conn: conn, source: 0, artifactDigest: artifact, active: true}
 		defer func() { options.management.active = false }()
+		if len(build) == 13 && build[12].Name == "0013_account_lifecycle.sql" {
+			artifact, err := managementArtifact(options.Runner, build[12])
+			if err != nil {
+				return result, err
+			}
+			options.lifecycle = &managementAdmission{conn: conn, source: 0, artifactDigest: artifact, active: true}
+			defer func() { options.lifecycle.active = false }()
+		}
 	}
 	// Even a schema-only invocation must not report a quarantined or
 	// identity-mismatched canonical 0011 database as current. Only the
@@ -507,6 +520,9 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 		if a := options.management; a != nil && a.active && a.conn == conn && a.source == 11 {
 			role = a.oldRole
 		}
+		if a := options.lifecycle; a != nil && a.active && a.conn == conn && a.source == 12 {
+			role = a.oldRole
+		}
 		if _, _, err := readyCTR06Admission(ctx, conn, role); err != nil {
 			result.State = StateRefused
 			result.Problems = append(result.Problems, "runtime floor or restore admission is unavailable or untrusted")
@@ -515,6 +531,9 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 	}
 	if len(applied) >= 12 && requireManagementReady(ctx, conn) != nil {
 		return Result{State: StateRefused}, ErrManagementTransitionRequired
+	}
+	if len(applied) >= 13 && requireLifecycleReady(ctx, conn) != nil {
+		return Result{State: StateRefused}, ErrLifecycleTransitionRequired
 	}
 	if len(comparison.Problems) > 0 {
 		for _, problem := range comparison.Problems {
@@ -623,11 +642,21 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 				return err
 			}
 		}
+		if migration.Version == 13 && migration.Name == "0013_account_lifecycle.sql" {
+			if err := guardLifecycle(ctx, tx, conn, options); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, migration.SQL); err != nil {
 			return err
 		}
 		if migration.Version == 12 && migration.Name == "0012_management_storage.sql" {
 			if err := recordManagement(ctx, tx, conn, options); err != nil {
+				return err
+			}
+		}
+		if migration.Version == 13 && migration.Name == "0013_account_lifecycle.sql" {
+			if err := recordLifecycle(ctx, tx, conn, options); err != nil {
 				return err
 			}
 		}
@@ -641,7 +670,7 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 		return err
 	})
 	if err != nil {
-		if errors.Is(err, ErrCTR06RetirementUnproven) || errors.Is(err, ErrManagementTransitionRequired) {
+		if errors.Is(err, ErrCTR06RetirementUnproven) || errors.Is(err, ErrManagementTransitionRequired) || errors.Is(err, ErrLifecycleTransitionRequired) {
 			return Step{}, err
 		}
 		failure := &Failure{Version: migration.Version, Name: migration.Name, SQLState: "unknown", Message: "the migration did not complete"}

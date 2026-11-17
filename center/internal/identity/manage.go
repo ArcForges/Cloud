@@ -50,6 +50,9 @@ func checkRevision(expected *int64, current int64) error {
 // UpdateProfile changes the caller's profile in the receipt's transaction (UpdateProfile): the display name (1 to 128 characters),
 // the locale and the time zone, each only when present, against meta.expected_rev of the account. An empty patch changes nothing.
 func (s *Service) UpdateProfile(ctx context.Context, tx pgx.Tx, caller Caller, change ProfileChange, expected *int64) (Profile, error) {
+	if err := RecheckCaller(ctx, tx, caller, s.now()); err != nil {
+		return Profile{}, err
+	}
 	switch {
 	case change.DisplayName != nil && !ValidDisplayName(*change.DisplayName):
 		return Profile{}, arc.InvalidArgument("patch.display_name", "length")
@@ -117,6 +120,9 @@ FROM identity.auth_identity WHERE auth_identity_id = $1`, credentialID).Scan(&it
 // RenameCredential renames one of the caller's credentials in the receipt's transaction (RenameAuthIdentity): the name follows the
 // credential label rule (1 to 64 characters of plain text), against meta.expected_rev of the credential.
 func (s *Service) RenameCredential(ctx context.Context, tx pgx.Tx, caller Caller, credentialID platform.ID, name *string, expected *int64) (Credential, error) {
+	if err := RecheckCaller(ctx, tx, caller, s.now()); err != nil {
+		return Credential{}, err
+	}
 	if refusal := labelRefusal("name", name); refusal != nil {
 		return Credential{}, refusal
 	}
@@ -145,6 +151,9 @@ func (s *Service) RenameCredential(ctx context.Context, tx pgx.Tx, caller Caller
 // the account participants cancelled first in the same transaction (CancelApprovals), counted in the audit event. It returns the
 // credential's new revision.
 func (s *Service) RemoveCredential(ctx context.Context, tx pgx.Tx, caller Caller, credentialID platform.ID, cancelled Cancellations, now time.Time) (int64, error) {
+	if err := RecheckCaller(ctx, tx, caller, now); err != nil {
+		return 0, err
+	}
 	var state int16
 	if err := tx.QueryRow(ctx, "SELECT state FROM identity.user WHERE user_id = $1 FOR UPDATE", caller.UserID).Scan(&state); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -181,7 +190,13 @@ func (s *Service) RemoveCredential(ctx context.Context, tx pgx.Tx, caller Caller
 		credentialID, now).Scan(&revision, &method); err != nil {
 		return 0, err
 	}
-	epochs, err := tx.Exec(ctx, "UPDATE identity.session SET auth_epoch = auth_epoch + 1, rev = rev + 1 WHERE user_id = $1 AND revoked_at IS NULL", caller.UserID)
+	var epoch, recoveryGeneration int64
+	if err = tx.QueryRow(ctx, `UPDATE identity.account_security_state SET auth_epoch = auth_epoch + 1,
+    changed_at = greatest(changed_at, $2), rev = rev + 1 WHERE user_id = $1 RETURNING auth_epoch,recovery_generation`, caller.UserID, now).Scan(&epoch, &recoveryGeneration); err != nil {
+		return 0, err
+	}
+	epochs, err := tx.Exec(ctx, `UPDATE identity.session SET auth_epoch = $2, rev = rev + 1 WHERE user_id = $1 AND revoked_at IS NULL
+AND auth_epoch = $2 - 1 AND recovery_generation = $3`, caller.UserID, epoch, recoveryGeneration)
 	if err != nil {
 		return 0, err
 	}
@@ -193,6 +208,13 @@ func (s *Service) RemoveCredential(ctx context.Context, tx pgx.Tx, caller Caller
 // own session is a sign-out, any other was revoked by the account. A node, push or automation session, another account's, a revoked
 // or expired one are STATE/not_found. It returns the session's new revision.
 func (s *Service) RevokeSession(ctx context.Context, tx pgx.Tx, caller Caller, sessionID platform.ID, now time.Time) (int64, error) {
+	security, err := lockCurrentCaller(ctx, tx, caller, now, true, true)
+	if err != nil {
+		return 0, err
+	}
+	if security.State == int16(StatePendingDeletion) && sessionID != caller.SessionID {
+		return 0, arc.PermissionDenied("identity.revokeSession")
+	}
 	reason, own := session.RevokedByAccount, sessionID == caller.SessionID
 	if own {
 		reason = session.RevokedSignedOut
@@ -210,6 +232,9 @@ func (s *Service) RevokeSession(ctx context.Context, tx pgx.Tx, caller Caller, s
 // in the same transaction (CancelApprovals: the account's approved node sign-ins no node collected yet) are counted in the audit
 // event. It returns how many sessions it revoked.
 func (s *Service) RevokeAllSessions(ctx context.Context, tx pgx.Tx, caller Caller, cancelled Cancellations, now time.Time) (int64, error) {
+	if err := RecheckCaller(ctx, tx, caller, now); err != nil {
+		return 0, err
+	}
 	count, err := session.RevokeAll(ctx, tx, caller.UserID, caller.SessionID, now)
 	if err != nil {
 		return 0, err
@@ -220,6 +245,9 @@ func (s *Service) RevokeAllSessions(ctx context.Context, tx pgx.Tx, caller Calle
 
 // RenameDevice renames one of the caller's live devices in the receipt's transaction (DeviceService.Rename), by the label rule.
 func (s *Service) RenameDevice(ctx context.Context, tx pgx.Tx, caller Caller, deviceID platform.ID, name *string, expected *int64, now time.Time) (*device.View, error) {
+	if err := RecheckCaller(ctx, tx, caller, now); err != nil {
+		return nil, err
+	}
 	// A device name follows the credential label rule: required, at most 64 UTF-16 units (rule length), plain text that is not only
 	// white space (rule pattern).
 	if refusal := labelRefusal("name", name); refusal != nil {
@@ -236,6 +264,9 @@ func (s *Service) RenameDevice(ctx context.Context, tx pgx.Tx, caller Caller, de
 // (DeviceService.Revoke; DC-17): its installations, every session on it whatever its scope and each registered participant's rows,
 // counted in the device.revoked audit event. It returns the device's new revision.
 func (s *Service) RevokeDevice(ctx context.Context, tx pgx.Tx, caller Caller, deviceID platform.ID, now time.Time) (int64, error) {
+	if err := RecheckCaller(ctx, tx, caller, now); err != nil {
+		return 0, err
+	}
 	cascade, err := device.Revoke(ctx, tx, caller.UserID, deviceID, device.RevokedByOwner, s.participants, now)
 	if err != nil {
 		return 0, err
@@ -272,7 +303,7 @@ func (s *Service) BeginRegistration(ctx context.Context, caller Caller, label *s
 	userID, sessionID := caller.UserID, caller.SessionID
 	row := flow{ID: platform.NewID(), Channel: ChannelNative, Kind: FlowPasskeyRegistration, Purpose: PurposeEnroll, UserID: &userID,
 		SessionID: &sessionID, Label: label, Challenge: randomBytes(passkey.ChallengeBytes), MaxAttempts: passkeyAttempts, CreatedAt: now,
-		ExpiresAt: now.Add(s.policy.PasskeyFlowLifetime)}
+		ExpiresAt: now.Add(s.policy.PasskeyFlowLifetime), AccountAuthEpoch: &caller.AuthEpoch, AccountRecoveryGeneration: &caller.RecoveryGeneration}
 	if caller.Browser {
 		origin := s.rp.Origin()
 		row.Channel, row.Origin = ChannelBrowser, &origin
@@ -399,7 +430,13 @@ func (s *Service) PrepareRegistration(ctx context.Context, caller Caller, flowID
 // that is already registered (to this account or another, revoked ones included) is CONFLICT/already_exists. It returns the new
 // credential as ListAuthIdentities shows it.
 func (s *Service) FinishRegistration(ctx context.Context, tx pgx.Tx, caller Caller, registration Registration, now time.Time) (Credential, error) {
+	if err := RecheckCaller(ctx, tx, caller, now); err != nil {
+		return Credential{}, err
+	}
 	row, credential := registration.flow, registration.credential
+	if row.AccountAuthEpoch == nil || row.AccountRecoveryGeneration == nil || *row.AccountAuthEpoch != caller.AuthEpoch || *row.AccountRecoveryGeneration != caller.RecoveryGeneration {
+		return Credential{}, arc.Expired()
+	}
 	if err := consume(ctx, tx, row.ID, now); err != nil {
 		return Credential{}, err
 	}

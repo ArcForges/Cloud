@@ -20,7 +20,7 @@ func TestManagementRevokedProtocolAllowsOnlyDefiniteReconciliation(t *testing.T)
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
-	if _, err := Apply(ctx, owner, centerBuild(t), Options{Runner: "isolated-reconciliation-fixture", RuntimeRole: group}); err != nil {
+	if _, err := Apply(ctx, owner, managementBuild(t), Options{Runner: "isolated-reconciliation-fixture", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
 	f := seedNamespaceFixture(t, owner)

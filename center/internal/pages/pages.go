@@ -114,6 +114,10 @@ func New(options Options) (*Handler, error) {
 	handler.handlers = map[string]func(*exchange){
 		"webBrowser.bootstrap": (*exchange).bootstrap, "webBrowser.beginAuthentication": (*exchange).beginAuthentication,
 		"webBrowser.completeAuthentication": (*exchange).completeAuthentication, "webBrowser.completeEnrollment": (*exchange).completeEnrollment,
+		"webBrowser.beginRecovery": (*exchange).beginRecovery, "webBrowser.completeRecovery": (*exchange).completeRecovery,
+		"account.deletion.prepare": (*exchange).prepareDeletion, "account.deletion.confirm": (*exchange).confirmDeletion,
+		"account.deletion.cancel": (*exchange).cancelDeletion, "account.export.prepare": (*exchange).prepareExport,
+		"account.export.read": (*exchange).readExport, "page.lifecycle": (*exchange).lifecyclePage, "page.recovery": (*exchange).recoveryPage,
 		"webBrowser.beginStepUp": (*exchange).beginStepUp, "webBrowser.completeStepUp": (*exchange).completeStepUp, "webBrowser.logout": (*exchange).logout,
 		"page.signIn": (*exchange).signInPage, "page.bootstrap": (*exchange).bootstrapPage, "page.passkeys": (*exchange).passkeysPage,
 		"page.sessions": (*exchange).sessionsPage, "page.devices": (*exchange).devicesPage, "page.signOut": (*exchange).signOutPage,

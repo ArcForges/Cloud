@@ -334,7 +334,7 @@ func mobileTokenReplyOf(issued mobileauth.Issued) mobileTokenReply {
 	}
 	native := issued.Session
 	return mobileTokenReply{SessionID: uuidText(native.SessionID), AccessToken: native.AccessToken, AccessExpiresAt: formatInstant(native.AccessExpiresAt),
-		RefreshToken: native.RefreshToken, RefreshExpiresAt: formatInstant(native.RefreshExpiresAt), Device: reply, RecoveryGeneration: "0",
+		RefreshToken: native.RefreshToken, RefreshExpiresAt: formatInstant(native.RefreshExpiresAt), Device: reply, RecoveryGeneration: strconv.FormatInt(native.RecoveryGeneration, 10),
 		Scope: "account", Purpose: "authenticate"}
 }
 
