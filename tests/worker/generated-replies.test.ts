@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The check the local Worker diagnostic (`npm run test:worker`, tooling/project.ts) applies to the generated not_activated replies.
-// Since E4-1 the Worker writes each call's own correlation id into the template's slot, so no reply equals the raw template; the
-// check must accept exactly that and nothing else (worker-1). The diagnostic itself needs Docker and `wrangler dev`, so what it
-// decides is pinned here against the real Worker's reply.
+// The Worker fills the unary error's correlation slot or both slots of a typed watch frame. The diagnostic itself needs Docker
+// and `wrangler dev`, so its checks are pinned here against the real Worker's reply.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assertNotActivatedReply } from "../../tooling/generated-replies.ts";
@@ -13,6 +12,8 @@ import {
   notActivatedReplyCorrelationOffsets,
   replyCorrelationBytes,
   surfaceRoutes,
+  watchNotActivatedReply,
+  watchNotActivatedReplyCorrelationOffsets,
 } from "../../worker/tables/center-tables.generated.ts";
 
 const offset = notActivatedReplyCorrelationOffsets.identity;
@@ -86,4 +87,50 @@ test("the diagnostic refuses what is not the generated reply with a correlation 
       `a change at byte ${index} must be refused`,
     );
   }
+});
+
+test("typed watch diagnostics require an exact watch frame with one correlation in both slots", () => {
+  const paths = [
+    "/arcforges.sandbox.v2.RunService/WatchOutput",
+    "/arcforges.sandbox.v2.NodeService/WatchEvents",
+    "/arcforges.sandbox.v2.ResourceService/WatchUsage",
+  ];
+  assert.deepEqual(
+    surfaceRoutes
+      .filter((route) => route.remoteTarget && route.kind === "serverStream")
+      .map((route) => route.path),
+    paths,
+  );
+  const [first, second] = watchNotActivatedReplyCorrelationOffsets;
+  assert(first !== undefined && second !== undefined && second >= first + replyCorrelationBytes);
+  const id = newCorrelationId();
+  const template = Buffer.from(watchNotActivatedReply, "base64");
+  const frame = Buffer.from(template);
+  for (const offset of [first, second]) frame.set(correlationIdBytes(id), offset);
+  for (const path of paths) assert.equal(assertNotActivatedReply("nodes", frame, path), id);
+
+  const [watch] = paths;
+  assert(watch);
+  const mismatched = Buffer.from(frame);
+  mismatched.set(correlationIdBytes(newCorrelationId()), second);
+  assert.throws(() => assertNotActivatedReply("nodes", mismatched, watch), /same correlation id/);
+  for (const offset of [first, second]) {
+    const nil = Buffer.from(frame);
+    nil.fill(0, offset, offset + replyCorrelationBytes);
+    assert.throws(() => assertNotActivatedReply("nodes", nil, watch), /canonical, non-nil/);
+    const marker = Buffer.from(frame);
+    template.copy(marker, offset, offset, offset + replyCorrelationBytes);
+    assert.throws(() => assertNotActivatedReply("nodes", marker, watch), /template's marker/);
+  }
+  for (const index of [0, first - 1, first + replyCorrelationBytes, frame.length - 1]) {
+    const changed = Buffer.from(frame);
+    changed[index] = (changed[index] ?? 0) ^ 1;
+    assert.throws(() => assertNotActivatedReply("nodes", changed, watch), /the template's/);
+  }
+  assert.throws(
+    () =>
+      assertNotActivatedReply("nodes", frame, "/arcforges.sandbox.v2.DataService/InspectTransfer"),
+    /template's length/,
+  );
+  assert.throws(() => assertNotActivatedReply("nodes", genuine(id), watch), /template's length/);
 });

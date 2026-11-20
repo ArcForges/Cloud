@@ -30,7 +30,11 @@ import { handleNativeRequest, nativeTable } from "./native.ts";
 import { handlePageRequest, pageTable } from "./pages.ts";
 import { forwardRemoteTarget } from "./remote-target.ts";
 import { handleUpgradeRequest, upgradeTable } from "./upgrade.ts";
-import { healthRoute } from "../tables/center-tables.generated.ts";
+import {
+  healthRoute,
+  watchNotActivatedReply,
+  watchNotActivatedReplyCorrelationOffsets,
+} from "../tables/center-tables.generated.ts";
 import { bodyReadMilliseconds } from "../tables/cloud-tables.generated.ts";
 import {
   clientAsnHeader,
@@ -68,9 +72,10 @@ export interface IngressEnv {
  * so a client reads the refusal exactly as it reads the center's. The ArcError carries the call's correlation id, which the Worker
  * writes into the template's 16-byte slot (Contracts requires it; E4-1).
  */
-function domainReply(base64: string, slotOffset: number, correlationId: string): Response {
+function domainReply(base64: string, offsets: readonly number[], correlationId: string): Response {
   const body = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
-  body.set(correlationIdBytes(correlationId), slotOffset);
+  const id = correlationIdBytes(correlationId);
+  for (const offset of offsets) body.set(id, offset);
   return domainReplyBody(body);
 }
 
@@ -150,15 +155,18 @@ export async function handleApiRequest(
   // body (a disabled surface, the edge limit) carry it in their ArcError, and an admitted call whose RequestMeta states none
   // continues with it. The body is not read before those refusals, so they never carry a value the client stated.
   const created = newCorrelationId();
+  const streaming = route.kind === "serverStream";
+  const typedWatch = streaming && route.remoteTarget === true;
   // A disabled surface is answered here, before any rate limit, credential, body or Container (DC-04).
   if (surfaceRoute && !enabledSurfaces(env.FLAGSHIP_SURFACES).has(surfaceRoute.surface))
     return domainReply(
-      notActivatedReplies[surfaceRoute.surface],
-      notActivatedReplyCorrelationOffsets[surfaceRoute.surface],
+      typedWatch ? watchNotActivatedReply : notActivatedReplies[surfaceRoute.surface],
+      typedWatch
+        ? watchNotActivatedReplyCorrelationOffsets
+        : [notActivatedReplyCorrelationOffsets[surfaceRoute.surface]],
       created,
     );
 
-  const streaming = route.kind === "serverStream";
   const cap = streaming ? Math.min(route.maxDurationMs, streamLifetimeMs) : route.maxDurationMs;
   const budget = timeoutMs(health ? null : request.headers.get("grpc-timeout"), cap);
   if (budget === null) return rpcError(grpcStatus.invalidArgument, "Invalid grpc-timeout.");
@@ -191,7 +199,7 @@ export async function handleApiRequest(
       // domain refusal RESOURCE/rate_limited (PLT-11) with its retry instant (F17), and the Container never sees it.
       const limiter = env.IDENTITY_RATE_LIMITER;
       const underLimit = limiter ? (await bounded(limiter.limit({ key }), signal)).success : false;
-      if (!underLimit) return domainReplyBody(rateLimitedReplyAt(Date.now(), created));
+      if (!underLimit) return domainReplyBody(rateLimitedReplyAt(Date.now(), created, typedWatch));
     } else {
       const { success } = await bounded(env.HELLO_RATE_LIMITER.limit({ key }), signal);
       if (!success) return reject(429, "Hello rate limit exceeded.");

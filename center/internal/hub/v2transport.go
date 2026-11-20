@@ -17,6 +17,7 @@ import (
 type pendingV2Control struct {
 	id        platform.ID
 	authority management.V2ControlAuthority
+	selector  v2ControlSelector
 	binding   [sha256.Size]byte
 	kid       string
 	deadline  time.Time
@@ -32,9 +33,10 @@ type v2ControlOutcome struct {
 }
 
 type lateV2Control struct {
-	id      platform.ID
-	binding [sha256.Size]byte
-	until   time.Time
+	id       platform.ID
+	binding  [sha256.Size]byte
+	selector v2ControlSelector
+	until    time.Time
 }
 
 // The Node bounds simultaneous authenticated control workers independently of V1 routing quotas.
@@ -137,7 +139,13 @@ func (h *Hub) CallV2(ctx context.Context, authority management.V2ControlAuthorit
 	mutation := selector.requiresCommandID() && selector != v2ControlGetOperation
 	deadline := time.UnixMilli(call.Deadline.UnixMilli())
 	duration := deadline.Sub(now)
-	if duration <= 0 || duration > MaxCallDeadline || mutation && beforeSend == nil ||
+	maxDeadline := MaxCallDeadline
+	if selector.watch() || selector == v2DataInspectTransfer {
+		maxDeadline = 10 * time.Second
+	} else if selector.data() {
+		maxDeadline = 30 * time.Second
+	}
+	if !selector.known() || duration <= 0 || duration > maxDeadline || mutation && beforeSend == nil ||
 		selector != v2ControlGetOperation && call.OriginalOwnerEpoch != authority.NodeOwnerEpoch {
 		return nil, management.ErrV2ControlUnavailable
 	}
@@ -147,11 +155,18 @@ func (h *Hub) CallV2(ctx context.Context, authority management.V2ControlAuthorit
 	if err != nil {
 		return nil, err
 	}
+	c.mu.Lock()
+	streamData := c.capabilities[v2StreamDataCapability]
+	c.mu.Unlock()
+	if (selector.watch() || selector.data()) && !streamData {
+		return nil, management.ErrV2ControlUpgradeRequired
+	}
 	if current != authority || !h.reserveCall() {
 		return nil, management.ErrV2ControlUnavailable
 	}
 	defer h.releaseCall()
-	p := &pendingV2Control{id: platform.NewID(), authority: authority, deadline: deadline, ctx: ctx, done: make(chan v2ControlOutcome, 1)}
+	p := &pendingV2Control{id: platform.NewID(), authority: authority, selector: selector,
+		deadline: deadline, ctx: ctx, done: make(chan v2ControlOutcome, 1)}
 	if !c.reserveV2Control(p) {
 		return nil, management.ErrV2ControlUnavailable
 	}
@@ -255,7 +270,7 @@ func (c *conn) dropV2Control(p *pendingV2Control, keepLate bool) error {
 			if len(c.v2Late) == lateResults {
 				c.v2Late = c.v2Late[1:]
 			}
-			c.v2Late = append(c.v2Late, lateV2Control{id: p.id, binding: p.binding, until: p.deadline})
+			c.v2Late = append(c.v2Late, lateV2Control{id: p.id, binding: p.binding, selector: p.selector, until: p.deadline})
 		}
 	}
 	if p.claimed || p.started {
@@ -324,29 +339,22 @@ func (c *conn) beginV2ControlWrite(p *pendingV2Control, writerDeadline time.Time
 func (c *conn) v2ControlResult(result v2SignedControlResult) bool {
 	c.mu.Lock()
 	enabled := c.v2Ready && c.capabilities[v2ControlCapability]
-	p := c.v2Calls[result.CallID]
-	var binding [sha256.Size]byte
-	late := -1
-	if p != nil && p.started {
-		binding = p.binding
-	} else if p == nil {
-		for i, call := range c.v2Late {
-			if call.id == result.CallID {
-				late, binding = i, call.binding
-				break
-			}
-		}
-	}
+	p, late, selector, binding := c.v2ControlResultTargetLocked(result.CallID)
 	var violation string
 	switch {
 	case !enabled:
 		violation = "unexpected_frame"
 	case (p == nil || !p.started) && late < 0:
 		violation = "result_other_call"
+	case selector.resultKind() != result.Kind ||
+		(selector.watch() || selector.data()) && !c.capabilities[v2StreamDataCapability]:
+		violation = "result_mismatch"
 	case binding != result.RequestBinding:
 		violation = "result_mismatch"
 	case !verifyES256(c.publicKey, result.SigningInput, result.Signature[:]):
 		violation = "result_signature"
+	case !selector.validResultBody(result.Body):
+		violation = "result_mismatch"
 	}
 	if violation != "" {
 		c.mu.Unlock()
@@ -394,4 +402,17 @@ func (c *conn) v2ControlResult(result v2SignedControlResult) bool {
 	}
 	c.finishV2ControlLocked(p, v2ControlOutcome{body: result.Body})
 	return true
+}
+
+func (c *conn) v2ControlResultTargetLocked(id platform.ID) (*pendingV2Control, int, v2ControlSelector, [sha256.Size]byte) {
+	p := c.v2Calls[id]
+	if p != nil {
+		return p, -1, p.selector, p.binding
+	}
+	for i, call := range c.v2Late {
+		if call.id == id {
+			return nil, i, call.selector, call.binding
+		}
+	}
+	return nil, -1, 0, [sha256.Size]byte{}
 }

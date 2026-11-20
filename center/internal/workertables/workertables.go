@@ -260,6 +260,9 @@ func Render(table routes.WorkerTable) (string, error) {
 	text.WriteString("export const rateLimitedReplyInstantOffsets: readonly number[] = [" + joinInts(offsets) + "];\n")
 	text.WriteString("/** The width of each instant's seconds: five varint bytes hold every instant from 1974 to 2514. */\n")
 	text.WriteString("export const rateLimitedReplyInstantBytes = " + strconv.Itoa(instantSlotBytes) + ";\n")
+	if err := writeWatchErrorTemplates(&text); err != nil {
+		return "", err
+	}
 	text.WriteString("/** The period of the surface rate limit in seconds (wrangler.json IDENTITY_RATE_LIMITER simple.period). */\n")
 	text.WriteString("export const edgeRateLimitPeriodSeconds = " + strconv.Itoa(routes.EdgeRateLimitPeriodSeconds) + ";\n")
 	text.WriteString("/** The network that keys an IPv6 client at the edge rate limits; an IPv4 client is keyed by its whole address. */\n")
@@ -558,29 +561,80 @@ func rateLimitedReply() (string, []int, int, error) {
 	if err != nil {
 		return "", nil, 0, err
 	}
-	// An instant is field 1 (sint64, varint) and field 2 (nanos 0): the tag 0x08, the five seconds bytes, then 0x10 0x00.
-	slot := protowire.AppendVarint([]byte{0x08}, protowire.EncodeZigZag(templateSeconds))
-	if len(slot) != 1+instantSlotBytes {
-		return "", nil, 0, errors.New("the template's instant does not take five varint bytes")
-	}
-	slot = append(slot, 0x10, 0x00)
-	var offsets []int
-	for start := 0; ; {
-		index := bytes.Index(body[start:], slot)
-		if index < 0 {
-			break
-		}
-		offsets = append(offsets, start+index+1)
-		start += index + len(slot)
-	}
-	if len(offsets) != 2 {
-		return "", nil, 0, errors.New("the rate_limited template does not hold exactly its two instants")
+	offsets, err := rateLimitInstantOffsets(body)
+	if err != nil {
+		return "", nil, 0, err
 	}
 	correlationSlot, err := correlationOffset(body)
 	if err != nil {
 		return "", nil, 0, err
 	}
 	return base64.StdEncoding.EncodeToString(body), offsets, correlationSlot, nil
+}
+
+func rateLimitInstantOffsets(body []byte) ([]int, error) {
+	// An instant is field 1 (sint64, varint) and field 2 (nanos 0): the tag 0x08, the five seconds bytes, then 0x10 0x00.
+	slot := protowire.AppendVarint([]byte{0x08}, protowire.EncodeZigZag(templateSeconds))
+	if len(slot) != 1+instantSlotBytes {
+		return nil, errors.New("the template's instant does not take five varint bytes")
+	}
+	slot = append(slot, 0x10, 0x00)
+	offsets := templateOffsets(body, slot)
+	if len(offsets) != 2 {
+		return nil, errors.New("the rate_limited template does not hold exactly its two instants")
+	}
+	for i := range offsets {
+		offsets[i]++
+	}
+	return offsets, nil
+}
+
+func templateOffsets(body, marker []byte) []int {
+	var offsets []int
+	for start := 0; ; {
+		index := bytes.Index(body[start:], marker)
+		if index < 0 {
+			return offsets
+		}
+		offsets = append(offsets, start+index)
+		start += index + len(marker)
+	}
+}
+
+func watchErrorTemplate(refusal *arc.Refusal) ([]byte, []int, error) {
+	call := templateCorrelationContext()
+	message, err := ingress.WatchErrorMessage(refusal.ArcError(call), call)
+	if err != nil {
+		return nil, nil, err
+	}
+	body := append(ingress.Frame(message), ingress.TrailerFrame(ingress.StatusOK, "", false)...)
+	offsets := templateOffsets(body, correlation.IDBytes(TemplateCorrelation))
+	if len(offsets) != 2 {
+		return nil, nil, errors.New("a watch reply template must hold correlation in the frame and its error")
+	}
+	return body, offsets, nil
+}
+
+func writeWatchErrorTemplates(text *strings.Builder) error {
+	dark, darkOffsets, err := watchErrorTemplate(arc.NotActivated(routes.SurfaceNodes))
+	if err != nil {
+		return err
+	}
+	limited, limitedOffsets, err := watchErrorTemplate(arc.RateLimited("edge", 0, time.Unix(templateSeconds, 0)))
+	if err != nil {
+		return err
+	}
+	instants, err := rateLimitInstantOffsets(limited)
+	if err != nil {
+		return err
+	}
+	text.WriteString("/** The typed watch error frames for the dark nodes surface and the edge limit. Base64. */\n")
+	text.WriteString(constant("watchNotActivatedReply", quote(base64.StdEncoding.EncodeToString(dark))))
+	text.WriteString(constant("watchRateLimitedReply", quote(base64.StdEncoding.EncodeToString(limited))))
+	text.WriteString("export const watchNotActivatedReplyCorrelationOffsets: readonly number[] = [" + joinInts(darkOffsets) + "];\n")
+	text.WriteString("export const watchRateLimitedReplyCorrelationOffsets: readonly number[] = [" + joinInts(limitedOffsets) + "];\n")
+	text.WriteString("export const watchRateLimitedReplyInstantOffsets: readonly number[] = [" + joinInts(instants) + "];\n")
+	return nil
 }
 
 // Generate renders the table of the center's registrations.

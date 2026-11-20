@@ -58,6 +58,9 @@ WHERE device_id=$1 AND user_id=$2 AND revoked_at IS NULL`, node.id, who.id).Scan
 	policy := &sandboxv2.ResourcePolicy{PressureAction: sandboxv2.PressureAction_PRESSURE_ACTION_THROTTLE.Enum()}
 	config := &sandboxv2.SandboxConfig{ProfileId: proto.String("linux-bubblewrap-sdk-v1"), ProfileVersion: proto.String("1"), Resources: policy,
 		Network: &sandboxv2.NetworkPolicy{Egress: sandboxv2.NetworkMode_NETWORK_MODE_DENY.Enum(), Ingress: sandboxv2.NetworkMode_NETWORK_MODE_DENY.Enum()}}
+	transferID := idOf(platform.NewID())
+	chunk := []byte("fixture")
+	digest := sha256.Sum256(chunk)
 	typedRequests := map[string]proto.Message{
 		sandboxv2connect.NodeServiceRevokeRemoteGrantProcedure: &sandboxv2.NodeServiceRevokeRemoteGrantRequest{Meta: typedMeta(true),
 			GrantId: idOf(grantID), OwnerEpoch: ownerEpoch},
@@ -70,6 +73,17 @@ WHERE device_id=$1 AND user_id=$2 AND revoked_at IS NULL`, node.id, who.id).Scan
 		sandboxv2connect.RunServiceStopProcedure: &sandboxv2.RunServiceStopRequest{Meta: typedMeta(false), RunId: idOf(platform.NewID()), OwnerEpoch: ownerEpoch},
 		sandboxv2connect.ResourceServiceSetPolicyProcedure: &sandboxv2.ResourceServiceSetPolicyRequest{Meta: typedMeta(true),
 			ScopeKind: proto.String("sandbox"), ScopeId: sandboxID, Policy: policy, OwnerEpoch: ownerEpoch},
+		sandboxv2connect.DataServiceBeginImportProcedure: &sandboxv2.DataServiceBeginImportRequest{Meta: typedMeta(false),
+			SandboxId: sandboxID, RelativePath: proto.String("fixture.bin"), OwnerEpoch: ownerEpoch,
+			ByteLength: proto.Uint64(uint64(len(chunk))), Sha256: proto.String(fmt.Sprintf("%x", digest))},
+		sandboxv2connect.DataServiceWriteImportProcedure: &sandboxv2.DataServiceWriteImportRequest{Meta: typedMeta(false),
+			TransferId: transferID, Offset: proto.Uint64(0), Chunk: chunk, OwnerEpoch: ownerEpoch},
+		sandboxv2connect.DataServiceCommitImportProcedure: &sandboxv2.DataServiceCommitImportRequest{Meta: typedMeta(false),
+			TransferId: transferID, OwnerEpoch: ownerEpoch},
+		sandboxv2connect.DataServiceBeginExportProcedure: &sandboxv2.DataServiceBeginExportRequest{Meta: typedMeta(false),
+			SandboxId: sandboxID, RelativePath: proto.String("fixture.bin"), OwnerEpoch: ownerEpoch},
+		sandboxv2connect.DataServiceCloseTransferProcedure: &sandboxv2.DataServiceCloseTransferRequest{Meta: typedMeta(false),
+			TransferId: transferID, OwnerEpoch: ownerEpoch},
 	}
 	credential := h.credentialIDs(who.id)[0]
 	requests := map[string]proto.Message{
@@ -125,8 +139,8 @@ WHERE device_id=$1 AND user_id=$2 AND revoked_at IS NULL`, node.id, who.id).Scan
 	for path := range typedRequests {
 		t.Errorf("%s has a routed request, but the operation table opens it to mobile.limited", path)
 	}
-	if checked != 17 {
-		t.Fatalf("%d methods need the upgrade, want 17", checked)
+	if checked != 22 {
+		t.Fatalf("%d methods need the upgrade, want 22", checked)
 	}
 
 	// Its own session and device need neither the upgrade nor evidence.

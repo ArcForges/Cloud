@@ -299,7 +299,7 @@ func Operations() []Operation {
 		{Path: fleetv1connect.FleetServiceListNodeWorkspacesProcedure, ID: "fleet.listNodeWorkspaces", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
 		{Path: fleetv1connect.FleetServiceGetNodeWorkspaceProcedure, ID: "fleet.getNodeWorkspace", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
 	}
-	for _, method := range routes.ManagementMethods() {
+	for _, method := range slices.Concat(routes.ManagementMethods(), routes.ManagementDataMethods(), routes.ManagementWatchMethods()) {
 		row := Operation{Path: method.Path, ID: "fleet.v2." + method.ReceiptMethod(),
 			Risk: "R1", Session: true, Object: ObjectNode, Audit: AuditBeforeCall,
 			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput}

@@ -6,6 +6,12 @@ import (
 	"encoding/binary"
 	"strconv"
 	"strings"
+
+	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+	sandboxv2 "github.com/ArcForges/Contracts/go/arcforges/sandbox/v2"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/ArcForges/Cloud/center/internal/correlation"
 )
 
 // The gRPC-Web wire framing the pipeline reads and writes itself: one flag byte, a big-endian length and the payload. A gRPC
@@ -41,6 +47,14 @@ func Frame(message []byte) []byte {
 	binary.BigEndian.PutUint32(frame[1:], uint32(len(message)))
 	copy(frame[HeaderLength:], message)
 	return frame
+}
+
+// WatchErrorMessage is the shared wire shape of a terminal error in the
+// three V2 watch methods: ResponseMeta at field 1, ArcError at field 20.
+func WatchErrorMessage(value *foundationv1.ArcError, call correlation.Context) ([]byte, error) {
+	return proto.Marshal(&sandboxv2.RunServiceWatchOutputFrame{
+		Meta: ResponseMeta(call), Frame: &sandboxv2.RunServiceWatchOutputFrame_Error{Error: value},
+	})
 }
 
 // TrailerFrame is a gRPC-Web trailer frame: one "name: value" CRLF line per trailer, names already lowercase, the message

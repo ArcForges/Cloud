@@ -174,6 +174,16 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.v2.RunService.Inspect":            "R1 allowed none - no-receipt active",
 		"fleet.v2.ResourceService.GetBudget":     "R1 allowed none - no-receipt active",
 		"fleet.v2.ResourceService.SetPolicy":     "R3 upgrade none - no-receipt active",
+		"fleet.v2.RunService.WatchOutput":        "R1 allowed none - no-receipt active",
+		"fleet.v2.NodeService.WatchEvents":       "R1 allowed none - no-receipt active",
+		"fleet.v2.ResourceService.WatchUsage":    "R1 allowed none - no-receipt active",
+		"fleet.v2.DataService.BeginImport":       "R3 upgrade none - no-receipt active",
+		"fleet.v2.DataService.WriteImport":       "R3 upgrade none - no-receipt active",
+		"fleet.v2.DataService.CommitImport":      "R3 upgrade none - no-receipt active",
+		"fleet.v2.DataService.BeginExport":       "R3 upgrade none - no-receipt active",
+		"fleet.v2.DataService.ReadExport":        "R1 allowed none - no-receipt active",
+		"fleet.v2.DataService.InspectTransfer":   "R1 allowed none - no-receipt active",
+		"fleet.v2.DataService.CloseTransfer":     "R3 upgrade none - no-receipt active",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
 	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own", EvidenceOnApprove: "evidence-on-approve"}
@@ -379,6 +389,12 @@ func TestTypedManagementRowsAuthorizeOnlyTheOwningAccountAndRequiredFeature(t *t
 		"RunService.Start": feature.GroupControl, "RunService.Stop": feature.GroupControl,
 		"RunService.List": feature.GroupStatusAndOutput, "RunService.Inspect": feature.GroupStatusAndOutput,
 		"ResourceService.GetBudget": feature.GroupStatusAndOutput, "ResourceService.SetPolicy": feature.GroupControl,
+		"RunService.WatchOutput": feature.GroupStatusAndOutput, "NodeService.WatchEvents": feature.GroupStatusAndOutput,
+		"ResourceService.WatchUsage": feature.GroupStatusAndOutput,
+		"DataService.BeginImport":    feature.GroupControl, "DataService.WriteImport": feature.GroupControl,
+		"DataService.CommitImport": feature.GroupControl, "DataService.BeginExport": feature.GroupControl,
+		"DataService.ReadExport": feature.GroupStatusAndOutput, "DataService.InspectTransfer": feature.GroupStatusAndOutput,
+		"DataService.CloseTransfer": feature.GroupControl,
 	}
 	seen := 0
 	for _, operation := range Operations() {

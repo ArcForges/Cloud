@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"io"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -153,21 +152,24 @@ func (c *conn) run() {
 // read reads frames until the connection ends. A message is read through its own bound (the library's read limit is off), so a frame
 // over the bound closes 4413 instead of the library's 1009.
 func (c *conn) read() {
-	limit := int64(c.hub.settings.MaxFrameBytes)
 	for {
 		kind, reader, err := c.ws.Reader(c.ctx)
 		if err != nil {
 			c.ended(err)
 			return
 		}
-		data, err := io.ReadAll(io.LimitReader(reader, limit+1))
-		if err != nil {
-			c.ended(err)
-			return
-		}
-		if int64(len(data)) > limit {
+		data, err := c.readNodeFrame(reader, kind == websocket.MessageBinary)
+		if errors.Is(err, errNodeFrameTooLarge) {
 			c.hub.metrics.ObserveChannel("violation", "too_large")
 			c.closeWith(CloseTooLarge, "frame_too_large")
+			return
+		}
+		if errors.Is(err, errFrame) {
+			c.violation("unreadable_frame")
+			return
+		}
+		if err != nil {
+			c.ended(err)
 			return
 		}
 		if kind != websocket.MessageBinary {

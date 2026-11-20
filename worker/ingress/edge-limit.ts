@@ -10,6 +10,9 @@ import {
   rateLimitedReplyCorrelationOffset,
   rateLimitedReplyInstantBytes,
   rateLimitedReplyInstantOffsets,
+  watchRateLimitedReply,
+  watchRateLimitedReplyCorrelationOffsets,
+  watchRateLimitedReplyInstantOffsets,
 } from "../tables/center-tables.generated.ts";
 import { correlationIdBytes } from "./correlation.ts";
 
@@ -86,10 +89,17 @@ const zigzagFactor = 2;
 export function rateLimitedReplyAt(
   nowMilliseconds: number,
   correlationId: string,
+  typedWatch = false,
 ): Uint8Array<ArrayBuffer> {
-  const body = Uint8Array.from(atob(rateLimitedReply), (character) => character.charCodeAt(0));
+  const body = Uint8Array.from(
+    atob(typedWatch ? watchRateLimitedReply : rateLimitedReply),
+    (character) => character.charCodeAt(0),
+  );
   const seconds = Math.ceil(nowMilliseconds / millisecondsPerSecond) + edgeRateLimitPeriodSeconds;
-  for (const offset of rateLimitedReplyInstantOffsets) {
+  const instants = typedWatch
+    ? watchRateLimitedReplyInstantOffsets
+    : rateLimitedReplyInstantOffsets;
+  for (const offset of instants) {
     let value = seconds * zigzagFactor;
     for (let index = 0; index < rateLimitedReplyInstantBytes; index++) {
       const continuation = index < rateLimitedReplyInstantBytes - 1 ? varintRadix : 0;
@@ -97,6 +107,10 @@ export function rateLimitedReplyAt(
       value = Math.floor(value / varintRadix);
     }
   }
-  body.set(correlationIdBytes(correlationId), rateLimitedReplyCorrelationOffset);
+  const ids = typedWatch
+    ? watchRateLimitedReplyCorrelationOffsets
+    : [rateLimitedReplyCorrelationOffset];
+  const id = correlationIdBytes(correlationId);
+  for (const offset of ids) body.set(id, offset);
   return body;
 }

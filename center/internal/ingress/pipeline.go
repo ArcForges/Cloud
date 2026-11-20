@@ -165,7 +165,14 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 		// sends (this one carries the call's correlation id).
 		if p.options.SurfaceEnabled == nil || !p.options.SurfaceEnabled(policy.Surface) {
 			call := correlation.ForRequest(request.Header.Values(TraceparentHeader), "")
-			reply, err := arc.ReplyMessage(arc.NotActivated(policy.Surface).ArcError(call))
+			value := arc.NotActivated(policy.Surface).ArcError(call)
+			var reply []byte
+			var err error
+			if policy.Kind == ServerStream && policy.CarriesRemoteTarget {
+				reply, err = WatchErrorMessage(value, call)
+			} else {
+				reply, err = arc.ReplyMessage(value)
+			}
 			if err != nil {
 				p.refuse(writer, request, outcome, ReasonInvalidRequest)
 				return
@@ -250,6 +257,9 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 		Policy: policy, Caller: caller, Owner: owner,
 		Correlation: correlation.ForRequest(request.Header.Values(TraceparentHeader), stated),
 		ClientIP:    clientIP, Origin: origin, Message: message, RemoteTarget: remoteTarget,
+	}
+	if policy.Kind == ServerStream && policy.CarriesRemoteTarget {
+		call.writeDeadline = http.NewResponseController(writer).SetWriteDeadline
 	}
 	outcome.Call = call
 	p.observe(request, outcome)

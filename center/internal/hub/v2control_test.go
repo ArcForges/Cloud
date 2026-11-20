@@ -86,7 +86,7 @@ func TestV2ControlWireMatchesExactPeerVector(t *testing.T) {
 	}
 
 	result := v2ControlResult{CallID: request.CallID, RequestBinding: binding, Body: []byte{0x12, 0x00}}
-	resultFrame, err := encodeV2ControlResult(9, result, 1024, func(input []byte) ([]byte, error) {
+	resultFrame, err := encodeV2ControlResult(9, v2ControlStartRun, result, 1024, func(input []byte) ([]byte, error) {
 		if hash := fmt.Sprintf("%x", sha256.Sum256(input)); hash != wantResultInput {
 			t.Fatalf("result signer got metadata hash %s", hash)
 		}
@@ -95,7 +95,7 @@ func TestV2ControlWireMatchesExactPeerVector(t *testing.T) {
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(resultFrame)) != wantResultFrame {
 		t.Fatalf("result bytes did not match the peer vector: frame hash %x, %v", sha256.Sum256(resultFrame), err)
 	}
-	observed, err := decodeV2ControlResult(resultFrame, 9, len(resultFrame))
+	observed, err := decodeV2ControlResult(resultFrame, v2ControlResultKind, 9, len(resultFrame))
 	if err != nil || !reflect.DeepEqual(observed.v2ControlResult, result) || observed.BodySHA256 != sha256.Sum256(result.Body) ||
 		!bytes.Equal(observed.Signature[:], signature) || fmt.Sprintf("%x", sha256.Sum256(observed.SigningInput)) != wantResultInput {
 		t.Fatalf("result observation did not match signed bytes: %v", err)
@@ -121,7 +121,7 @@ func TestV2ControlWireChecksDirectionFrameBoundAndExactBody(t *testing.T) {
 		{"version", func(value []byte) { value[0] = 1 }},
 		{"direction", func(value []byte) { value[1] = 8 }},
 		{"sequence", func(value []byte) { binary.BigEndian.PutUint64(value[2:10], 2) }},
-		{"unknown method", func(value []byte) { value[header+16] = 14 }},
+		{"unknown method", func(value []byte) { value[header+16] = byte(v2DataCloseTransfer + 1) }},
 		{"zero grant revision", func(value []byte) { clear(value[header+161 : header+169]) }},
 		{"unsigned grant revision", func(value []byte) { value[header+161] = 0x80 }},
 		{"unsigned fence", func(value []byte) { value[header+169] = 0x80 }},
@@ -159,7 +159,7 @@ func TestV2ControlWireChecksDirectionFrameBoundAndExactBody(t *testing.T) {
 	}
 
 	result := v2ControlResult{CallID: request.CallID, RequestBinding: binding, Body: []byte{0x12, 0}}
-	resultFrame, err := encodeV2ControlResult(9, result, 1024, v2ControlInertSignature)
+	resultFrame, err := encodeV2ControlResult(9, v2ControlStartRun, result, 1024, v2ControlInertSignature)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,18 +177,18 @@ func TestV2ControlWireChecksDirectionFrameBoundAndExactBody(t *testing.T) {
 		t.Run("result "+tc.name, func(t *testing.T) {
 			changed := bytes.Clone(resultFrame)
 			tc.edit(changed)
-			if _, err := decodeV2ControlResult(changed, 9, len(changed)); err == nil {
+			if _, err := decodeV2ControlResult(changed, v2ControlResultKind, 9, len(changed)); err == nil {
 				t.Fatal("invalid result accepted")
 			}
 		})
 	}
-	if _, err := decodeV2ControlResult(append(bytes.Clone(resultFrame), 0), 9, 1024); err == nil {
+	if _, err := decodeV2ControlResult(append(bytes.Clone(resultFrame), 0), v2ControlResultKind, 9, 1024); err == nil {
 		t.Fatal("result accepted with trailing bytes")
 	}
-	if _, err := encodeV2ControlResult(9, result, len(resultFrame)-1, v2ControlInertSignature); err == nil {
+	if _, err := encodeV2ControlResult(9, v2ControlStartRun, result, len(resultFrame)-1, v2ControlInertSignature); err == nil {
 		t.Fatal("result encoder exceeded the negotiated full-frame bound")
 	}
-	if _, err := encodeV2ControlResult(9, result, 1024, func([]byte) ([]byte, error) { return make([]byte, 63), nil }); err == nil {
+	if _, err := encodeV2ControlResult(9, v2ControlStartRun, result, 1024, func([]byte) ([]byte, error) { return make([]byte, 63), nil }); err == nil {
 		t.Fatal("encoder accepted a short P1363 signature")
 	}
 }

@@ -87,10 +87,19 @@ type Call struct {
 	Message []byte
 	// RemoteTarget is selection metadata only; authorization must bind the
 	// selected target to the authenticated caller and the current local grant.
-	RemoteTarget *RemoteTarget
+	RemoteTarget  *RemoteTarget
+	writeDeadline func(time.Time) error
 	// after holds what runs when the call ends (AfterCall); finished is set once Finish ran.
 	after    []func()
 	finished bool
+}
+
+// SetStreamWriteDeadline bounds a write to the HTTP consumer of a typed watch.
+func (c *Call) SetStreamWriteDeadline(deadline time.Time) error {
+	if c.writeDeadline == nil {
+		return http.ErrNotSupported
+	}
+	return c.writeDeadline(deadline)
 }
 
 // AfterCall registers a release that runs when the call ends (Finish): a resource control that holds a resource for the call's

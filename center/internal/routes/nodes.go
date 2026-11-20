@@ -7,6 +7,7 @@ import (
 
 	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
 	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
+	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
 
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 )
@@ -135,18 +136,36 @@ func Nodes() (Module, error) {
 		module.Policies = append(module.Policies, policy)
 		module.Budgets[method.Path] = budget
 	}
-	for _, method := range ManagementMethods() {
-		policy, err := ingress.NewUnary(method.Path, ingress.Session, ingress.NoScope, ManagementRequestBytes, true)
+	for _, method := range append(ManagementMethods(), ManagementDataMethods()...) {
+		requestBytes, replyBytes := ManagementRequestBytes, RoutedReplyBytes
+		switch method.Path {
+		case sandboxv2connect.DataServiceWriteImportProcedure:
+			requestBytes = ingress.DataTransferWireBytes
+		case sandboxv2connect.DataServiceReadExportProcedure:
+			replyBytes = ingress.DataTransferWireBytes
+		}
+		policy, err := ingress.NewUnary(method.Path, ingress.Session, ingress.NoScope, requestBytes, true)
 		if err != nil {
 			return Module{}, err
 		}
-		policy = policy.InSurface(SurfaceNodes).WithDeadline(RoutedDeadline)
-		policy.CarriesRemoteTarget = true
-		module.Policies = append(module.Policies, policy)
-		module.Budgets[method.Path] = Budget{
-			MaxFrameBytes: RoutedReplyBytes, MaxUnaryResponseBytes: RoutedReplyBytes,
-			MaxDurationMilliseconds: int(RoutedDeadline.Milliseconds()), Instance: HealthInstance,
+		addManagementRoute(&module, policy, ManagementDeadline(method), replyBytes)
+	}
+	for _, method := range ManagementWatchMethods() {
+		policy, err := ingress.NewServerStream(method.Path, ingress.Session, ingress.NoScope, ingress.DefaultMaxRequestBytes, true)
+		if err != nil {
+			return Module{}, err
 		}
+		addManagementRoute(&module, policy, ManagementDeadline(method), RoutedReplyBytes)
 	}
 	return module, nil
+}
+
+func addManagementRoute(module *Module, policy ingress.Policy, deadline time.Duration, replyBytes int) {
+	policy = policy.InSurface(SurfaceNodes).WithDeadline(deadline)
+	policy.CarriesRemoteTarget = true
+	module.Policies = append(module.Policies, policy)
+	module.Budgets[policy.FullName] = Budget{
+		MaxFrameBytes: replyBytes, MaxUnaryResponseBytes: replyBytes,
+		MaxDurationMilliseconds: int(deadline.Milliseconds()), Instance: HealthInstance,
+	}
 }
