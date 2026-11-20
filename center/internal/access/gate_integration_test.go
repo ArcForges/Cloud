@@ -617,6 +617,14 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 		if routedOperation(operation.ID) {
 			continue
 		}
+		if strings.HasPrefix(operation.ID, "fleet.v2.") {
+			// The typed cohort has separate exact feature/authorization
+			// assertions in TestTypedManagementRowsAuthorizeOnlyTheOwningAccountAndRequiredFeature.
+			if operation.Feature == "" || operation.Object != ObjectNode || operation.Audit != AuditBeforeCall {
+				t.Errorf("%s: a typed management route has no target and feature guard", operation.ID)
+			}
+			continue
+		}
 		if strings.HasPrefix(operation.ID, "fleet.") {
 			// The node registry (AF-CTR-05 E2a) is never gated either (Q20); its rows that address one node name it (Object node).
 			registry := strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.FleetService/")

@@ -27,6 +27,10 @@ func TestLifecycleBackupRestoreRevokesAuthorityAndRetainsUnknown(t *testing.T) {
 	testManagementBackupRestore(t, 13)
 }
 
+func TestRemoteObservationBackupRestoreRetainsIdentityAndUncertainty(t *testing.T) {
+	testManagementBackupRestore(t, 14)
+}
+
 func testManagementBackupRestore(t *testing.T, version int) {
 	t.Helper()
 	ctx := context.Background()
@@ -34,15 +38,15 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	owner := pgtest.Connect(t, url)
 	group := name + "_runtime"
 	build := managementBuild(t)
-	if version == 13 {
-		build = centerBuild(t)
+	if version >= 13 {
+		build = centerBuild(t)[:version]
 	}
 	if _, err := Apply(ctx, owner, build, Options{Runner: "isolated-schema12-backup-source", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
 	var authority lifecycleAuthority
 	var export, recovery, deletion platform.ID
-	if version == 13 {
+	if version >= 13 {
 		authority = seedLifecycleAuthority(t, owner)
 		export, recovery, deletion = platform.NewID(), platform.NewID(), platform.NewID()
 		// Supplied source facts exercise restore preservation, not the business
@@ -61,11 +65,11 @@ func testManagementBackupRestore(t *testing.T, version int) {
 		}
 	}
 	f := seedNamespaceFixture(t, owner)
-	channel, holder := platform.NewID(), platform.NewID()
+	channel, holder, protocol := platform.NewID(), platform.NewID(), platform.NewID()
 	if _, err := owner.Exec(ctx, `UPDATE fleet.node SET online_since=now(),connection_id=$1 WHERE enrollment_id=$2`, channel, f.enrollment); err != nil {
 		t.Fatal(store.Sanitize("seed fixture channel identity", err))
 	}
-	if _, err := owner.Exec(ctx, `INSERT INTO management.node_protocol(enrollment_id,node_id,account_id,protocol_major,protocol_epoch,initialized_at,rev) VALUES($1,$2,$3,2,$4,now(),1)`, f.enrollment, f.node, f.account, platform.NewID()); err != nil {
+	if _, err := owner.Exec(ctx, `INSERT INTO management.node_protocol(enrollment_id,node_id,account_id,protocol_major,protocol_epoch,initialized_at,rev) VALUES($1,$2,$3,2,$4,now(),1)`, f.enrollment, f.node, f.account, protocol); err != nil {
 		t.Fatal(store.Sanitize("seed fixture protocol identity", err))
 	}
 	if _, err := owner.Exec(ctx, `INSERT INTO fleet.hub_lease(singleton,holder,fence,acquired_at,renewed_at,expires_at) VALUES(true,$1,1,now(),now(),now()+interval '5 minutes')`, holder); err != nil {
@@ -74,20 +78,33 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	runtime, sqlRuntime := managementRuntime(t, owner, url, group)
 	identity := management.Identity{Account: f.account, Command: platform.NewID(), Enrollment: f.enrollment, Node: f.node, OwnerEpoch: [16]byte(platform.NewID()), IntentSHA256: sha256.Sum256([]byte("supplied unresolved operation identity")), Method: "RunService.Start", CreatedAt: time.Now().UTC(), ReplayUntil: time.Now().Add(time.Hour).UTC()}
 	lease := management.Lease{Holder: holder, ChannelEpoch: channel, Fence: 1}
-	if _, inserted, err := runtime.Reserve(ctx, identity, lease); err != nil || !inserted {
+	if version == 14 {
+		identity.Actor, identity.Grant, identity.GrantRevision = platform.NewID(), platform.NewID(), 4
+		lease.ProtocolEpoch = protocol
+	}
+	reserved, inserted, err := runtime.Reserve(ctx, identity, lease)
+	if err != nil || !inserted {
 		t.Fatalf("reserve input fixture: %v", err)
 	}
-	if _, err := sqlRuntime.Exec(ctx, `UPDATE management.remote_operation SET state=7,may_have_delivered=true,effect=3,delivery_count=1,updated_at=clock_timestamp()`); err != nil {
+	if version == 14 {
+		if _, won, err := runtime.MarkPossiblyDelivered(ctx, identity, lease, reserved); err != nil || !won {
+			t.Fatalf("claim the original routing observation: %v", err)
+		}
+		if receipt, err := runtime.MarkUnknown(ctx, identity, lease); err != nil || receipt.State != management.StateUnknown {
+			t.Fatalf("retain uncertainty after the original claim: %v", err)
+		}
+	} else if _, err := sqlRuntime.Exec(ctx, `UPDATE management.remote_operation SET state=7,may_have_delivered=true,effect=3,delivery_count=1,updated_at=clock_timestamp()`); err != nil {
 		t.Fatal(store.Sanitize("record supplied unknown fixture", err))
 	}
 	dir := t.TempDir()
 	archive, metadata := filepath.Join(dir, "source.dump"), filepath.Join(dir, "source.json")
 	captured, err := CaptureLogical(ctx, managementConfig(url, name, group), archive, metadata)
 	if err != nil || captured.SchemaVersion != version {
-		t.Fatalf("schema12 real snapshot: %v", err)
+		t.Fatalf("schema%d real snapshot: %v", version, err)
 	}
 	var sourceAdmission string
-	if err := owner.QueryRow(ctx, "SELECT encode(database_identity_sha256,'hex') FROM management.cutover_receipt WHERE target_schema=$1", version).Scan(&sourceAdmission); err != nil {
+	cutoverVersion := min(version, 13)
+	if err := owner.QueryRow(ctx, "SELECT encode(database_identity_sha256,'hex') FROM management.cutover_receipt WHERE target_schema=$1", cutoverVersion).Scan(&sourceAdmission); err != nil {
 		t.Fatal("source admission unavailable")
 	}
 	target := name + "_restored"
@@ -96,7 +113,7 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	cfg := config.Migration{Mode: config.SelfHosted, URL: pgtest.WithDatabase(t, url, target), Maintenance: url, Database: target, RuntimeRole: targetRole}
 	restored, err := RestoreLogical(ctx, cfg, archive, captured.ArchiveSHA256, metadata, captured.MetadataSHA256, "isolated-schema12-restore-target")
 	if err != nil || restored.SchemaVersion != version || restored.RestoreReceipt == "" || restored.SourceBackupSHA256 != captured.ArchiveSHA256 {
-		t.Fatalf("schema12 real restore: %v", err)
+		t.Fatalf("schema%d real restore: %v", version, err)
 	}
 	destination := pgtest.Connect(t, cfg.URL)
 	status, err := Inspect(ctx, destination, build)
@@ -109,10 +126,10 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	if err := destination.QueryRow(ctx, `SELECT (SELECT count(*) FROM management.cutover_receipt),
  (SELECT encode(database_identity_sha256,'hex') FROM management.cutover_receipt WHERE target_schema=$2),
  (SELECT count(*) FROM management.node_protocol WHERE revoked_at IS NOT NULL),
- (SELECT connection_id IS NULL FROM fleet.node WHERE enrollment_id=$1)`, f.enrollment, version).Scan(&readyCount, &targetAdmission, &revoked, &channelAbsent); err != nil || readyCount != version-11 || targetAdmission == sourceAdmission || revoked != 1 || !channelAbsent {
+ (SELECT connection_id IS NULL FROM fleet.node WHERE enrollment_id=$1)`, f.enrollment, cutoverVersion).Scan(&readyCount, &targetAdmission, &revoked, &channelAbsent); err != nil || readyCount != cutoverVersion-11 || targetAdmission == sourceAdmission || revoked != 1 || !channelAbsent {
 		t.Fatal("source ready/channel authority survived as target authority")
 	}
-	if version == 13 {
+	if version >= 13 {
 		var auth, generation, oldAuth, oldGeneration int64
 		var revokedSession, provedConsumed, pendingDenied, retainedExport bool
 		var exportState, recoveryState, deletionState int
@@ -134,6 +151,18 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	retained, inserted, err := restoredRuntime.Reserve(ctx, identity, lease)
 	if err != nil || inserted || retained.State != 7 || !retained.MayHaveDelivered || retained.Effect == nil || *retained.Effect != 3 {
 		t.Fatalf("unknown identity was forgotten or re-executed: inserted=%v err=%v", inserted, err)
+	}
+	if version == 14 {
+		authority := management.Authority{
+			Account: identity.Account, Actor: identity.Actor, Enrollment: identity.Enrollment,
+			Node: identity.Node, Grant: identity.Grant, GrantRevision: identity.GrantRevision,
+		}
+		original, observed, err := restoredRuntime.InspectOriginal(ctx, authority, identity.Command)
+		if err != nil || original.OwnerEpoch != identity.OwnerEpoch || original.IntentSHA256 != identity.IntentSHA256 ||
+			observed.State != management.StateUnknown || !observed.MayHaveDelivered || observed.DeliveryCount != 1 ||
+			observed.FinalAt != nil || observed.Reason != "operation_unknown" {
+			t.Fatalf("the original scope or uncertain observation changed across the archive restore: %v", err)
+		}
 	}
 	newCommand := identity
 	newCommand.Command = platform.NewID()

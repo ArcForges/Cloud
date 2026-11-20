@@ -515,6 +515,7 @@ func (c *conn) failCalls() {
 		delete(c.calls, id)
 	}
 	c.nonces = nil
+	c.failV2ControlsLocked()
 	c.mu.Unlock()
 	for _, p := range calls {
 		p.finish(outcome{refusal: p.unreachable(c.nodeID, arc.UnreachableChannelClosed)})

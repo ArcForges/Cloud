@@ -29,6 +29,8 @@ func backupDefinition(version int) (inventory, catalogue string, err error) {
 		return managementSchema12Inventory, managementSchema12CatalogueSHA, nil
 	case 13:
 		return lifecycleBackupDefinition()
+	case 14:
+		return remoteObservationBackupDefinition()
 	default:
 		return "", "", errors.New("unsupported logical backup schema")
 	}

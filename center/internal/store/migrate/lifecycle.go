@@ -34,9 +34,12 @@ func ApplyLifecycle(ctx context.Context, conn *pgx.Conn, build []Migration, opti
 	if options.BridgeProof != nil || cfg.CTR06BridgeExecutable != "" || cfg.CTR06ProofFile != "" {
 		return Result{State: StateRefused}, ErrManagementSuccessorUnqualified
 	}
-	if len(build) != 13 || build[11].Name != "0012_management_storage.sql" || build[12].Name != "0013_account_lifecycle.sql" {
+	if len(build) < 13 || build[11].Name != "0012_management_storage.sql" || build[12].Name != "0013_account_lifecycle.sql" {
 		return Result{State: StateRefused}, ErrRefused
 	}
+	// This finite admission proves only its original schema12 to schema13
+	// transition. A later append runs through the ordinary migration entry.
+	build = build[:13]
 	options.defaults()
 	if err := lock(ctx, conn, options); err != nil {
 		return Result{}, err

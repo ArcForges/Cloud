@@ -502,7 +502,7 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 		}
 		options.management = &managementAdmission{conn: conn, source: 0, artifactDigest: artifact, active: true}
 		defer func() { options.management.active = false }()
-		if len(build) == 13 && build[12].Name == "0013_account_lifecycle.sql" {
+		if len(build) >= 13 && build[12].Name == "0013_account_lifecycle.sql" {
 			artifact, err := managementArtifact(options.Runner, build[12])
 			if err != nil {
 				return result, err

@@ -28,6 +28,7 @@ import { bounded, readBytes, reject, rpcError } from "./io.ts";
 import { apexTable, handleApexRequest } from "./applink.ts";
 import { handleNativeRequest, nativeTable } from "./native.ts";
 import { handlePageRequest, pageTable } from "./pages.ts";
+import { forwardRemoteTarget } from "./remote-target.ts";
 import { handleUpgradeRequest, upgradeTable } from "./upgrade.ts";
 import { healthRoute } from "../tables/center-tables.generated.ts";
 import { bodyReadMilliseconds } from "../tables/cloud-tables.generated.ts";
@@ -214,6 +215,8 @@ export async function handleApiRequest(
       if (!credentials.ok) return rpcError(credentials.code, credentials.message);
       for (const [name, value] of Object.entries(credentials.headers)) headers.set(name, value);
     }
+    if (route.remoteTarget && !forwardRemoteTarget(request.headers, headers))
+      return rpcError(grpcStatus.invalidArgument, invalidRequestKey);
     if (Number(request.headers.get("content-length") ?? "0") > route.maxRequestBytes && !health) {
       return reject(413, `Request body exceeds ${route.maxRequestBytes} bytes.`);
     }

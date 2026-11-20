@@ -6,9 +6,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,12 +39,11 @@ type conn struct {
 	sessionID, userID, deviceID, installationID platform.ID
 	nodeID, enrollmentID                        platform.ID
 	// nodeName is the node's registry name as the upgrade read it: ChannelAccepted.node_name (AF-CTR-05 E2a; Plan Q25).
-	nodeName          string
-	publicKey         []byte
-	connectionID      platform.ID
-	correlationID     *platform.ID
-	fence             int64
-	upgradeAccessHash [32]byte
+	nodeName      string
+	publicKey     []byte
+	connectionID  platform.ID
+	correlationID *platform.ID
+	fence         int64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -69,7 +70,8 @@ type conn struct {
 	v2Capabilities []string
 	v2Ready        bool
 	recorded       bool     // the accept's presence write succeeded: the close records the node offline
-	tokenDigest    [32]byte // the SHA-256 of the access token the connection is bound to
+	tokenDigest    [32]byte // SHA-256 of the wire token text, used to recognize an unchanged refresh
+	v2AccessHash   [32]byte // SHA-256 of the decoded credential, matched against the store for V2
 	refreshes      int      // the TokenRefresh frames the connection sent
 	lastRefresh    time.Time
 	accessExpires  time.Time
@@ -85,6 +87,8 @@ type conn struct {
 	late        []lateCall
 	forgotten   []platform.ID
 	nonces      []relayNonce
+	v2Calls     map[platform.ID]*pendingV2Control
+	v2Late      []lateV2Control
 
 	queue chan outbound
 	// stall holds the writer after it took a frame until it is closed (tests only: a stalled writer; nil in a running center).
@@ -116,8 +120,9 @@ func (c *conn) wire() Codec {
 
 // outbound is one queued frame; call is the call it carries, marked delivered when the writer starts writing it.
 type outbound struct {
-	data []byte
-	call *pending
+	data      []byte
+	call      *pending
+	v2Control *pendingV2Control
 }
 
 // run serves the connection until it closes: the challenge, the reader, the writer and the supervisor. The writer starts first: a close
@@ -246,6 +251,8 @@ func (c *conn) handle(frame inbound, now time.Time) bool {
 		return c.relayNonce(frame, now)
 	case frame.kind == inboundResult:
 		return c.result(frame.result)
+	case frame.kind == inboundV2ControlResult:
+		return c.v2ControlResult(frame.v2Result)
 	}
 	c.violation("unexpected_frame")
 	return false
@@ -524,8 +531,17 @@ func (c *conn) tokenRefresh(token string, now time.Time) bool {
 		c.closeWith(CloseRefused, "upgrade_required")
 		return false
 	}
+	var v2AccessHash [32]byte
+	if c.v2 != nil {
+		secret, ok := session.ParseToken(session.AccessPrefix, token)
+		if !ok {
+			c.closeWith(CloseCredential, "token_refused")
+			return false
+		}
+		v2AccessHash = secret.Digest()
+	}
 	c.mu.Lock()
-	c.accessExpires, c.tokenDigest = expires, digest
+	c.accessExpires, c.tokenDigest, c.v2AccessHash = expires, digest, v2AccessHash
 	c.mu.Unlock()
 	c.hub.metrics.ObserveChannel("token", "rebound")
 	c.recheckSession(ctx)
@@ -672,6 +688,15 @@ func (c *conn) send(encode func(seq uint64) ([]byte, error)) error {
 	if c.closing.Load() {
 		return errQueueFull
 	}
+	if c.v2 != nil {
+		// V2 uses a contiguous emitted sequence. A declined control frame may be dropped
+		// before the writer takes its sequence, even if later heartbeats are already queued.
+		data, err := encode(0)
+		if err != nil {
+			return err
+		}
+		return c.enqueue(outbound{data: data})
+	}
 	next := c.sentSeq + 1
 	data, err := encode(next)
 	if err != nil {
@@ -788,6 +813,16 @@ func (c *conn) write(item outbound) bool {
 		}
 	}
 	deadline := time.Now().Add(c.hub.settings.WriteTimeout)
+	if item.v2Control != nil {
+		bounded, releaseNode, ok := c.beginV2ControlWrite(item.v2Control, deadline)
+		if !ok {
+			return true
+		}
+		defer releaseNode()
+		if bounded.Before(deadline) {
+			deadline = bounded
+		}
+	}
 	replay := item.call != nil && fileCall(item.call.method) && !item.call.replayUntil.IsZero()
 	if replay {
 		// This observation is before invoking the WebSocket write. A write that has
@@ -807,6 +842,11 @@ func (c *conn) write(item outbound) bool {
 		c.abandonUnwrittenReplay(item.call)
 		return true
 	}
+	if c.v2 != nil && !c.assignV2WriteSequence(item.data) {
+		cancel()
+		c.closeWith(CloseShuttingDown, "sequence_exhausted")
+		return false
+	}
 	err := c.ws.Write(write, websocket.MessageBinary, item.data)
 	cancel()
 	if err != nil {
@@ -816,6 +856,20 @@ func (c *conn) write(item outbound) bool {
 		}
 		return false
 	}
+	if item.v2Control != nil {
+		c.reportV2Control(item.v2Control, "send", "frame_written")
+	}
+	return true
+}
+
+func (c *conn) assignV2WriteSequence(data []byte) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sentSeq == math.MaxUint64 || len(data) < v2HeaderBytes {
+		return false
+	}
+	c.sentSeq++
+	binary.BigEndian.PutUint64(data[2:v2HeaderBytes], c.sentSeq)
 	return true
 }
 
@@ -883,8 +937,12 @@ func (c *conn) closeWith(code uint32, reason string) {
 				hint = c.hub.reconnectHint()
 			}
 			c.mu.Lock()
-			c.sentSeq++
-			frame, err := c.wire().Close(c.sentSeq, code, reason, hint)
+			var frame []byte
+			err := errFrame
+			if c.v2 == nil || c.sentSeq < math.MaxUint64 {
+				c.sentSeq++
+				frame, err = c.wire().Close(c.sentSeq, code, reason, hint)
+			}
 			c.mu.Unlock()
 			if err == nil {
 				_ = c.ws.Write(c.writes, websocket.MessageBinary, frame)

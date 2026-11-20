@@ -149,18 +149,31 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.readNodeTaskOutput": "R1 allowed none - no-receipt active relayed:node",
 		"fleet.cancelNodeTask":     "R2 upgrade evidence node no-receipt active relayed:node",
 		// AF-CTR-06: six mutations use routed receipts; five require method/target step-up; planning and queries are low risk.
-		"fleet.readNodeFile":            "R1 allowed none - no-receipt active relayed:node",
-		"fleet.writeNodeFile":           "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.editNodeFile":            "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.searchNodeFiles":         "R1 allowed none - no-receipt active relayed:node",
-		"fleet.listNodeDirectory":       "R1 allowed none - no-receipt active relayed:node",
-		"fleet.planNodeRemoval":         "R1 allowed none - no-receipt active relayed:node",
-		"fleet.executeNodeRemoval":      "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.getNodeFileOperation":    "R1 allowed none - no-receipt active relayed:node",
-		"fleet.registerNodeWorkspace":   "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.unregisterNodeWorkspace": "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.listNodeWorkspaces":      "R1 allowed none - no-receipt active relayed:node",
-		"fleet.getNodeWorkspace":        "R1 allowed none - no-receipt active relayed:node",
+		"fleet.readNodeFile":                     "R1 allowed none - no-receipt active relayed:node",
+		"fleet.writeNodeFile":                    "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.editNodeFile":                     "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.searchNodeFiles":                  "R1 allowed none - no-receipt active relayed:node",
+		"fleet.listNodeDirectory":                "R1 allowed none - no-receipt active relayed:node",
+		"fleet.planNodeRemoval":                  "R1 allowed none - no-receipt active relayed:node",
+		"fleet.executeNodeRemoval":               "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.getNodeFileOperation":             "R1 allowed none - no-receipt active relayed:node",
+		"fleet.registerNodeWorkspace":            "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.unregisterNodeWorkspace":          "R3 upgrade evidence node no-receipt active relayed:node",
+		"fleet.listNodeWorkspaces":               "R1 allowed none - no-receipt active relayed:node",
+		"fleet.getNodeWorkspace":                 "R1 allowed none - no-receipt active relayed:node",
+		"fleet.v2.NodeService.GetOperation":      "R1 allowed none - no-receipt active",
+		"fleet.v2.NodeService.ListRemoteGrants":  "R1 allowed none - no-receipt active",
+		"fleet.v2.NodeService.RevokeRemoteGrant": "R3 upgrade none - no-receipt active",
+		"fleet.v2.SandboxService.Create":         "R3 upgrade none - no-receipt active",
+		"fleet.v2.SandboxService.Configure":      "R3 upgrade none - no-receipt active",
+		"fleet.v2.SandboxService.List":           "R1 allowed none - no-receipt active",
+		"fleet.v2.SandboxService.Inspect":        "R1 allowed none - no-receipt active",
+		"fleet.v2.RunService.Start":              "R3 upgrade none - no-receipt active",
+		"fleet.v2.RunService.Stop":               "R3 upgrade none - no-receipt active",
+		"fleet.v2.RunService.List":               "R1 allowed none - no-receipt active",
+		"fleet.v2.RunService.Inspect":            "R1 allowed none - no-receipt active",
+		"fleet.v2.ResourceService.GetBudget":     "R1 allowed none - no-receipt active",
+		"fleet.v2.ResourceService.SetPolicy":     "R3 upgrade none - no-receipt active",
 	}
 	mobile := map[MobileLimited]string{Allowed: "allowed", Upgrade: "upgrade", UpgradeUnlessOwn: "upgrade-unless-own"}
 	evidence := map[StepUp]string{NoEvidence: "none", Evidence: "evidence", EvidenceUnlessOwn: "evidence-unless-own", EvidenceOnApprove: "evidence-on-approve"}
@@ -250,7 +263,7 @@ func TestTheMobileLimitedRules(t *testing.T) {
 func TestFleetRowsCarryNoFeature(t *testing.T) {
 	rows := 0
 	for _, operation := range Operations() {
-		if !strings.HasPrefix(operation.ID, "fleet.") || operation.ID == "fleet.nodeChannel" || routedOperation(operation.ID) {
+		if !strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.") || operation.ID == "fleet.nodeChannel" || routedOperation(operation.ID) {
 			// The node channel is the first gated row (AF-CTR-05 E1a): TestOperationRowsAreCheckedForConsistency pins it; the routed
 			// task rows (E2b) are gated by their groups' keys, pinned by TestTheRoutedRowsAreGatedByTheirGroups.
 			continue
@@ -354,5 +367,35 @@ func TestTheRoutedRowsAreGatedByTheirGroups(t *testing.T) {
 	}
 	if seen != len(want) {
 		t.Fatalf("%d routed rows", seen)
+	}
+}
+
+func TestTypedManagementRowsAuthorizeOnlyTheOwningAccountAndRequiredFeature(t *testing.T) {
+	want := map[string]feature.Group{
+		"NodeService.GetOperation": feature.GroupStatusAndOutput, "NodeService.ListRemoteGrants": feature.GroupStatusAndOutput,
+		"NodeService.RevokeRemoteGrant": feature.GroupControl,
+		"SandboxService.Create":         feature.GroupControl, "SandboxService.Configure": feature.GroupControl,
+		"SandboxService.List": feature.GroupStatusAndOutput, "SandboxService.Inspect": feature.GroupStatusAndOutput,
+		"RunService.Start": feature.GroupControl, "RunService.Stop": feature.GroupControl,
+		"RunService.List": feature.GroupStatusAndOutput, "RunService.Inspect": feature.GroupStatusAndOutput,
+		"ResourceService.GetBudget": feature.GroupStatusAndOutput, "ResourceService.SetPolicy": feature.GroupControl,
+	}
+	seen := 0
+	for _, operation := range Operations() {
+		name, typed := strings.CutPrefix(operation.ID, "fleet.v2.")
+		if !typed {
+			continue
+		}
+		group, declared := want[name]
+		key, _ := feature.KeyOfGroup(group)
+		if !declared || !operation.Session || operation.Restricted || operation.Object != ObjectNode ||
+			len(operation.Scopes) != 0 || len(operation.RelayedScopes) != 0 || operation.Audit != AuditBeforeCall ||
+			operation.Feature != key || operation.Group != group || CheckRow(operation) != nil {
+			t.Errorf("typed management operation %s: %+v", name, operation)
+		}
+		seen++
+	}
+	if seen != len(want) {
+		t.Fatalf("typed management table has %d rows, want %d", seen, len(want))
 	}
 }

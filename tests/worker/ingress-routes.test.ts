@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { edgeCredentials } from "../../worker/ingress/edge-caller.ts";
+import { handleApiRequest, type IngressEnv } from "../../worker/ingress/pipeline.ts";
 import { proofRouteTable } from "../../worker/ingress/proof-table.ts";
 import {
   findRoute,
@@ -17,6 +18,13 @@ import {
   type ApiRoute,
 } from "../../worker/ingress/routes.ts";
 import { proofRoutes } from "../../worker/tables/cloud-tables.generated.ts";
+import {
+  remoteEnrollmentHeader,
+  remoteGrantHeader,
+  remoteGrantRevisionHeader,
+  remoteNodeHeader,
+  surfaceRoutes,
+} from "../../worker/tables/center-tables.generated.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const namePattern =
@@ -79,6 +87,85 @@ test("the edge credential check needs a whole Origin match and never reads a coo
     false,
   );
   assert.equal(edgeCredentials(request({ authorization: cookie }), "https://o.test").ok, false);
+});
+
+test("only fixed typed management routes forward normalized target selection headers", async () => {
+  const selected = surfaceRoutes.filter((route) => route.remoteTarget);
+  assert.equal(selected.length, 13);
+  assert.ok(
+    selected.every(
+      (route) => route.surface === "nodes" && route.auth === "session" && route.kind === "unary",
+    ),
+  );
+  const forwarded: Request[] = [];
+  const env: IngressEnv = {
+    SOURCE_REVISION: "worker-route-fixture",
+    FLAGSHIP_SURFACES: "identity,pages,fleet,relay,nodes",
+    HELLO_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    IDENTITY_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    CLOUD_CONTAINER: {
+      getByName: () => ({
+        fetch: async (request) => {
+          forwarded.push(request);
+          return new Response(null, {
+            headers: { "Content-Type": "application/grpc-web+proto", "grpc-status": "0" },
+          });
+        },
+      }),
+    },
+  };
+  const node = "C0000000-0000-0000-0000-000000000001";
+  const enrollment = "C0000000-0000-0000-0000-000000000002";
+  const grant = "C0000000-0000-0000-0000-000000000003";
+  const headers = {
+    "content-type": "application/grpc-web+proto",
+    "cf-connecting-ip": "203.0.113.10",
+    authorization: `Bearer ${"t".repeat(40)}`,
+    [remoteNodeHeader]: node,
+    [remoteEnrollmentHeader]: enrollment,
+    [remoteGrantHeader]: grant,
+    [remoteGrantRevisionHeader]: "9223372036854775807",
+    "x-arcforges-account-id": node,
+    "x-arcforges-actor-id": node,
+  };
+  const request = (method: string, overrides: Record<string, string> = {}) =>
+    new Request(`https://example.test/api${method}`, {
+      method: "POST",
+      headers: { ...headers, ...overrides },
+      body: new Uint8Array([0, 0, 0, 0, 0]),
+    });
+  const typed = "/arcforges.sandbox.v2.RunService/Start";
+  await handleApiRequest(request(typed), env);
+  assert.equal(forwarded.length, 1);
+  const [routed] = forwarded;
+  assert.ok(routed);
+  assert.equal(routed.headers.get(remoteNodeHeader), node.toLowerCase());
+  assert.equal(routed.headers.get(remoteEnrollmentHeader), enrollment.toLowerCase());
+  assert.equal(routed.headers.get(remoteGrantHeader), grant.toLowerCase());
+  assert.equal(routed.headers.get(remoteGrantRevisionHeader), "9223372036854775807");
+  assert.equal(routed.headers.get("x-arcforges-account-id"), null);
+  assert.equal(routed.headers.get("x-arcforges-actor-id"), null);
+
+  for (const invalid of ["0", "01", "+1", "1, 2", "9223372036854775808"])
+    await handleApiRequest(request(typed, { [remoteGrantRevisionHeader]: invalid }), env);
+  await handleApiRequest(request(typed, { [remoteNodeHeader]: `${node}, ${node}` }), env);
+  assert.equal(forwarded.length, 1, "malformed typed target selections never reach the Center");
+
+  await handleApiRequest(request("/arcforges.management.v2.DeviceService/List"), env);
+  assert.equal(forwarded.length, 2);
+  const [, unrelated] = forwarded;
+  assert.ok(unrelated);
+  for (const name of [
+    remoteNodeHeader,
+    remoteEnrollmentHeader,
+    remoteGrantHeader,
+    remoteGrantRevisionHeader,
+  ])
+    assert.equal(
+      unrelated.headers.get(name),
+      null,
+      "an unrelated route never forwards target selection",
+    );
 });
 
 // The agreement of this table with the C# host's registrations is no longer a regex over C# sources: the table is generated

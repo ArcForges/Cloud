@@ -127,14 +127,14 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.refuse(writer, call, http.StatusForbidden, arc.InvalidState("node", "upgrade_required"))
 		return
 	}
-	var upgradeAccessHash [32]byte
+	var v2AccessHash [32]byte
 	if isV2 {
 		secret, valid := session.ParseToken(session.AccessPrefix, token)
 		if !valid {
 			h.refuse(writer, call, 0, arc.Unauthenticated())
 			return
 		}
-		upgradeAccessHash = secret.Digest()
+		v2AccessHash = secret.Digest()
 	}
 	release := func() {}
 	if h.options.Slot != nil {
@@ -172,15 +172,15 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	c := &conn{hub: h, ws: ws, sessionID: parseID(caller.SessionID), userID: parseID(caller.UserID), deviceID: parseID(caller.DeviceID),
 		installationID: parseID(caller.InstallationID), nodeID: node.nodeID, enrollmentID: node.enrollmentID, nodeName: node.name, publicKey: node.publicKey,
 		connectionID: platform.NewID(), fence: fence, accessExpires: expires, tokenDigest: sha256.Sum256([]byte(token)), queue: make(chan outbound, h.settings.SendQueueFrames),
-		upgradeAccessHash: upgradeAccessHash,
-		calls:             map[platform.ID]*pending{}, stopWrites: make(chan struct{}), writerDone: make(chan struct{}), closeDone: make(chan struct{}),
+		v2AccessHash: v2AccessHash,
+		calls:        map[platform.ID]*pending{}, stopWrites: make(chan struct{}), writerDone: make(chan struct{}), closeDone: make(chan struct{}),
 		finished: make(chan struct{})}
 	if isV2 {
 		epoch := node.protocolEpoch
 		if epoch == (platform.ID{}) {
 			epoch = platform.NewID()
 		}
-		c.v2 = &v2Codec{enrollment: c.enrollmentID, epoch: epoch, account: c.userID, fence: fence}
+		c.v2 = &v2Codec{enrollment: c.enrollmentID, epoch: epoch, account: c.userID, fence: fence, maxFrameBytes: h.settings.MaxFrameBytes}
 	}
 	if raw := correlation.IDBytes(call.CorrelationID); len(raw) == 16 {
 		var id platform.ID

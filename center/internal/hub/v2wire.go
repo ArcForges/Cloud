@@ -43,6 +43,7 @@ type v2Codec struct {
 	fence                      int64
 	challenge                  []byte
 	inboundSeq                 uint64
+	maxFrameBytes              int
 }
 
 func (v *v2Codec) Decode(data []byte) (inbound, error) {
@@ -74,6 +75,12 @@ func (v *v2Codec) Decode(data []byte) (inbound, error) {
 			return inbound{}, errFrame
 		}
 		return inbound{kind: inboundClose, closeCode: binary.BigEndian.Uint32(body[:4])}, nil
+	case v2ControlResultKind:
+		result, err := decodeV2ControlResult(data, v.inboundSeq, v.maxFrameBytes)
+		if err != nil {
+			return inbound{}, err
+		}
+		return inbound{kind: inboundV2ControlResult, v2Result: result}, nil
 	default:
 		return inbound{}, errFrame
 	}

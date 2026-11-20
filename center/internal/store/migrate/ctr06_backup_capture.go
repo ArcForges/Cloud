@@ -130,8 +130,8 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 		return report, errors.New("the supported migration catalogue is unavailable")
 	}
 	applied, exists, err := ReadApplied(ctx, tx)
-	if err != nil || !exists || (len(applied) != 10 && len(applied) != 11 && len(applied) != 12 && len(applied) != 13) || len(applied) > len(build) {
-		return report, errors.New("only a supported complete 0010,0011,0012 or 0013 source can be captured")
+	if err != nil || !exists || len(applied) < 10 || len(applied) > len(build) {
+		return report, errors.New("only a supported complete source can be captured")
 	}
 	version := len(applied)
 	build = build[:version]
@@ -160,7 +160,7 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if version >= 12 && requireManagementReady(ctx, tx) != nil {
 		return report, ErrManagementTransitionRequired
 	}
-	if version == 13 && requireLifecycleReady(ctx, tx) != nil {
+	if version >= 13 && requireLifecycleReady(ctx, tx) != nil {
 		return report, ErrLifecycleTransitionRequired
 	}
 	tables, err := ctr06RequiredTablesFrom(inventory)

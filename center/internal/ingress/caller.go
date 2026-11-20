@@ -85,6 +85,9 @@ type Call struct {
 	// a command receipt digests these bytes without RequestMeta.correlation_id (platform.RequestDigestInput), never a re-encoding
 	// (AD-0021 section 10). It is never logged.
 	Message []byte
+	// RemoteTarget is selection metadata only; authorization must bind the
+	// selected target to the authenticated caller and the current local grant.
+	RemoteTarget *RemoteTarget
 	// after holds what runs when the call ends (AfterCall); finished is set once Finish ran.
 	after    []func()
 	finished bool
