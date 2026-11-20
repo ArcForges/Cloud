@@ -7,7 +7,7 @@
     ".dockerignore": "2e6cacafd55390ad89b423b752e690f21fc37f4a0c61611100e65d9a3e9a0e43",
     ".github/workflows/ci.yml": "5bfd0199d8c419bbd6b3fa1088cafb97cf554d3d42cfac08d78d02c42dad3d6c",
     ".gitignore": "3f4b2e7b8f7c7f0e7b1bc4888d5ab5855f4d11639669e534d8cd5f5b02ef00e0",
-    ".gitleaks.toml": "a15bb3d5c75a33000d4c9efea6a0a7c82483f748996c93e3d633a4bf25ee45bf",
+    ".gitleaks.toml": "f3233e8a9b3488eb8245453f56163606a423e3731ee3924df1b79b1b7a325e21",
     ".node-version": "5c293036fc0a61ad76e15d85f454c3c7cec157e181e035b69f95058a2c239144",
     ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
     ".python-version": "673e2ba07f95bfcfe0a543258b8e267954e403d1f466481c546f467f86b31d46",
@@ -234,7 +234,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
     "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
     "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-    "eng/provenance/files.json": "c9e9e58b34f5adc428fc3cce3e331ef8ea4c6bcbfb68e46b0ce29350682ca1bd",
+    "eng/provenance/files.json": "c6c38cc6f2a5097cfe74f37d105812697ba2141d9323bcd115a696e2a591a339",
     "eng/provenance/records/afv2-center-01-management-storage-r1.json": "0ec5d5aadbedb3c1dd54741f2e1df4711852a9b8b42acbb5246a42401548215f",
     "eng/provenance/records/afv2-center-01-management-storage-r2.json": "5f9910beb89d51add566f63af9822011250bd5b374fd9214ff09acfeb62d4ea6",
     "eng/provenance/records/afv2-center-01-management-storage-r3.json": "84a30e4eea501632e65292e9d441449ae8bbd440287b2607ebbdfc1859d010b8",
@@ -559,7 +559,7 @@
     "tests/worker/docker-context.test.ts": "62fb772c1289047f396ec0be6c8c1a37f7bcff45edd99f332d59f72694e60914",
     "tests/worker/postgres-deploy.test.ts": "72c191704a5e7dfb7b5a0fc87c4035f3859eaa9693f628f61cfec58879b2f41c",
     "tests/worker/proof-gate.test.ts": "debc5ba809a67252ebf373a37817e9d6799bb29a88ba344e328b582c46573a63",
-    "tests/worker/provenance.test.ts": "4c1f4faa94df1d941fd8ee49e3cc5f35768af4c7275a987e6fbc079eafbf248d",
+    "tests/worker/provenance.test.ts": "6801ea739f7742877a5a1b9dbadbac563e2aa7ba30d150236e48a8fc15c3b5cc",
     "tests/worker/release-provenance.test.ts": "e3e8f48298284845c74c561d9a34a0847cc415e04d121aa128c6f871c7e227e3",
     "tests/worker/support/ctr06-bootstrap-mock.ts": "aa369367046fa25269231b36b814ecef4cb68533398b355c74b2919b55a546e1",
     "tests/worker/support/ctr06-bootstrap-production-driver.ts": "9f8ca433063dd3f1715862a8691119095ecafb8b05115b6941b1e3cb0ee3cf64",
@@ -601,12 +601,12 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "Maintainer-authorized Cloud source and artifact admission with final independent review pending",
     "date": "2026-11-20",
-    "rationale": "AFV2-CENTER-02 artifact successor at c97e8755149eadba12744bb2406bb2fa3b6fcf53. The Go presence update preserves legacy stale-lease classification and takes the enrollment row lock before the lease. The same reviewed Worker inputs produce the same locked Wrangler bundle and closure as profile r139. The installed Go and npm dependencies, original legal terms, historical bridge identities and predecessor records retain their exact pins. Formal native checks and independent review apply to the final delivery.",
+    "rationale": "AFV2-CENTER-02 scanner admission for the pinned scan finding at commit 96879109906e174b9796c9de537571a107cc19e7. The reported Go test line contains the public RFC 6455 handshake nonce. The new check admits the exact observed line at that immutable commit and path for the generic-api-key rule. The current fixture generates a fresh handshake nonce per request. This successor adds one input-bound review record and retains all r140 release inputs, original legal evidence and historical review records.",
     "inputs": {
       ".dockerignore": "2e6cacafd55390ad89b423b752e690f21fc37f4a0c61611100e65d9a3e9a0e43",
       ".github/workflows/ci.yml": "5bfd0199d8c419bbd6b3fa1088cafb97cf554d3d42cfac08d78d02c42dad3d6c",
       ".gitignore": "3f4b2e7b8f7c7f0e7b1bc4888d5ab5855f4d11639669e534d8cd5f5b02ef00e0",
-      ".gitleaks.toml": "a15bb3d5c75a33000d4c9efea6a0a7c82483f748996c93e3d633a4bf25ee45bf",
+      ".gitleaks.toml": "f3233e8a9b3488eb8245453f56163606a423e3731ee3924df1b79b1b7a325e21",
       ".node-version": "5c293036fc0a61ad76e15d85f454c3c7cec157e181e035b69f95058a2c239144",
       ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
       ".python-version": "673e2ba07f95bfcfe0a543258b8e267954e403d1f466481c546f467f86b31d46",
@@ -833,7 +833,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
       "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
       "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-      "eng/provenance/files.json": "c9e9e58b34f5adc428fc3cce3e331ef8ea4c6bcbfb68e46b0ce29350682ca1bd",
+      "eng/provenance/files.json": "c6c38cc6f2a5097cfe74f37d105812697ba2141d9323bcd115a696e2a591a339",
       "eng/provenance/records/afv2-center-01-management-storage-r1.json": "0ec5d5aadbedb3c1dd54741f2e1df4711852a9b8b42acbb5246a42401548215f",
       "eng/provenance/records/afv2-center-01-management-storage-r2.json": "5f9910beb89d51add566f63af9822011250bd5b374fd9214ff09acfeb62d4ea6",
       "eng/provenance/records/afv2-center-01-management-storage-r3.json": "84a30e4eea501632e65292e9d441449ae8bbd440287b2607ebbdfc1859d010b8",
@@ -1158,7 +1158,7 @@
       "tests/worker/docker-context.test.ts": "62fb772c1289047f396ec0be6c8c1a37f7bcff45edd99f332d59f72694e60914",
       "tests/worker/postgres-deploy.test.ts": "72c191704a5e7dfb7b5a0fc87c4035f3859eaa9693f628f61cfec58879b2f41c",
       "tests/worker/proof-gate.test.ts": "debc5ba809a67252ebf373a37817e9d6799bb29a88ba344e328b582c46573a63",
-      "tests/worker/provenance.test.ts": "4c1f4faa94df1d941fd8ee49e3cc5f35768af4c7275a987e6fbc079eafbf248d",
+      "tests/worker/provenance.test.ts": "6801ea739f7742877a5a1b9dbadbac563e2aa7ba30d150236e48a8fc15c3b5cc",
       "tests/worker/release-provenance.test.ts": "e3e8f48298284845c74c561d9a34a0847cc415e04d121aa128c6f871c7e227e3",
       "tests/worker/support/ctr06-bootstrap-mock.ts": "aa369367046fa25269231b36b814ecef4cb68533398b355c74b2919b55a546e1",
       "tests/worker/support/ctr06-bootstrap-production-driver.ts": "9f8ca433063dd3f1715862a8691119095ecafb8b05115b6941b1e3cb0ee3cf64",
@@ -1205,8 +1205,8 @@
       "sbom",
       "framework-posture"
     ],
-    "runtimeAssessment": "The Go presence change restores the legacy stale-lease classification under the existing lock order. All 23 Go runtime dependency paths and versions, including published Contracts 481.1, stay pinned. NuGet and Worker npm coordinates, both bridge profiles, the compiler and the build and runtime base images retain their exact identities.",
-    "maintenance": "The active r140 records preserve all existing Docker-carried input names and bind the corrected presence source. The Worker bundle, Go dependency admission, historical r139 records and licence evidence remain available under their existing checks."
+    "runtimeAssessment": "The work covers the historical secret-scan finding and the test's public WebSocket handshake input. Go, npm and NuGet dependency identities, the packaged Worker and Go runtime inputs and the two historical bridge profiles retain their exact pins.",
+    "maintenance": "Keep the existing full-history scanner and all prior review receipts. The source check pins the specific historical match and refuses other commits, paths and line contents."
   },
   "closure": {
     "node_modules/@arcforges/ai-internal": {
@@ -2019,7 +2019,7 @@
   "buildToolPrereleases": {
     "unenv": "2.0.0-rc.24"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/afv2-center-02-r2.json",
+  "reviewRecord": "eng/policy/dependency-reviews/afv2-center-02-r3.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
