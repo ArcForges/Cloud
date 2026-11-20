@@ -21,6 +21,8 @@ import { startFailedText } from "../readiness/container.ts";
 import { containerSleepAfter } from "../tables/cloud-tables.generated.ts";
 import {
   centerStopPollMs,
+  officialHostedCenterMode,
+  paddleWebhookRoute,
   staleCenterKillMs,
   staleCenterStopMs,
 } from "../tables/center-tables.generated.ts";
@@ -34,6 +36,14 @@ export interface CenterEnvironment {
   ARCFORGES_CENTER_MODE?: string;
   ARCFORGES_CENTER_PUBLIC_BASE_URL?: string;
   ARCFORGES_CENTER_PLAN_CONFIGURATION?: string;
+  ARCFORGES_CENTER_HOSTED_CATALOGUE?: string;
+  ARCFORGES_CENTER_COMMERCE_CATALOGUE?: string;
+  ARCFORGES_CENTER_PADDLE_ENVIRONMENT?: string;
+  ARCFORGES_CENTER_PADDLE_API_KEY?: string;
+  ARCFORGES_CENTER_PADDLE_WEBHOOK_SECRET?: string;
+  ARCFORGES_CENTER_PADDLE_PREVIOUS_WEBHOOK_SECRET?: string;
+  ARCFORGES_CENTER_PADDLE_CHECKOUT_ORIGINS?: string;
+  ARCFORGES_CENTER_PADDLE_PORTAL_ORIGINS?: string;
   /** The identity policy override; only the acceptance environment sets one (its anonymous-flow ceiling, C1). */
   ARCFORGES_CENTER_IDENTITY_POLICY?: string;
   ARCFORGES_CENTER_ANDROID_APP?: string;
@@ -92,6 +102,16 @@ const mailVariables: Record<"postmark" | "smtp", readonly MailName[]> = {
   ],
 };
 
+const commerceVariables = [
+  "ARCFORGES_CENTER_COMMERCE_CATALOGUE",
+  "ARCFORGES_CENTER_PADDLE_ENVIRONMENT",
+  "ARCFORGES_CENTER_PADDLE_API_KEY",
+  "ARCFORGES_CENTER_PADDLE_WEBHOOK_SECRET",
+  "ARCFORGES_CENTER_PADDLE_PREVIOUS_WEBHOOK_SECRET",
+  "ARCFORGES_CENTER_PADDLE_CHECKOUT_ORIGINS",
+  "ARCFORGES_CENTER_PADDLE_PORTAL_ORIGINS",
+] as const satisfies readonly (keyof CenterEnvironment)[];
+
 /**
  * The mail variables to hand the Go center for a provider value: none while mail is unset, empty or "disabled"; the closed list of
  * "postmark" or "smtp" (an exact string match); anything else, including a value that is not a string, throws a fixed error that
@@ -133,6 +153,19 @@ export function centerContainerSettings(
     ] as const) {
       const value = center[name];
       if (value !== undefined) settings.envVars[name] = value;
+    }
+    if (center.ARCFORGES_CENTER_MODE === officialHostedCenterMode) {
+      const catalogue = center.ARCFORGES_CENTER_HOSTED_CATALOGUE;
+      if (catalogue !== undefined) settings.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE = catalogue;
+      if (
+        paddleWebhookRoute &&
+        enabledSurfaces(center.FLAGSHIP_SURFACES).has(paddleWebhookRoute.surface)
+      ) {
+        for (const name of commerceVariables) {
+          const value = center[name];
+          if (value !== undefined) settings.envVars[name] = value;
+        }
+      }
     }
     // The mail variables of the named provider, each only when it is a non-empty string. The egress switch is the database's: a mail
     // variable never widens it (the identity surface that sends mail needs the store, and with it the switch is already on).

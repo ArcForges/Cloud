@@ -118,10 +118,11 @@ const (
 
 // The targets of the step-up classes: the object the target hash names (TargetHash).
 const (
-	TargetAccount    = "account"
-	TargetSession    = "session"
-	TargetCredential = "credential"
-	TargetDevice     = "device"
+	TargetAccount      = "account"
+	TargetSession      = "session"
+	TargetCredential   = "credential"
+	TargetDevice       = "device"
+	TargetSubscription = "subscription"
 	// TargetFlow is a node sign-in flow, named by its flow ID (AF-CTR-04: the approval's evidence is bound to the flow it decides).
 	TargetFlow = "flow"
 	// TargetUserCode is a device authorization, named by its normalized user code, 8 upper-case letters (AF-CTR-04 E2: the approval's
@@ -146,6 +147,8 @@ type Operation struct {
 	Risk string
 	// Session is true for a method that needs an account session; false for an anonymous sign-in method.
 	Session bool
+	// BrowserOnly requires a CSRF-checked browser account session.
+	BrowserOnly bool
 	// Restricted is true for a security operation a restricted account may still call.
 	Restricted bool
 	// MobileLimited is the rule of a mobile.limited session.
@@ -195,6 +198,17 @@ func Operations() []Operation {
 		{Path: publicapiv1connect.IdentityServiceRefreshSessionProcedure, ID: "identity.refreshSession", Risk: "R1"},
 		{Path: publicapiv1connect.IdentityServiceGetProfileProcedure, ID: "identity.getProfile", Risk: "R1", Session: true},
 		{Path: publicapiv1connect.EntitlementServiceGetSnapshotProcedure, ID: "entitlement.getSnapshot", Risk: "R1", Session: true, Restricted: true},
+		{Path: publicapiv1connect.CommerceServiceGetCatalogueProcedure, ID: "commerce.getCatalogue", Risk: "R1", Session: true, BrowserOnly: true},
+		{Path: publicapiv1connect.CommerceServiceCreatePurchaseIntentProcedure, ID: "commerce.createPurchaseIntent", Risk: "R2", Session: true, BrowserOnly: true, Receipt: true},
+		{Path: publicapiv1connect.CommerceServiceCreateCheckoutAttemptProcedure, ID: "commerce.createCheckoutAttempt", Risk: "R2", Session: true, BrowserOnly: true, Receipt: true},
+		{Path: publicapiv1connect.CommerceServiceGetPurchaseStateProcedure, ID: "commerce.getPurchaseState", Risk: "R1", Session: true, BrowserOnly: true, Restricted: true},
+		{Path: publicapiv1connect.CommerceServiceGetSubscriptionProcedure, ID: "commerce.getSubscription", Risk: "R1", Session: true, BrowserOnly: true, Restricted: true},
+		{Path: publicapiv1connect.CommerceServiceCancelSubscriptionProcedure, ID: "commerce.cancelSubscription", Risk: "R3", Session: true, BrowserOnly: true,
+			StepUp: Evidence, Target: TargetSubscription, Receipt: true, Audit: AuditInTransaction},
+		{Path: publicapiv1connect.CommerceServiceReactivateSubscriptionProcedure, ID: "commerce.reactivateSubscription", Risk: "R2", Session: true, BrowserOnly: true, Receipt: true},
+		{Path: publicapiv1connect.CommerceServiceListBillingHistoryProcedure, ID: "commerce.listBillingHistory", Risk: "R1", Session: true, BrowserOnly: true, Restricted: true},
+		{Path: routes.CommercePortalPath, ID: routes.CommercePortalID, Risk: "R3", Session: true, BrowserOnly: true, Restricted: true,
+			StepUp: Evidence, Target: TargetSubscription, Audit: AuditInTransaction},
 		{Path: publicapiv1connect.IdentityServiceGetAccountDeletionProcedure, ID: "identity.getAccountDeletion", Risk: "R1", Session: true, MobileLimited: Upgrade, Restricted: true},
 		{Path: publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure, ID: "identity.listAuthIdentities", Risk: "R1", Session: true, Restricted: true},
 		{Path: publicapiv1connect.IdentityServiceListSessionsProcedure, ID: "identity.listSessions", Risk: "R1", Session: true, Restricted: true},
@@ -509,6 +523,8 @@ func CheckRow(operation Operation) error {
 	switch {
 	case (operation.StepUp != NoEvidence) != (operation.Target != ""):
 		return inconsistent("evidence and its target go together")
+	case operation.BrowserOnly && (!operation.Session || len(operation.Scopes) > 0 || len(operation.RelayedScopes) > 0):
+		return inconsistent("browser-only rows need a human session")
 	case !operation.Session && (operation.StepUp != NoEvidence || operation.MobileLimited != Allowed || operation.Restricted ||
 		len(operation.Scopes) > 0 || operation.Object != "" || (operation.Receipt || operation.Audit != NoAudit) && !recovery):
 		// A gated row is audited before the call, so it is caught here as well.
@@ -821,6 +837,8 @@ func (a *Authorizer) AuthorizeRelayed(ctx context.Context, call *ingress.Call, s
 		return operation, relay, a.refuse(ctx, call, operation, "restricted")
 	case caller.AccountState == restrictedState && !operation.Restricted:
 		return operation, relay, a.refuse(ctx, call, operation, "restricted")
+	case operation.BrowserOnly && (caller.Credential != ingress.CredentialBrowserSession || caller.Scope != "account"):
+		return operation, relay, a.refuse(ctx, call, operation, "scope")
 	case operation.MobileLimited == Upgrade && operation.NeedsUpgrade(caller, false):
 		return operation, relay, arc.StepUpRequired()
 	}

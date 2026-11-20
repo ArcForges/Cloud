@@ -37,7 +37,8 @@ export interface ApiRoute {
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
-export type Surface = "identity" | "pages" | "operations" | "fleet" | "mobile" | "relay" | "nodes";
+export type Surface =
+  "identity" | "pages" | "operations" | "fleet" | "mobile" | "relay" | "nodes" | "commerce";
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
@@ -123,6 +124,20 @@ export interface UpgradeRoute {
   readonly instance: string;
 }
 
+/** One exact provider webhook transport. The center authenticates the raw payload and records the receipt. */
+export interface WebhookRoute {
+  readonly surface: Surface;
+  readonly method: "POST";
+  readonly path: string;
+  readonly contentType: string;
+  readonly signatureHeader: string;
+  readonly maxSignatureBytes: number;
+  readonly maxRequestBytes: number;
+  readonly maxDurationMs: number;
+  readonly instance: string;
+  readonly centerMode: string;
+}
+
 /** The surface names, in registration order; FLAGSHIP_SURFACES lists them comma-separated and exactly. */
 export const surfaceNames: readonly Surface[] = [
   "identity",
@@ -132,6 +147,7 @@ export const surfaceNames: readonly Surface[] = [
   "mobile",
   "relay",
   "nodes",
+  "commerce",
 ];
 /** The header the Worker sets to the client's address (from cf-connecting-ip) on every surface call. */
 export const clientIpHeader = "x-arcforges-client-ip";
@@ -160,6 +176,8 @@ export const notActivatedReplies: Readonly<Record<Surface, string>> = {
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVyZWxheYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
   nodes:
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVub2Rlc4AAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
+  commerce:
+    "AAAAAF8aXQoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86FSITCgdzdXJmYWNlEghjb21tZXJjZYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
 };
 /** The byte offset of the correlation id slot in each surface's not_activated template. */
 export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, number>> = {
@@ -170,6 +188,7 @@ export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, numbe
   mobile: 61,
   relay: 61,
   nodes: 61,
+  commerce: 61,
 };
 /**
  * The gRPC-Web body answering a surface call over the edge rate limit: RESOURCE/rate_limited (limit "edge"), retry after time.
@@ -1251,6 +1270,102 @@ export const surfaceRoutes: readonly SurfaceRoute[] = [
     remoteTarget: true,
     surface: "nodes",
   },
+  {
+    path: "/arcforges.publicapi.v1.CommerceService/GetCatalogue",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "commerce",
+  },
+  {
+    path: "/arcforges.publicapi.v1.CommerceService/CreatePurchaseIntent",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "commerce",
+  },
+  {
+    path: "/arcforges.publicapi.v1.CommerceService/CreateCheckoutAttempt",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "commerce",
+  },
+  {
+    path: "/arcforges.publicapi.v1.CommerceService/GetPurchaseState",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "commerce",
+  },
+  {
+    path: "/arcforges.publicapi.v1.CommerceService/GetSubscription",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "commerce",
+  },
+  {
+    path: "/arcforges.publicapi.v1.CommerceService/CancelSubscription",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "commerce",
+  },
+  {
+    path: "/arcforges.publicapi.v1.CommerceService/ReactivateSubscription",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "commerce",
+  },
+  {
+    path: "/arcforges.publicapi.v1.CommerceService/ListBillingHistory",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "commerce",
+  },
 ];
 
 /** Selection metadata forwarded only for registered typed management routes. */
@@ -1833,6 +1948,19 @@ export const pageRoutes: readonly PageRoute[] = [
     setCookie: "none",
     redirects: false,
   },
+  {
+    surface: "commerce",
+    method: "POST",
+    path: "/account/billing/v1/portal",
+    kind: "json",
+    requestType: "application/json",
+    responseTypes: ["application/json"],
+    maxRequestBytes: 512,
+    maxResponseBytes: 4096,
+    cookie: true,
+    setCookie: "none",
+    redirects: false,
+  },
 ];
 /**
  * The headers every reply of a page route must carry with exactly these values (the content security policy among them), in
@@ -1934,6 +2062,21 @@ export const upgradeRefusalStatuses: readonly number[] = [400, 401, 403, 404, 40
 export const upgradeRefusalBytes = 16384;
 /** The value a forwarded reason header (the refusal header, Retry-After) must have: visible ASCII, at most 128 characters. */
 export const upgradeRefusalValuePattern = /^[\x21-\x7e]{1,128}$/u;
+
+export const officialHostedCenterMode = "official-hosted";
+/** Paddle v1's exact callback route. Other provider paths are absent. */
+export const paddleWebhookRoute: WebhookRoute | undefined = {
+  surface: "commerce",
+  method: "POST",
+  path: "/commerce/v1/paddle/webhook",
+  contentType: "application/json",
+  signatureHeader: "paddle-signature",
+  maxSignatureBytes: 512,
+  maxRequestBytes: 262144,
+  maxDurationMs: 5000,
+  instance: "hello",
+  centerMode: officialHostedCenterMode,
+};
 
 export const helloPath = "/api/arcforges.hello.v1.HelloService/SayHello";
 export const healthPath = "/api/healthz";

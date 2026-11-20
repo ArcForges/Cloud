@@ -144,9 +144,10 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
   assert.equal(centerSurfaces("identity,pages,operations"), "identity,pages,operations");
   assert.equal(centerSurfaces("identity,pages,fleet"), "identity,pages,fleet");
   assert.equal(centerSurfaces("identity,pages,fleet,mobile"), "identity,pages,fleet,mobile");
+  assert.equal(centerSurfaces("identity,commerce"), "identity,commerce");
   assert.deepEqual(
     [...surfaceNames],
-    ["identity", "pages", "operations", "fleet", "mobile", "relay", "nodes"],
+    ["identity", "pages", "operations", "fleet", "mobile", "relay", "nodes", "commerce"],
   );
   // FleetService's node registry, routed task methods and twelve AF-CTR-06 file/workspace methods are the nodes surface's;
   // no other FleetService method has a row.

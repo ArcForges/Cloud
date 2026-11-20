@@ -151,6 +151,11 @@ function surfaceProblems(vars: Record<string, unknown> | undefined): string[] {
     !(names.includes("identity") && names.includes("fleet") && names.includes("relay"))
   )
     return ["the nodes surface needs the identity, fleet and relay surfaces"];
+  if (names.includes("commerce")) {
+    if (vars?.ARCFORGES_CENTER_MODE !== "official-hosted")
+      return ["the commerce surface needs the official-hosted center"];
+    if (!names.includes("identity")) return ["the commerce surface needs the identity surface"];
+  }
   if (names.includes("identity")) {
     const base = vars?.ARCFORGES_CENTER_PUBLIC_BASE_URL;
     const origin =
@@ -195,6 +200,12 @@ test("production enables no surface and the acceptance environment enables ident
   assert.equal(wrangler.env?.proof?.vars?.ALLOWED_ORIGIN, "https://proof.arcforges.com");
   for (const [name, environment] of environments) {
     assert.deepEqual(surfaceProblems(environment.vars), [], `wrangler.json environment ${name}`);
+    assert(
+      !String(environment.vars?.FLAGSHIP_SURFACES ?? "")
+        .split(",")
+        .includes("commerce"),
+      `wrangler.json environment ${name} has commerce disabled`,
+    );
     for (const key of Object.keys(environment.vars ?? {}))
       assert(!/BOOTSTRAP/u.test(key), `wrangler.json environment ${name} carries ${key}`);
   }
@@ -203,6 +214,7 @@ test("production enables no surface and the acceptance environment enables ident
 test("the surface rule refuses unknown names, a wrong origin and the C# runtime", () => {
   const valid = {
     ARCFORGES_HELLO_RUNTIME: "go",
+    ARCFORGES_CENTER_MODE: "official-hosted",
     ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
     ALLOWED_ORIGIN: "https://proof.arcforges.com",
     FLAGSHIP_SURFACES: "identity",
@@ -287,7 +299,16 @@ test("the surface rule refuses unknown names, a wrong origin and the C# runtime"
       name === "proof",
       `wrangler.json environment ${name}: only proof enables the nodes surface`,
     );
+  const commerce = { ...valid, FLAGSHIP_SURFACES: "identity,commerce" };
+  assert.deepEqual(surfaceProblems(commerce), []);
+  assert.deepEqual(surfaceProblems({ ...commerce, ARCFORGES_CENTER_MODE: "self-hosted" }), [
+    "the commerce surface needs the official-hosted center",
+  ]);
+  assert.deepEqual(surfaceProblems({ ...commerce, FLAGSHIP_SURFACES: "commerce" }), [
+    "the commerce surface needs the identity surface",
+  ]);
   assert.deepEqual([...surfaces].sort(), [
+    "commerce",
     "fleet",
     "identity",
     "mobile",

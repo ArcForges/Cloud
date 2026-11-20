@@ -285,12 +285,38 @@ func sessionRequests(who account, credential, target platform.ID, targetDevice p
 
 // sessionRows walks every session row of the operation table with its request. A row without a request, or a request without a
 // row, fails the test, so a new row cannot be left out of the matrix.
+// These exact hosted browser procedures are exercised against the composed commerce server.
+func commerceReceiptInDedicatedFixture(path string) bool {
+	switch path {
+	case publicapiv1connect.CommerceServiceCreatePurchaseIntentProcedure,
+		publicapiv1connect.CommerceServiceCreateCheckoutAttemptProcedure,
+		publicapiv1connect.CommerceServiceCancelSubscriptionProcedure,
+		publicapiv1connect.CommerceServiceReactivateSubscriptionProcedure:
+		return true
+	}
+	return false
+}
+
+func commerceRPCInDedicatedFixture(path string) bool {
+	switch path {
+	case publicapiv1connect.CommerceServiceGetCatalogueProcedure,
+		publicapiv1connect.CommerceServiceGetPurchaseStateProcedure,
+		publicapiv1connect.CommerceServiceGetSubscriptionProcedure,
+		publicapiv1connect.CommerceServiceListBillingHistoryProcedure:
+		return true
+	}
+	return commerceReceiptInDedicatedFixture(path)
+}
+
 func sessionRows(t *testing.T, requests map[string]proto.Message, each func(operation access.Operation, request proto.Message)) {
 	t.Helper()
 	for _, operation := range access.Operations() {
 		// Fleet V1 has its own scope matrix. The V2 WebSocket applies a
 		// different scope rule, covered by real GET upgrades below.
 		if !operation.Session || strings.HasPrefix(operation.ID, "fleet.") || operation.Path == routes.NodeChannelV2Path {
+			continue
+		}
+		if commerceRPCInDedicatedFixture(operation.Path) || operation.Path == routes.CommercePortalPath {
 			continue
 		}
 		request, ok := requests[operation.Path]
@@ -677,6 +703,9 @@ func TestTheServedMethodsAreExactlyTheIdentitySet(t *testing.T) {
 		// The fleet surface's rows are pinned by fleetapi's TestFleetRowsAreTheServedMethods, the nodes surface's (AF-CTR-05 E2a) by hub's
 		// TestTheRegistryRowsAreTheServedMethods.
 		if row.Surface == routes.SurfaceFleet || row.Surface == routes.SurfaceNodes {
+			continue
+		}
+		if row.Surface == routes.SurfaceCommerce && commerceRPCInDedicatedFixture(row.Path) {
 			continue
 		}
 		if !pinned[row.Path] {

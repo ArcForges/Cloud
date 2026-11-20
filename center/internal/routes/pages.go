@@ -31,10 +31,9 @@ const (
 	PageActivatePrefix = "/activate"
 )
 
-// PageSurfaces are the surfaces whose modules may declare page routes (cloud-13): the pages surface, the operations surface, the fleet
-// surface and the mobile surface. Table and CheckPages read the one list.
+// PageSurfaces names the modules that may declare browser, native or apex page routes.
 func PageSurfaces() []string {
-	return []string{SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile}
+	return []string{SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile, SurfaceCommerce}
 }
 
 // underPrefix reports whether a path is a prefix page itself or one of its children.
@@ -246,8 +245,7 @@ func pageSurfaceRoutes() []PageRoute {
 	}
 }
 
-// AllPageRoutes are the page routes of every surface, in registration order: the pages surface's, the operations surface's, the fleet
-// surface's, the mobile surface's (its native JSON and apex routes included: the center's page handler serves them all).
+// AllPageRoutes are the routes of the shared account page handler, including the mobile native JSON and apex routes.
 func AllPageRoutes() []PageRoute {
 	return append(append(append(PageRoutes(), OperationsPageRoutes()...), FleetPageRoutes()...), MobilePageRoutes()...)
 }
@@ -297,6 +295,8 @@ func CheckPages(rows []PageRoute) error {
 			return fmt.Errorf("%w: %s is outside the fleet prefixes", ErrPageRegistration, row.Path)
 		case row.Surface == SurfaceMobile && !mobileRowAdmitted(row):
 			return fmt.Errorf("%w: %s is not a mobile route of an admitted shape", ErrPageRegistration, row.ID)
+		case (row.Surface == SurfaceCommerce || row.Path == CommercePortalPath) && !isCommercePortal(row):
+			return fmt.Errorf("%w: the commerce portal must use its dedicated browser route", ErrPageRegistration)
 		case row.Surface != SurfaceMobile && (row.Kind == PageNativeKind || row.Kind == PageApexKind):
 			return fmt.Errorf("%w: %s is a native or apex route outside the mobile surface", ErrPageRegistration, row.ID)
 		case strings.ContainsAny(row.Path, "?#%\\ ") || strings.Contains(row.Path, "//") || strings.Contains(row.Path, "..") || strings.HasSuffix(row.Path, "/"):

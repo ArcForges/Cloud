@@ -29,6 +29,10 @@ func TestHostedEntitlementInventoryForBackup(t *testing.T) {
 	captureBackupInventory(t, 15, "ARCFORGES_HOST01_INVENTORY_DIR")
 }
 
+func TestHostedCommerceInventoryForBackup(t *testing.T) {
+	captureBackupInventory(t, 16, "ARCFORGES_HOST02_INVENTORY_DIR")
+}
+
 func captureBackupInventory(t *testing.T, version int, evidenceRoot string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

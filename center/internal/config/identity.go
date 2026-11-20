@@ -75,7 +75,7 @@ const MaxFleetPublicBaseURLLength = 512 - 50
 
 // KnownSurfaces is every surface name, in generated order.
 func KnownSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile, SurfaceRelay, SurfaceNodes}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile, SurfaceRelay, SurfaceNodes, SurfaceCommerce}
 }
 
 // DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces, node
@@ -608,6 +608,9 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 		if mode != OfficialHosted {
 			return Identity{}, invalid("the %s surface exists on the official hosted center only: operator grants have no place on a self-hosted center", SurfaceOperations)
 		}
+	}
+	if identity.Enabled(SurfaceCommerce) && mode != OfficialHosted {
+		return Identity{}, invalid("the %s surface exists on the official hosted center only", SurfaceCommerce)
 	}
 	if identity.Enabled(SurfaceIdentity) {
 		if err = RequireRelyingParty(publicBaseURL); err != nil {

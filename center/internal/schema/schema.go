@@ -25,7 +25,7 @@ func Migrations() fs.FS {
 
 // Schemas are the module schemas the migrations own, in creation order. platform is created by the runner before the first
 // migration (it holds platform.schema_migration).
-var Schemas = []string{"platform", "audit", "fleet", "identity", "device", "entitlement", "management"}
+var Schemas = []string{"platform", "audit", "fleet", "identity", "device", "entitlement", "management", "commerce"}
 
 // Privilege is one table privilege of the runtime role.
 type Privilege string
@@ -73,16 +73,16 @@ var RuntimeGrants = []Grant{
 	{"device", "installation", []Privilege{Select, Insert, Update}},
 	// AF-CTR-03 part B (0003): the operator role is written by the migration role only (decision n2, PLT-10). The entitlement
 	// records are append-only (a trigger refuses UPDATE and DELETE besides): the runtime role writes grants, revocations,
-	// definitions activations and service terms, and only reads term actions, account status facts and feature releases, whose
-	// writers are later tasks (AF-CTR-09 commerce, AF-OPS-01 operations). The snapshot and the revision are derived and rewritten.
+	// definitions activations and service terms. Schema 16 lets commerce append term actions and account status facts.
+	// Feature releases remain read-only. The snapshot and the revision are derived and rewritten.
 	{"identity", "operator", []Privilege{Select}},
 	{"entitlement", "revision", []Privilege{Select, Insert, Update}},
 	{"entitlement", "snapshot", []Privilege{Select, Insert, Update}},
 	{"entitlement", "grant", []Privilege{Select, Insert}},
 	{"entitlement", "revocation", []Privilege{Select, Insert}},
 	{"entitlement", "service_term", []Privilege{Select, Insert}},
-	{"entitlement", "service_term_action", []Privilege{Select}},
-	{"entitlement", "account_status_fact", []Privilege{Select}},
+	{"entitlement", "service_term_action", []Privilege{Select, Insert}},
+	{"entitlement", "account_status_fact", []Privilege{Select, Insert}},
 	{"entitlement", "feature_release", []Privilege{Select}},
 	{"entitlement", "definitions_activation", []Privilege{Select, Insert}},
 	// AF-CTR-04 (0004): enrolled nodes and the two sign-in flows. Rows are marked, never deleted at runtime (the retention sweeps
@@ -118,6 +118,18 @@ var RuntimeGrants = []Grant{
 	{"management", "command_identity", []Privilege{Select, Insert}},
 	{"management", "remote_operation", []Privilege{Select, Insert, Update}},
 	{"management", "legacy_outcome", []Privilege{Select}},
+	// AFV2-HOST-02: immutable provider associations, settled terms and
+	// billing facts are insert-only. The cleanup view uses the caller's reads.
+	{"commerce", "provider_environment", []Privilege{Select, Insert}},
+	{"commerce", "customer", []Privilege{Select, Insert}},
+	{"commerce", "purchase", []Privilege{Select, Insert, Update}},
+	{"commerce", "checkout", []Privilege{Select, Insert, Update}},
+	{"commerce", "subscription", []Privilege{Select, Insert, Update}},
+	{"commerce", "renewal", []Privilege{Select, Insert, Update}},
+	{"commerce", "provider_event", []Privilege{Select, Insert, Update}},
+	{"commerce", "settled_period", []Privilege{Select, Insert}},
+	{"commerce", "billing_entry", []Privilege{Select, Insert}},
+	{"commerce", "provider_cleanup_pending", []Privilege{Select}},
 }
 
 // MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted
@@ -131,12 +143,12 @@ var MigrationOnly = []string{
 	"entitlement.hosted_projection_migration",
 }
 
-// AtVersion retains the exact historical grant/schema closure for the finite
-// 0011 backup/restore path. It never adds tables which that build does not own.
+// AtVersion retains the exact historical grant/schema closure of every
+// supported version. It adds only privileges and objects that build owns.
 func AtVersion(version int) ([]string, []Grant) {
 	var schemas []string
 	for _, name := range Schemas {
-		if version < 3 && name == "entitlement" || version < 12 && name == "management" {
+		if version < 3 && name == "entitlement" || version < 12 && name == "management" || version < 16 && name == "commerce" {
 			continue
 		}
 		schemas = append(schemas, name)
@@ -153,6 +165,10 @@ func AtVersion(version int) ([]string, []Grant) {
 		case version < 11 && grant.Schema == "fleet" && (grant.Table == "routed_file_call" || grant.Table == "routed_file_target" || grant.Table == "routed_command_id"):
 		case version < 12 && grant.Schema == "management":
 		case version < 13 && grant.Schema == "identity" && (grant.Table == "account_security_state" || grant.Table == "lifecycle_operation"):
+		case version < 16 && grant.Schema == "commerce":
+		case version < 16 && grant.Schema == "entitlement" && (grant.Table == "service_term_action" || grant.Table == "account_status_fact"):
+			grant.Privileges = []Privilege{Select}
+			grants = append(grants, grant)
 		default:
 			grants = append(grants, grant)
 		}

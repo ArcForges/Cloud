@@ -395,7 +395,7 @@ const containerSites = (text: string): { request: boolean; manual: boolean }[] =
 };
 
 test("every request the Worker makes to the Container says redirect manual (H-1): a new request site must say it too", () => {
-  const root = new URL("../../", import.meta.url).pathname;
+  const root = path.resolve(import.meta.dirname, "../..");
   const sources: string[] = [];
   const walk = (directory: string) => {
     for (const entry of readdirSync(directory)) {
@@ -407,12 +407,12 @@ test("every request the Worker makes to the Container says redirect manual (H-1)
   walk(path.join(root, "worker"));
   assert(sources.length > 20, "the Worker sources were found");
   // The scan is keyed on the call that reaches the Container, not on an address: a request whose URL comes from a constant is seen,
-  // and a comment is not an option. The list is the sites of this task: a sixth must be added here on purpose.
+  // and a comment is not an option. Every new request site must be listed explicitly.
   const requests = new Map<string, number>();
   const stubs = new Map<string, number>();
   for (const file of sources) {
     const text = readFileSync(file, "utf8");
-    const name = path.relative(root, file);
+    const name = path.relative(root, file).split(path.sep).join("/");
     for (const site of containerSites(text)) {
       if (!site.request) {
         stubs.set(name, (stubs.get(name) ?? 0) + 1);
@@ -431,6 +431,7 @@ test("every request the Worker makes to the Container says redirect manual (H-1)
       // AF-CTR-04 part M: the apex and native JSON handlers of the mobile surface.
       ["worker/ingress/applink.ts", 1],
       ["worker/ingress/native.ts", 1],
+      ["worker/ingress/paddle-webhook.ts", 1],
       ["worker/ingress/pages.ts", 1],
       ["worker/ingress/pipeline.ts", 1],
       // AF-CTR-05 E1a: the node channel's upgrade handler.

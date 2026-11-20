@@ -28,10 +28,12 @@ import { bounded, readBytes, reject, rpcError } from "./io.ts";
 import { apexTable, handleApexRequest } from "./applink.ts";
 import { handleNativeRequest, nativeTable } from "./native.ts";
 import { handlePageRequest, pageTable } from "./pages.ts";
+import { handlePaddleWebhook } from "./paddle-webhook.ts";
 import { forwardRemoteTarget } from "./remote-target.ts";
 import { handleUpgradeRequest, upgradeTable } from "./upgrade.ts";
 import {
   healthRoute,
+  paddleWebhookRoute,
   watchNotActivatedReply,
   watchNotActivatedReplyCorrelationOffsets,
 } from "../tables/center-tables.generated.ts";
@@ -59,6 +61,7 @@ export interface IngressEnv {
   ALLOWED_ORIGIN?: string;
   /** The enabled switchable surfaces (AF-CTR-03): exact generated names, comma-separated; absent or empty enables none. */
   FLAGSHIP_SURFACES?: string;
+  ARCFORGES_CENTER_MODE?: string;
   CLOUD_CONTAINER: {
     getByName(name: string): { fetch(request: Request): Promise<Response> };
   };
@@ -134,6 +137,8 @@ export async function handleApiRequest(
   if (upgrade) return handleUpgradeRequest(request, env, upgrade, requestOrigin(request));
   const pageCandidates = pageTable.get(url.pathname);
   if (pageCandidates) return handlePageRequest(request, env, pageCandidates);
+  if (paddleWebhookRoute && url.pathname === `/api${paddleWebhookRoute.path}`)
+    return handlePaddleWebhook(request, env, paddleWebhookRoute);
   const health = url.pathname === healthPath;
   const fixed = health ? healthRoute : findRoute(url.pathname, routes);
   // A surface method is in no route table: it is routed only by the generated surface rows.

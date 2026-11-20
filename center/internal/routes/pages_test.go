@@ -128,8 +128,13 @@ func TestThePageRoutesAreThePipelinesPlainPathsAndNotTheWorkersOwnRows(t *testin
 		t.Fatal(err)
 	}
 	// The mobile surface's native JSON and apex routes are tables of their own (AF-CTR-04 part M); every other route is a page row.
-	if len(table.Pages)+len(table.Native)+len(table.Apex) != len(AllPageRoutes()) || len(table.Native) != 2 || len(table.Apex) != 2 {
+	if len(table.Pages)+len(table.Native)+len(table.Apex) != len(AllPageRoutes())+1 || len(table.Native) != 2 || len(table.Apex) != 2 {
 		t.Fatalf("the Worker table holds %d page, %d native and %d apex routes", len(table.Pages), len(table.Native), len(table.Apex))
+	}
+	portal := table.Pages[len(table.Pages)-1]
+	if portal.Path != "/account/billing/v1/portal" || portal.Method != "POST" || portal.Surface != "commerce" ||
+		portal.Kind != PageJSONKind || !portal.Cookie || portal.Redirects || portal.SetCookie != SetCookieNone {
+		t.Fatalf("unexpected commerce portal route: %+v", portal)
 	}
 	ingress, err := Ingress(modules)
 	if err != nil {
@@ -140,13 +145,15 @@ func TestThePageRoutesAreThePipelinesPlainPathsAndNotTheWorkersOwnRows(t *testin
 			t.Errorf("the pipeline does not let %s through", row.Path)
 		}
 	}
+	if !ingress.IsPlain(portal.Path) || ingress.IsPlain(portal.Path+"/other") {
+		t.Fatal("the commerce portal must be one exact path")
+	}
 	if ingress.IsPlain("/account") || ingress.IsPlain("/account/") || ingress.IsPlain("/session/v1/web") {
 		t.Fatal("a path outside the registration is plain")
 	}
-	// The pages add no RPC row: the surface rows are the identity methods, the fleet methods (AF-CTR-04) and FleetService's (the nodes
-	// surface, AF-CTR-05 E2a) only.
+	// Pages have their own HTTP rows. RPCs are registered by identity, fleet, nodes and commerce.
 	for _, row := range table.SurfaceRows {
-		if row.Surface != SurfaceIdentity && row.Surface != SurfaceFleet && row.Surface != SurfaceNodes {
+		if row.Surface != SurfaceIdentity && row.Surface != SurfaceFleet && row.Surface != SurfaceNodes && row.Surface != SurfaceCommerce {
 			t.Errorf("an RPC row of the surface %s", row.Surface)
 		}
 	}
@@ -201,7 +208,7 @@ func TestTheOperationsRoutesAreTheirOwnSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,mobile,relay,nodes" {
+	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,mobile,relay,nodes,commerce" {
 		t.Fatalf("the surfaces %v", surfaces)
 	}
 	crossed := append([]Module(nil), modules...)
@@ -228,7 +235,7 @@ func TestTheFleetPagesAreTheirOwnSurface(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("the fleet routes:\n%s", strings.Join(got, "\n"))
 	}
-	if strings.Join(PageSurfaces(), ",") != "pages,operations,fleet,mobile" {
+	if strings.Join(PageSurfaces(), ",") != "pages,operations,fleet,mobile,commerce" {
 		t.Fatalf("the page surfaces %v", PageSurfaces())
 	}
 	for name, mutate := range map[string]func([]PageRoute) []PageRoute{

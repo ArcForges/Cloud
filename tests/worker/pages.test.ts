@@ -74,7 +74,7 @@ function bindings(
   const env: CloudBindings = {
     SOURCE_REVISION: "candidate",
     ALLOWED_ORIGIN: origin,
-    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile,relay,nodes",
+    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile,relay,nodes,commerce",
     CLOUD_CONTAINER: {
       getByName() {
         return {
@@ -268,8 +268,14 @@ test("a route belongs to its own surface: the operations page is not the pages' 
     ["GET /operations/grant", "POST /operations/grant/review", "POST /operations/grant/confirm"],
   );
   assert(operations.length < pageRoutes.length);
-  // Every other route is of the pages, the fleet or the mobile surface, and the methods of one path share a surface.
-  for (const row of pageRoutes.filter((item) => item.surface !== "operations"))
+  const commerce = pageRoutes.filter((row) => row.surface === "commerce");
+  assert.deepEqual(
+    commerce.map((row) => `${row.method} ${row.path}`),
+    ["POST /account/billing/v1/portal"],
+  );
+  for (const row of pageRoutes.filter(
+    (item) => item.surface !== "operations" && item.surface !== "commerce",
+  ))
     assert(
       row.surface === "pages" || row.surface === "fleet" || row.surface === "mobile",
       row.path,
@@ -314,6 +320,21 @@ test("a route belongs to its own surface: the operations page is not the pages' 
   );
   const grant = route("GET", "/operations/grant");
   assert.equal((await routeRequest(call(grant), both)).status, 200);
+});
+
+test("the billing portal stays closed with every other surface enabled", async () => {
+  const { env, seen, keys } = bindings(() => jsonOk(), {
+    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile,relay,nodes",
+  });
+  const reply = await routeRequest(call(route("POST", "/account/billing/v1/portal")), env);
+  const unknown = await routeRequest(
+    new Request("https://proof.example.test/api/account/not-a-page"),
+    env,
+  );
+  assert.equal(reply.status, 404);
+  assert.equal(await reply.text(), await unknown.text());
+  assert.equal(seen.length, 0);
+  assert.equal(keys.length, 0);
 });
 
 test("the request side refuses what breaks the browser protocol before the limit and the Container", async () => {

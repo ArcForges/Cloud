@@ -521,8 +521,8 @@ func TestNoReceiptHoldsAnAddress(t *testing.T) {
 	}
 	for _, operation := range access.Operations() {
 		// The fleet surface's receipts (AF-CTR-04) hold no address by construction (a node's receipt is its command ID and effect) and
-		// are tested in fleetapi.
-		if !operation.Receipt || strings.HasPrefix(operation.ID, "fleet.") {
+		// are tested in fleetapi. The four hosted commerce receipts are scanned by the composed server fixture.
+		if !operation.Receipt || strings.HasPrefix(operation.ID, "fleet.") || commerceReceiptInDedicatedFixture(operation.Path) {
 			continue
 		}
 		if !operations[operation.Path] {

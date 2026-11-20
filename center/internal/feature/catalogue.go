@@ -16,10 +16,8 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/entitlement"
 )
 
-// Classification says which configuration a catalogue belongs to. Production is the hosted center that sells (today: no catalogue at
-// all, until H-07); Development is the acceptance environment and the tests, which may use the embedded fixtures. There is no
-// production environment slot for a catalogue (DC-12): a production-classified catalogue exists only injected in a test, until the
-// owner decides prices and limits.
+// Classification identifies a catalogue's configuration. Production definitions are supplied explicitly to the official hosted
+// center. Development fixtures are embedded for tests and isolated acceptance. Merchant prices are configured separately.
 type Classification int
 
 // The classifications.
@@ -42,8 +40,7 @@ const (
 	maxPlans          = 16
 )
 
-// Plan is one plan of the catalogue: the features it carries. The plans are configuration for the commerce task (AF-CTR-09), which
-// turns a purchase into grants of a plan's features; this task issues grants only through the operator (names features, not plans).
+// Plan names the hosted feature keys available in a configured offer.
 type Plan struct {
 	ID       string
 	Name     string
@@ -104,9 +101,8 @@ var (
 
 // ParseCatalogue reads and validates a catalogue document under a classification. It is strict: one JSON object, no unknown or
 // repeated field (a name is exactly one of the document's spellings: "Version" is neither "version" nor an unknown field to ignore),
-// no trailing data, at most 64 KiB. A fixture (marker true) is only valid under the development classification and is
-// the only catalogue that may carry a price, USD 5 or USD 15; a non-fixture catalogue states no price. It defines exactly the six
-// gated keys. Every refusal is ErrInvalidCatalogue.
+// no trailing data, at most 64 KiB. Only the development classification accepts the fixture marker. The catalogue defines exactly
+// the three active gated keys and carries no prices. Every refusal is ErrInvalidCatalogue.
 func ParseCatalogue(data []byte, class Classification) (Catalogue, error) {
 	if class != ClassProduction && class != ClassDevelopment {
 		return Catalogue{}, invalidCatalogue("the classification is unknown")

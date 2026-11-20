@@ -129,10 +129,18 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.sandbox.v2.RunService/WatchOutput session 4096",
 		"/arcforges.sandbox.v2.NodeService/WatchEvents session 4096",
 		"/arcforges.sandbox.v2.ResourceService/WatchUsage session 4096",
+		"/arcforges.publicapi.v1.CommerceService/GetCatalogue session 4096",
+		"/arcforges.publicapi.v1.CommerceService/CreatePurchaseIntent session 4096",
+		"/arcforges.publicapi.v1.CommerceService/CreateCheckoutAttempt session 4096",
+		"/arcforges.publicapi.v1.CommerceService/GetPurchaseState session 4096",
+		"/arcforges.publicapi.v1.CommerceService/GetSubscription session 4096",
+		"/arcforges.publicapi.v1.CommerceService/CancelSubscription session 4096",
+		"/arcforges.publicapi.v1.CommerceService/ReactivateSubscription session 4096",
+		"/arcforges.publicapi.v1.CommerceService/ListBillingHistory session 4096",
 	}
-	if len(table.Surfaces) != 7 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
+	if len(table.Surfaces) != 8 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
 		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || table.Surfaces[6] != SurfaceNodes ||
-		len(table.SurfaceRows) != len(served) {
+		table.Surfaces[7] != SurfaceCommerce || len(table.SurfaceRows) != len(served) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
 	}
 	for index, row := range table.SurfaceRows {
@@ -142,6 +150,8 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		kind := "unary"
 		remoteTarget := false
 		switch {
+		case strings.HasPrefix(row.Path, "/arcforges.publicapi.v1.CommerceService/"):
+			surface = SurfaceCommerce
 		case strings.HasPrefix(row.Path, "/arcforges.sandbox.v2."):
 			surface, deadline, reply = SurfaceNodes, 10_000, RoutedReplyBytes
 			remoteTarget = true
@@ -211,6 +221,13 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 	}
 	if !routes.IsPlain(HealthPath) || routes.IsPlain("/readyz") {
 		t.Fatal("plain routes")
+	}
+	callback := table.PaddleWebhook
+	if callback == nil || callback.Path != "/commerce/v1/paddle/webhook" || callback.Method != "POST" ||
+		callback.SignatureHeader != "Paddle-Signature" || callback.MaxSignatureBytes != 512 ||
+		callback.MaxRequestBytes != 262144 || callback.MaxDurationMilliseconds != 5000 ||
+		!routes.IsPaddleWebhook(callback.Path) || routes.IsPlain(callback.Path) || routes.IsPaddleWebhook(callback.Path+"/other") {
+		t.Fatalf("unexpected Paddle callback registration: %+v", callback)
 	}
 }
 

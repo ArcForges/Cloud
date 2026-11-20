@@ -150,8 +150,8 @@ func lifecycleIntent(kind int16, userID, operationID platform.ID) [32]byte {
 	return sha256.Sum256([]byte(fmt.Sprintf("arcforges.lifecycle.v1\n%d\n%s\n%s", kind, userID.String(), operationID.String())))
 }
 
-// deletionFacts reads the retained provider/remote facts. A subscription reference
-// or renewal/pending purchase is not proof that a provider has cancelled billing.
+// deletionFacts uses the same provider cleanup predicate as the owner finalizer.
+// Callers hold the account security lock while reading these facts.
 func deletionFacts(ctx context.Context, tx pgx.Tx, userID platform.ID, now time.Time) (subscriptions, unresolved int, provider bool, err error) {
 	err = tx.QueryRow(ctx, `SELECT
  (SELECT count(DISTINCT subscription_ref) FROM entitlement.service_term t WHERE t.account_id = $1 AND t.kind = 1
@@ -159,9 +159,7 @@ func deletionFacts(ctx context.Context, tx pgx.Tx, userID platform.ID, now time.
        WHERE a.account_id = t.account_id AND a.term_id = t.term_id AND a.effective_at <= $2)),
  (SELECT count(*) FROM management.remote_operation WHERE account_id = $1 AND (final_at IS NULL OR effect = 3)) +
  (SELECT count(*) FROM management.legacy_outcome WHERE account_id = $1 AND (final_at IS NULL OR legacy_state = 7)),
- EXISTS (SELECT 1 FROM entitlement.service_term WHERE account_id = $1 AND subscription_ref IS NOT NULL)
- OR coalesce((SELECT auto_renew OR purchase_pending FROM entitlement.account_status_fact WHERE account_id = $1
-     ORDER BY recorded_at DESC, status_fact_id DESC LIMIT 1),false)`, userID, now).Scan(&subscriptions, &unresolved, &provider)
+ EXISTS (SELECT 1 FROM commerce.provider_cleanup_pending WHERE account_id = $1)`, userID, now).Scan(&subscriptions, &unresolved, &provider)
 	return
 }
 

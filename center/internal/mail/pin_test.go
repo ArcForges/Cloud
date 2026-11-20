@@ -15,19 +15,19 @@ import (
 	"testing"
 )
 
-// The source-scan pins of the mail transport, in the style of the catalogue pin of package server: they parse the non-test sources
+// The source-scan pins of the provider transports, in the style of the catalogue pin of package server: they parse the non-test sources
 // of the whole center module and report the forms listed below, and each rule has mutants (forms injected into copies of the
 // sources) that the scan must report. The scan runs on both hosts.
 //
 // What it scans (and nothing more is claimed): no certificate-verification bypass or hook (InsecureSkipVerify assigned, keyed or
-// address-taken; VerifyConnection, VerifyPeerCertificate, DialTLS, DialTLSContext); tls.Config only inside internal/mail, only as a
-// literal there, whose MinVersion is tls.VersionTLS12 or tls.VersionTLS13 and whose other keys are on an allow-list, and no later
+// address-taken; VerifyConnection, VerifyPeerCertificate, DialTLS, DialTLSContext); tls.Config literals only in internal/mail or
+// the exact Paddle transport, with MinVersion tls.VersionTLS12 or tls.VersionTLS13 and only the admitted keys; no later
 // assignment of MinVersion, CipherSuites, Renegotiation or KeyLogWriter outside the test double; the test-only options RootCAs,
 // Dial, BaseURL, Client and Proxy (and Now in package mail) set, by key or by assignment (parentheses included), only in smtp.go and
 // postmark.go, the adapters' own files, and in New by no key, assignment or positional literal (TestNewSetsNoTestOnlyOption, backed
 // by the behavioural checks of new_test.go); no environment proxy, default HTTP client or default transport,
 // no http.Get-style helper; no environment read in internal/mail; net/smtp imported only by smtp.go; no dot import of the packages
-// above; Secret.Reveal referenced (called or taken as a method value) only in the two adapters; mailtest imported by no non-test file
+// above; Secret.Reveal referenced (called or taken as a method value) only in the named adapters; mailtest imported by no non-test file
 // and importing nothing of this repository.
 //
 // What it does NOT scan: reflection by string name (reflect FieldByName or MethodByName), encoding into a configuration
@@ -36,16 +36,18 @@ import (
 // tests) and of the review.
 
 const (
-	modulePrefix  = "github.com/ArcForges/Cloud/center/"
-	mailtestPath  = modulePrefix + "internal/mail/mailtest"
-	mailDirectory = "internal/mail/"
-	mailtestDir   = "internal/mail/mailtest/"
-	smtpFile      = "internal/mail/smtp.go"
-	postmarkFile  = "internal/mail/postmark.go"
+	modulePrefix         = "github.com/ArcForges/Cloud/center/"
+	mailtestPath         = modulePrefix + "internal/mail/mailtest"
+	mailDirectory        = "internal/mail/"
+	mailtestDir          = "internal/mail/mailtest/"
+	smtpFile             = "internal/mail/smtp.go"
+	postmarkFile         = "internal/mail/postmark.go"
+	paddleTransportFile  = "internal/commerce/paddle/transport.go"
+	paddleConfiguredFile = "internal/commerce/paddle/configured.go"
 )
 
 // revealAllowed are the only non-test files that may reference Secret.Reveal.
-var revealAllowed = []string{"internal/mail/postmark.go", "internal/mail/smtp.go"}
+var revealAllowed = []string{paddleConfiguredFile, postmarkFile, smtpFile}
 
 // Rule names, so a mutant can say which rule must report it.
 const (
@@ -160,6 +162,11 @@ func scanSources(files sourceSet) []string {
 		}
 		inMail := strings.HasPrefix(path, mailDirectory)
 		inMailtest := strings.HasPrefix(path, mailtestDir)
+		inPaddleTransport := path == paddleTransportFile
+		allowedTLSKeys := tlsKeys
+		if inPaddleTransport {
+			allowedTLSKeys = []string{"ServerName", "MinVersion"}
+		}
 		tlsNames, httpNames := localNames(file, "crypto/tls", "tls"), localNames(file, "net/http", "http")
 		osNames, syscallNames := localNames(file, "os", "os"), localNames(file, "syscall", "syscall")
 		for _, spec := range file.Imports {
@@ -226,8 +233,8 @@ func scanSources(files sourceSet) []string {
 					}
 				}
 			case *ast.SelectorExpr:
-				if selects(n, tlsNames, "Config") && !inMail {
-					report(ruleTLSPlacement, path, "tls.Config outside internal/mail")
+				if selects(n, tlsNames, "Config") && !inMail && !inPaddleTransport {
+					report(ruleTLSPlacement, path, "tls.Config outside the approved transport files")
 				}
 				for _, name := range []string{"ProxyFromEnvironment", "DefaultClient", "DefaultTransport", "Get", "Head", "Post", "PostForm"} {
 					if selects(n, httpNames, name) {
@@ -247,7 +254,7 @@ func scanSources(files sourceSet) []string {
 					}
 				}
 				if n.Sel.Name == "Reveal" && !slices.Contains(revealAllowed, path) {
-					report(ruleReveal, path, "Reveal is referenced outside the two adapters")
+					report(ruleReveal, path, "Reveal is referenced outside the approved adapter files")
 				}
 			case *ast.CallExpr:
 				// new(tls.Config) and a conversion tls.Config(x) build a configuration that no literal check sees.
@@ -271,7 +278,7 @@ func scanSources(files sourceSet) []string {
 						if !ok {
 							continue
 						}
-						if !slices.Contains(tlsKeys, key.Name) && key.Name != "InsecureSkipVerify" && key.Name != "VerifyConnection" && key.Name != "VerifyPeerCertificate" {
+						if !slices.Contains(allowedTLSKeys, key.Name) && key.Name != "InsecureSkipVerify" && key.Name != "VerifyConnection" && key.Name != "VerifyPeerCertificate" {
 							report(ruleTLSKey, path, "tls.Config key "+key.Name+" is not on the allow-list")
 						}
 						if key.Name == "MinVersion" {
@@ -386,7 +393,8 @@ func TestTheScanSeesEveryForbiddenForm(t *testing.T) {
 	// The mutants need the mail package and a neighbour, not the whole module: parsing everything per mutant would take seconds.
 	real := sourceSet{}
 	for path, source := range loadSources(t) {
-		if strings.HasPrefix(path, mailDirectory) || strings.HasPrefix(path, "internal/config/") {
+		if strings.HasPrefix(path, mailDirectory) || strings.HasPrefix(path, "internal/config/") ||
+			path == paddleTransportFile || path == paddleConfiguredFile {
 			real[path] = source
 		}
 	}
@@ -459,6 +467,10 @@ func TestTheScanSeesEveryForbiddenForm(t *testing.T) {
 		{"Reveal as a method value", real.with("internal/identity/deliver.go", "package identity\n\nfunc f(s interface{ Reveal() string }) string { g := s.Reveal; return g() }\n"), ruleReveal},
 		{"Reveal passed as a method value", real.with("internal/server/x.go", "package other\n\nfunc f(s interface{ Reveal() string }, use func(func() string)) { use(s.Reveal) }\n"), ruleReveal},
 		{"Reveal in the mail package outside the adapters", real.appended(t, "internal/mail/guard.go", "func leak(s interface{ Reveal() string }) string { return s.Reveal() }"), ruleReveal},
+		{"Reveal in Paddle outside its configured adapter", real.appended(t, paddleTransportFile, "func leak(s interface{ Reveal() string }) string { return s.Reveal() }"), ruleReveal},
+		{"TLS configuration outside the dedicated Paddle transport", real.with(paddleConfiguredFile, tlsFile("_ = &tls.Config{MinVersion: tls.VersionTLS12}")), ruleTLSPlacement},
+		{"client certificates in the Paddle transport", real.appended(t, paddleTransportFile, "var _ = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: nil}"), ruleTLSKey},
+		{"weak TLS in the Paddle transport", real.appended(t, paddleTransportFile, "var _ = &tls.Config{MinVersion: tls.VersionTLS11}"), ruleTLSMinVersion},
 		{"mailtest imported by the server", real.with("internal/server/x.go", "package other\n\nimport _ \""+mailtestPath+"\"\n"), ruleImporter},
 		{"mailtest imported by the mail package", real.with("internal/mail/x.go", "package mail\n\nimport _ \""+mailtestPath+"\"\n"), ruleImporter},
 		{"mailtest importing the mail package", real.with("internal/mail/mailtest/x.go", "package mailtest\n\nimport _ \""+modulePrefix+"internal/mail\"\n"), ruleInRepo},
@@ -494,7 +506,7 @@ func TestTheScanSeesEveryForbiddenForm(t *testing.T) {
 	}
 }
 
-// TestRevealRuleIsNotVacuous: the two adapters do reference Reveal, so an empty finding list for Reveal means the rule ran.
+// TestRevealRuleIsNotVacuous checks that each pinned adapter actually references Reveal.
 func TestRevealRuleIsNotVacuous(t *testing.T) {
 	files := loadSources(t)
 	for _, path := range revealAllowed {

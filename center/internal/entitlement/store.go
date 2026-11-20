@@ -137,13 +137,29 @@ type TermRow struct {
 	PeriodRef       string
 }
 
-// Append is the records to add in one commit. The store only ever appends: no row is updated or deleted. Term actions, status facts
-// and feature releases have no runtime writer yet (their owners are later tasks), so they have no append here.
+// TermActionRow carries the resolver fact and the persistence identities of an admitted term action.
+type TermActionRow struct {
+	Fact              TermActionFact
+	ActionID          string
+	SourceRef         string
+	ReplacementTermID *string
+}
+
+// StatusRow carries the resolver fact and the persistence identities of an admitted account status.
+type StatusRow struct {
+	Fact         StatusFact
+	StatusFactID string
+	SourceRef    string
+}
+
+// Append is the immutable history added in one commit.
 type Append struct {
 	Grants      []Grant
 	Revocations []Revocation
 	Activations []DefinitionsActivation
 	Terms       []TermRow
+	TermActions []TermActionRow
+	StatusFacts []StatusRow
 }
 
 // CommitOutcome is the answer of a commit that reached the store.
@@ -568,6 +584,22 @@ VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7)`, revocation.RevocationID,
 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10)`, term.Fact.TermID, account, int16(term.Fact.Kind)+1, term.SubscriptionRef, term.PeriodRef, term.Fact.StartsAt.Time(),
 			term.Fact.EndsAt.Time(), optionalTime(term.Fact.GraceEndsAt), term.Fact.AuthorizedAt.Time(), term.Fact.CreatedAt.Time()); err != nil {
 			return 0, store.Sanitize("append an entitlement service term", err)
+		}
+	}
+	for _, action := range add.TermActions {
+		if _, err := tx.Exec(ctx, `INSERT INTO entitlement.service_term_action
+    (action_id, account_id, term_id, kind, effective_at, recorded_at, source_ref, replacement_term_id)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid)`, action.ActionID, account, action.Fact.TermID, int16(action.Fact.Kind)+1,
+			action.Fact.EffectiveAt.Time(), action.Fact.RecordedAt.Time(), action.SourceRef, action.ReplacementTermID); err != nil {
+			return 0, store.Sanitize("append an entitlement service term action", err)
+		}
+	}
+	for _, status := range add.StatusFacts {
+		if _, err := tx.Exec(ctx, `INSERT INTO entitlement.account_status_fact
+    (status_fact_id, account_id, recorded_at, status, auto_renew, purchase_pending, source_ref)
+VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)`, status.StatusFactID, account, status.Fact.RecordedAt.Time(), int16(status.Fact.Status)+1,
+			status.Fact.AutoRenew, status.Fact.PurchasePending, status.SourceRef); err != nil {
+			return 0, store.Sanitize("append an entitlement account status fact", err)
 		}
 	}
 	for _, activation := range add.Activations {

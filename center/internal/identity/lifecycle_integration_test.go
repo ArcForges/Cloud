@@ -483,6 +483,77 @@ VALUES($1,$2,$3,$4,$5,'Private account label','Private host name',true,2,1,'1.0.
 	}
 }
 
+func TestDeletionPreviewAndFinalizerUseTheSameProviderFacts(t *testing.T) {
+	r := newLifecycleRig(t, 1)
+	subscription := platform.NewID()
+	if err := r.tx(func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `WITH provider AS (
+  INSERT INTO commerce.provider_environment(environment) VALUES (2) RETURNING environment
+), customer AS (
+  INSERT INTO commerce.customer(account_id,provider,environment,provider_customer_ref,created_at)
+  SELECT $1,1,environment,'ctm_deletion_fixture',$2 FROM provider RETURNING environment,provider_customer_ref
+)
+INSERT INTO commerce.subscription(subscription_id,account_id,provider,environment,provider_customer_ref,
+provider_subscription_ref,catalog_version,product_ref,price_ref,state,auto_renew,provider_updated_at,
+provider_snapshot_sha256,verified_at,rev)
+SELECT $3,$1,1,environment,provider_customer_ref,'sub_deletion_fixture','deletion-v1','pro_fixture','pri_fixture',
+7,true,$2,decode(repeat('00',32),'hex'),$2,1 FROM customer`, r.user, r.now, subscription)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prepare := func(now time.Time) Lifecycle {
+		t.Helper()
+		var plan Lifecycle
+		if err := r.tx(func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			plan, err = r.s.PrepareDeletion(ctx, tx, r.caller, platform.NewID(), now)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return plan
+	}
+	blocked := prepare(r.now)
+	if blocked.BlockedReason != 1 {
+		t.Fatalf("unverified provider status did not block cleanup: %d", blocked.BlockedReason)
+	}
+	r.prove(ClassConfirmDeletion, blocked.ID)
+	settledAt := r.now.Add(time.Second)
+	if err := r.tx(func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE commerce.subscription SET state=5,auto_renew=false,
+provider_updated_at=$2,verified_at=$2,provider_snapshot_sha256=decode(repeat('01',32),'hex'),rev=2
+WHERE subscription_id=$1`, subscription, settledAt)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.tx(func(ctx context.Context, tx pgx.Tx) error {
+		_, err := r.s.ConfirmDeletion(ctx, tx, r.caller, blocked.ID, blocked.PlanRevision, platform.NewID(), settledAt)
+		return err
+	}); err == nil {
+		t.Fatal("an old deletion plan survived changed provider facts")
+	}
+	settled := prepare(settledAt)
+	if settled.BlockedReason != 0 || settled.ID == blocked.ID {
+		t.Fatal("verified terminal status did not produce a new unblocked plan")
+	}
+	r.prove(ClassConfirmDeletion, settled.ID)
+	if err := r.tx(func(ctx context.Context, tx pgx.Tx) error {
+		_, err := r.s.ConfirmDeletion(ctx, tx, r.caller, settled.ID, settled.PlanRevision, platform.NewID(), settledAt)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var completed bool
+	if err := r.db.Migration.QueryRow(context.Background(), `SELECT identity.finish_account_deletion($1,$2)`, settled.ID, settledAt).Scan(&completed); err != nil || !completed {
+		t.Fatal("owner finalizer did not agree with the verified preview", completed, err)
+	}
+	if got := r.db.Count(`SELECT count(*) FROM commerce.subscription WHERE subscription_id=$1`, subscription); got != 1 {
+		t.Fatal("cleanup removed retained provider evidence", got)
+	}
+}
+
 func TestDeletionRevokesCallerRequiresNewAuthenticationAndPreservesRestrictionOnCancel(t *testing.T) {
 	r := newLifecycleRig(t, 2)
 	ctx := context.Background()
