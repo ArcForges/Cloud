@@ -8,6 +8,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import "../../tooling/deployment-preflight.test.ts";
 import {
   CloudflareApi,
   checkProofDomainFree,

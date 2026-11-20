@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "center-pending-source-unavailable",
+  "condition": {
+    "signal": "dependency.primary-database.center-pending-source-available",
+    "operator": "lt",
+    "threshold": 1,
+    "windowSeconds": 300,
+    "minimumSamples": 1
+  },
+  "dependencyId": "primary-database",
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/center-pending-source-unavailable.md"
+}

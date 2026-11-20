@@ -139,5 +139,6 @@ the remaining C# code.
   `config.Secret`, revealed only in `mail/postmark.go` and `mail/smtp.go`; `mail/mailtest` is imported by `_test.go` files only; a test
   never contacts a real provider unless its own explicit local switch is set; mail stays disabled in every deployed environment, and
   no workflow or script references a mail secret until the later enabling step. No real account can be mailed yet.
-- The C# executable stays the image's default entrypoint for the proof environment; `ARCFORGES_HELLO_RUNTIME=csharp` through a
-  reviewed main push is the Hello rollback. Go is not .NET Native AOT; health reports `runtime=go` and `nativeAot=false`.
+- Keep the C# executable as the default entrypoint for historical Hello proof. New official-hosted deployment requires the
+  Go Center. Under H-03, rollback may use a previously admitted Worker and image only after checking the live schema and
+  credential compatibility. Go health reports `runtime=go` and `nativeAot=false`.

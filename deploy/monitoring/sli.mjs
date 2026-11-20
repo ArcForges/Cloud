@@ -13,17 +13,16 @@ const REQUIRED_PAGE_ALERTS = new Set([
   "remote-connection-collapse",
   "backup-lag-beyond-objective",
   "payment-provider-webhook-backlog",
-  "managed-ai-routes-unavailable",
   "data-integrity-alarm",
+  "center-capacity-exhausted",
+  "center-watch-admission-refused",
+  "remote-outcome-uncertain",
+  "storage-admission-unavailable",
+  "billing-reconciliation-review",
+  "center-pending-source-unavailable",
 ]);
 
-const EXPECTED_CAPABILITIES = new Set([
-  "cloud-api",
-  "identity",
-  "sync-control-plane",
-  "realtime",
-  "managed-ai",
-]);
+const EXPECTED_CAPABILITIES = new Set(["cloud-api", "identity", "sync-control-plane", "realtime"]);
 
 const EXPECTED_DEPENDENCIES = new Set([
   "edge-ingress",
@@ -33,7 +32,6 @@ const EXPECTED_DEPENDENCIES = new Set([
   "identity-delivery",
   "payment-provider",
   "realtime-transport",
-  "managed-ai-provider",
 ]);
 
 const ALLOWED_SIGNALS = new Set([
@@ -46,8 +44,13 @@ const ALLOWED_SIGNALS = new Set([
   "capability.realtime.connection-loss-rate-bp",
   "dependency.object-storage.backup-lag-seconds",
   "dependency.payment-provider.webhook-oldest-age-seconds",
-  "capability.managed-ai.route-availability-bp",
   "dependency.primary-database.integrity-alarm-count",
+  "capability.realtime.center-capacity-bp",
+  "capability.realtime.center-watch-refusals",
+  "capability.realtime.center-remote-unknown-count",
+  "dependency.primary-database.center-admission-ready",
+  "dependency.payment-provider.center-review-count",
+  "dependency.primary-database.center-pending-source-available",
 ]);
 
 const ROUTE_CLASSES = new Set(["page", "ticket", "dashboard"]);

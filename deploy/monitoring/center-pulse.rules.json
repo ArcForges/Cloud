@@ -1,0 +1,121 @@
+{
+  "groups": [
+    {
+      "name": "arcforges-center-pulse",
+      "rules": [
+        {
+          "alert": "CenterCapacityExhausted",
+          "expr": "arcforges_center_resource_in_use >= arcforges_center_resource_limit",
+          "for": "1m",
+          "labels": {
+            "alert_id": "center-capacity-exhausted",
+            "severity": "SEV2",
+            "route_class": "page"
+          },
+          "annotations": {
+            "summary": "Center concurrent reservation pool is full",
+            "runbook": "runbooks/center-capacity-exhausted.md"
+          }
+        },
+        {
+          "alert": "CenterWatchAdmissionRefused",
+          "expr": "increase(arcforges_center_watch_refusals_total[5m]) > 0",
+          "for": "0s",
+          "labels": {
+            "alert_id": "center-watch-admission-refused",
+            "severity": "SEV2",
+            "route_class": "page"
+          },
+          "annotations": {
+            "summary": "Center watch admissions exceeded an enforced limit",
+            "runbook": "runbooks/center-watch-admission-refused.md"
+          }
+        },
+        {
+          "alert": "CenterRemoteOutcomeUncertain",
+          "expr": "arcforges_center_pending_items{queue=\"remote_unknown\"} > 0",
+          "for": "1m",
+          "labels": {
+            "alert_id": "remote-outcome-uncertain",
+            "severity": "SEV2",
+            "route_class": "page"
+          },
+          "annotations": {
+            "summary": "Remote Node operation still has an uncertain outcome",
+            "runbook": "runbooks/remote-outcome-uncertain.md"
+          }
+        },
+        {
+          "alert": "CenterDatabaseUnavailable",
+          "expr": "arcforges_center_store_ready{check=\"database\"} == 0",
+          "for": "3m",
+          "labels": {
+            "alert_id": "database-unavailable",
+            "severity": "SEV1",
+            "route_class": "page"
+          },
+          "annotations": {
+            "summary": "Configured runtime database is unavailable",
+            "runbook": "runbooks/database-unavailable.md"
+          }
+        },
+        {
+          "alert": "CenterStorageAdmissionUnavailable",
+          "expr": "arcforges_center_store_ready{check=\"schema_admission\"} == 0 and ignoring(check) arcforges_center_store_ready{check=\"database\"} == 1",
+          "for": "1m",
+          "labels": {
+            "alert_id": "storage-admission-unavailable",
+            "severity": "SEV1",
+            "route_class": "page"
+          },
+          "annotations": {
+            "summary": "Runtime database is reachable but failed schema or restore admission",
+            "runbook": "runbooks/storage-admission-unavailable.md"
+          }
+        },
+        {
+          "alert": "CenterBillingWebhookBacklog",
+          "expr": "arcforges_center_pending_oldest_seconds{queue=\"billing_due\"} > 300",
+          "for": "5m",
+          "labels": {
+            "alert_id": "payment-provider-webhook-backlog",
+            "severity": "SEV1",
+            "route_class": "page"
+          },
+          "annotations": {
+            "summary": "A sampled due provider event has waited more than five minutes",
+            "runbook": "runbooks/payment-provider-webhook-backlog.md"
+          }
+        },
+        {
+          "alert": "CenterBillingReconciliationReview",
+          "expr": "arcforges_center_pending_items{queue=\"billing_review\"} > 0",
+          "for": "1m",
+          "labels": {
+            "alert_id": "billing-reconciliation-review",
+            "severity": "SEV2",
+            "route_class": "page"
+          },
+          "annotations": {
+            "summary": "Durable billing reconciliation is waiting for manual review",
+            "runbook": "runbooks/billing-reconciliation-review.md"
+          }
+        },
+        {
+          "alert": "CenterPendingSourceUnavailable",
+          "expr": "arcforges_center_pending_available == 0 and on (job, instance) arcforges_center_store_ready{check=\"schema_admission\"} == 1",
+          "for": "5m",
+          "labels": {
+            "alert_id": "center-pending-source-unavailable",
+            "severity": "SEV2",
+            "route_class": "page"
+          },
+          "annotations": {
+            "summary": "Configured durable queue could not be sampled",
+            "runbook": "runbooks/center-pending-source-unavailable.md"
+          }
+        }
+      ]
+    }
+  ]
+}

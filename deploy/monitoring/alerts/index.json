@@ -10,7 +10,12 @@
     "alerts/remote-connection-collapse.json",
     "alerts/backup-lag-beyond-objective.json",
     "alerts/payment-provider-webhook-backlog.json",
-    "alerts/managed-ai-routes-unavailable.json",
-    "alerts/data-integrity-alarm.json"
+    "alerts/data-integrity-alarm.json",
+    "alerts/center-capacity-exhausted.json",
+    "alerts/center-watch-admission-refused.json",
+    "alerts/remote-outcome-uncertain.json",
+    "alerts/storage-admission-unavailable.json",
+    "alerts/billing-reconciliation-review.json",
+    "alerts/center-pending-source-unavailable.json"
   ]
 }

@@ -96,6 +96,9 @@ type Center struct {
 	// buildVersion the number of migrations of this build.
 	schemaVersion atomic.Int64
 	buildVersion  int
+	pulse         pulseSampler
+	httpSlots     *slots
+	grpcSlots     *slots
 	// startedAt is the process start instant the definitions fact is stamped with (store-1), captured once by Run before the first
 	// attempt and used unchanged by every retry, so a late retry never displaces a newer start's fact.
 	startedAt time.Time
@@ -378,7 +381,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 			dispatcher.Register(registry.Methods()...)
 			dispatcher.Register(fleetServer.DeviceMethods(c.Hub, service.RevokeDevice)...)
 			dispatcher.Register(fleetServer.V2ControlMethods(c.Hub, c.Config.Identity.Policy.RoutedReplayWindow)...)
-			dispatcher.Register(fleetServer.V2WatchMethods(c.Hub, longPolls)...)
+			dispatcher.Register(fleetServer.V2WatchMethods(c.Hub, longPolls, c.Metrics.ObserveManagementWatch)...)
 		}
 	}
 	var mobile *mobileauth.Service
@@ -532,7 +535,7 @@ func checkIdentityComposition(modules []routes.Module) error {
 	served[status.Procedure] = status.StreamType
 	fleetServer := fleetapi.New(nil, nil, nil, nil, nil)
 	for _, method := range slices.Concat(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods(),
-		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0), fleetServer.V2WatchMethods(nil, 1), commerceRPC{}.methods()) {
+		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0), fleetServer.V2WatchMethods(nil, 1, nil), commerceRPC{}.methods()) {
 		served[method.Spec.Procedure] = method.Spec.StreamType
 	}
 	if len(served) != len(policies) {
@@ -796,6 +799,9 @@ func (c *Center) serveMetrics(writer http.ResponseWriter, request *http.Request)
 	if err := c.Metrics.WritePrometheus(writer); err != nil {
 		return
 	}
+	if err := c.operationalPulse(request.Context()).WritePrometheus(writer); err != nil {
+		return
+	}
 	_ = c.writeDatabaseMetrics(writer)
 }
 
@@ -897,8 +903,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		// A request connection of a public listener holds one of MaxConnections; an admitted node channel moves to one of
 		// MaxNodeConnections (PN-1). The admin listener serves no channel and keeps the plain bound.
 		bounded := netutil.LimitListener(listener, cfg.MaxConnections)
-		if item.name != "admin" {
-			bounded = listen(listener, cfg.MaxConnections, cfg.MaxNodeConnections)
+		switch item.name {
+		case "http", "grpc":
+			public := listen(listener, cfg.MaxConnections, cfg.MaxNodeConnections)
+			if item.name == "http" {
+				center.httpSlots = public.slots
+			} else {
+				center.grpcSlots = public.slots
+			}
+			bounded = public
 		}
 		go func() { failures <- server.Serve(bounded) }()
 	}
@@ -1038,7 +1051,7 @@ func (c *Center) logMetrics(ctx context.Context, interval time.Duration) {
 			return
 		case <-ticker.C:
 			c.Metrics.SetDefinitionsSuperseded(c.definitionsSuperseded(ctx))
-			c.Logger.Info("metrics", "requests", c.Metrics.Summary())
+			c.Logger.Info("metrics", "requests", c.Metrics.Summary(), "centerPulse", c.operationalPulse(ctx))
 		}
 	}
 }

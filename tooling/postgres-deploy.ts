@@ -337,6 +337,27 @@ export function requirePostgresGate(
     throw new Error("the PostgreSQL migration step did not pass; nothing is promoted");
 }
 
+/** The protected deployment may rotate only the runtime generation admitted by this build. */
+export function promotionRuntimeRole(
+  record: GateRecord | undefined,
+  target: PostgresTarget,
+  revision: string,
+  expectedSchemaVersion: number,
+): string {
+  requirePostgresGate(record, target, revision);
+  assert.equal(
+    record?.version,
+    expectedSchemaVersion,
+    "The PostgreSQL gate does not admit this candidate's schema version.",
+  );
+  const role = record?.runtimeRole;
+  assert(
+    typeof role === "string" && /^[a-z][a-z0-9_]{2,40}$/u.test(role),
+    "The PostgreSQL runtime generation floor is missing or invalid.",
+  );
+  return role;
+}
+
 export async function readGate(target: PostgresTarget): Promise<GateRecord | undefined> {
   try {
     return await readJson<GateRecord>(gateFile(target));

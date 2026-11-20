@@ -54,6 +54,11 @@ type Metrics struct {
 	connected  int
 	inFlight   int
 	superseded int
+
+	managementWatch Capacity
+	watchGlobal     uint64
+	watchAccount    uint64
+	watchNode       uint64
 }
 
 // FleetOutcomes is the closed label set of the fleet surface's events (AF-CTR-04, CR-02): the refresh of a node session (rotated,

@@ -1,0 +1,4 @@
+# Include these settings in the dedicated PostgreSQL 18 cluster.
+listen_addresses = '127.0.0.1'
+port = 5432
+password_encryption = 'scram-sha-256'

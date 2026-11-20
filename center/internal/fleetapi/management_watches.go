@@ -48,17 +48,29 @@ type watchSlots struct {
 	total    int
 	accounts map[platform.ID]int
 	nodes    map[platform.ID]int
+	observe  func(active, limit int, refusal string)
 }
 
 func (s *watchSlots) take(scope management.Authority) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.total >= s.limit || s.accounts[scope.Account] >= watchPerIdentity || s.nodes[scope.Node] >= watchPerIdentity {
+	var refusal string
+	switch {
+	case s.total >= s.limit:
+		refusal = "global"
+	case s.accounts[scope.Account] >= watchPerIdentity:
+		refusal = "account"
+	case s.nodes[scope.Node] >= watchPerIdentity:
+		refusal = "node"
+	}
+	if refusal != "" {
+		s.publish(refusal)
 		return false
 	}
 	s.total++
 	s.accounts[scope.Account]++
 	s.nodes[scope.Node]++
+	s.publish("")
 	return true
 }
 
@@ -74,16 +86,24 @@ func (s *watchSlots) release(scope management.Authority) {
 	if s.nodes[scope.Node] == 0 {
 		delete(s.nodes, scope.Node)
 	}
+	s.publish("")
+}
+
+func (s *watchSlots) publish(refusal string) {
+	if s.observe != nil {
+		s.observe(s.total, s.limit, refusal)
+	}
 }
 
 // V2WatchMethods serves the fixed public watches. Each HTTP stream owns one
 // exact node channel and makes one pull at a time. The next pull cannot begin
 // until the receiver has completed its previous write.
-func (s *Server) V2WatchMethods(transport V2ControlTransport, longPolls int) []connect.Method {
+func (s *Server) V2WatchMethods(transport V2ControlTransport, longPolls int, observe func(active, limit int, refusal string)) []connect.Method {
 	r := &managementRouter{Server: s, transport: transport}
 	slots := &watchSlots{
-		limit: max(1, longPolls), accounts: make(map[platform.ID]int), nodes: make(map[platform.ID]int),
+		limit: max(1, longPolls), accounts: make(map[platform.ID]int), nodes: make(map[platform.ID]int), observe: observe,
 	}
+	slots.publish("")
 	methods := routes.ManagementWatchMethods()
 	return []connect.Method{
 		watchMethod(r, slots, methods[0], v2.ValidateRunServiceWatchOutputRequest, v2.ValidateRunServiceWatchOutputFrame,
