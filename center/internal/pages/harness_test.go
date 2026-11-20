@@ -193,6 +193,8 @@ type settings struct {
 	relay bool
 	// nativeCertificate serves the composed Center directly on an isolated HTTPS localhost listener for the installed Node test.
 	nativeCertificate *tls.Certificate
+	// nativeHandler optionally wraps that listener's real handler before it starts.
+	nativeHandler func(http.Handler) http.Handler
 }
 
 const writePolicy = `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`
@@ -304,7 +306,11 @@ func newHarness(t *testing.T, options settings) *harness {
 	})
 	h.center = center
 	if h.native != nil {
-		h.native.Config.Handler = center.Public()
+		handler := center.Public()
+		if options.nativeHandler != nil {
+			handler = options.nativeHandler(handler)
+		}
+		h.native.Config.Handler = handler
 		h.native.TLS = &tls.Config{Certificates: []tls.Certificate{*options.nativeCertificate}, MinVersion: tls.VersionTLS12}
 		h.native.StartTLS()
 		h.url, h.http = baseURL, h.native.Client()

@@ -3,14 +3,19 @@
 package pages_test
 
 import (
+	"bytes"
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"slices"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	fleetv1 "github.com/ArcForges/Contracts/go/arcforges/fleet/v1"
+	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
 	foundation "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	publicapi "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
@@ -82,21 +87,79 @@ func startHost01InstalledNode(t *testing.T, hosted bool) *center02NativeRun {
 	t.Helper()
 	options := settings{surfaces: "identity,pages,fleet,relay,nodes", relay: true, hosted: hosted,
 		policy: `{"stepUpPerAccountLimit":1000,"signInFailuresAccountLimit":1000,"signInPerPrefixLimit":1000,"channelLapseRecheck":"1m"}`}
+	if hosted {
+		options.nativeHandler = host01LoopbackIngress
+	}
 	run := startInstalledCenterNode(t, host01Required, "ArcForges.ClosedLoop.Tests.CloudLinkCenterControlTests", options, func(h *harness) {
 		if hosted && h.center.Config.Mode != config.OfficialHosted ||
 			!hosted && (h.center.Config.Mode != config.SelfHosted || h.center.Config.Plan != config.PlanNone) {
 			t.Fatal("the startup fixture selected the wrong Center service mode")
 		}
 		h.clock.mu.Lock()
-		defer h.clock.mu.Unlock()
 		h.clock.tick = func() {
 			h.clock.mu.Lock()
 			h.clock.now = time.Now().UTC()
 			h.clock.mu.Unlock()
 		}
+		h.clock.mu.Unlock()
+		if hosted {
+			requireHost01IngressBoundary(t, h)
+		}
 	})
 	run.ownerBrowser.bootstrapState()
 	return run
+}
+
+// The real official Center requires the client address normally supplied
+// by its edge. The private TLS fixture derives that one field from its
+// accepted socket and passes the actual request to the unchanged ingress.
+func host01LoopbackIngress(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		peer, err := netip.ParseAddrPort(r.RemoteAddr)
+		if err != nil || !peer.Addr().IsLoopback() {
+			http.Error(w, "the hosted fixture requires a loopback peer", http.StatusBadRequest)
+			return
+		}
+		forwarded := r.Clone(r.Context())
+		forwarded.Header.Set(config.ClientIPHeader, peer.Addr().Unmap().String())
+		forwarded.Header.Del(config.ClientCountryHeader)
+		forwarded.Header.Del(config.ClientASNHeader)
+		next.ServeHTTP(w, forwarded)
+	})
+}
+
+func requireHost01IngressBoundary(t *testing.T, h *harness) {
+	t.Helper()
+	const procedure = fleetv1connect.NodeEnrollmentServiceStartDeviceAuthorizationProcedure
+	// Omit the node on purpose. The unwrapped official ingress should
+	// stop at the missing edge address. The fixture HTTPS route should
+	// proceed to the actual device method's typed node validation.
+	request := &fleetv1.NodeEnrollmentServiceStartDeviceAuthorizationRequest{Meta: center03Meta(false, nil)}
+	payload, err := proto.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := httptest.NewRequest(http.MethodPost, h.origin+procedure, bytes.NewReader(ingress.Frame(payload)))
+	raw.RemoteAddr = "127.0.0.1:1"
+	raw.Header.Set("Content-Type", "application/grpc-web+proto")
+	refusal := httptest.NewRecorder()
+	h.center.Public().ServeHTTP(refusal, raw)
+	if denial := ingress.ReasonInvalidRequest; refusal.Code != http.StatusOK ||
+		!bytes.Equal(refusal.Body.Bytes(), ingress.TrailerFrame(denial.Status, denial.Code, true)) {
+		t.Fatalf("the official ingress without its address did not return the expected transport refusal (HTTP %d)", refusal.Code)
+	}
+
+	client := connect.NewClient(connecthttp.NewTransport(h.http, h.url, connecthttp.WithGRPCWeb()))
+	var reply fleetv1.NodeEnrollmentServiceStartDeviceAuthorizationResponse
+	if err = client.CallUnary(t.Context(), connect.Spec{Procedure: procedure, StreamType: connect.StreamTypeUnary}, request, &reply); err != nil {
+		t.Fatalf("the native loopback ingress did not reach typed device validation: %s", connect.CodeOf(err))
+	}
+	failure := reply.GetError()
+	if reply.GetValue() != nil || failure.GetCategory() != foundation.ErrorCategory_ERROR_CATEGORY_VALIDATION ||
+		failure.GetCode() != "invalid_argument" || failure.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+		t.Fatalf("the official device method returned an unexpected result: %s/%s", failure.GetCategory(), failure.GetCode())
+	}
+	t.Log("the same device request hit the official missing-address transport refusal directly and reached real typed validation over the fixture TLS listener")
 }
 
 // The isolated provider fact is an actual service interval and ordinary
