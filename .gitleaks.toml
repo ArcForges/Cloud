@@ -1196,6 +1196,17 @@ regexes = [
 ]
 
 [[allowlists]]
+description = "AFV2-HOST-03: two immutable public licence record digests matched by the pinned redacted scan of the exact r148 dependency receipt. Only the two exact record-key and digest lines of this exact file are exempt."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^eng/policy/dependency\-reviews/afv2\-host\-03\-r1\.json$''']
+regexTarget = "line"
+regexes = [
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthn\-legal\-r1\.json":\s*"fecb236888c74fd6195890d16720689d5341b51bbe8ac3a3d942171a936e4d07",?\s*$''',
+  '''(?s)^\s*"eng/provenance/records/go\-gowebauthnx\-legal\-r1\.json":\s*"f1680c3b153114ea4cc145264a716e4669e14212976d6584c1b3f41eda1202c4",?\s*$''',
+]
+
+[[allowlists]]
 description = "AFV2-CENTER-02 RFC 6455: public WebSocket handshake example at line 196 of the reviewed historical Identity test."
 condition = "AND"
 targetRules = ["generic-api-key"]
