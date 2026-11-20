@@ -59,7 +59,7 @@ func TestCenter04InstalledNode(t *testing.T) {
 	cursor := center04Output(t, run, browser, watcher, stream)
 	eventScope := center03ID(center03ParseID(t, stream.Sandbox))
 	center04Events(t, run, browser, watcher, eventScope, center03ID(center03ParseID(t, stream.Run)), reported.NodeEpoch)
-	previousSample := center04Usage(t, run, browser, watcher, eventScope, nil)
+	previousSample := center04WatchQuota(t, run, browser, watcher, eventScope)
 
 	files := center02Observation[center04Scope](t, run, "file-scope.json")
 	transfer := files.target(t, peer)
@@ -69,6 +69,7 @@ func TestCenter04InstalledNode(t *testing.T) {
 	contents = append(contents, "native-final-tail"...)
 	digest := sha256.Sum256(contents)
 	expectedDigest := hex.EncodeToString(digest[:])
+	center04RejectOversize(t, run, browser, transfer, fileScope, ownerEpoch, files.SandboxRevision, expectedDigest)
 	center04Upload(t, run, browser, transfer, fileScope, ownerEpoch, files.SandboxRevision, contents, expectedDigest)
 
 	export := center04Export(t, run, browser, transfer, fileScope, ownerEpoch, files.SandboxRevision, contents, expectedDigest)
@@ -219,6 +220,41 @@ func center04OutputReconnect(t *testing.T, run *center02NativeRun, b *browser, s
 	}
 }
 
+func center04RejectOversize(t *testing.T, run *center02NativeRun, b *browser, target center03Target, scope, epoch *foundation.Id,
+	revision int64, digest string) {
+	t.Helper()
+	const maximum = 256 << 20 // SandboxManager.DataMaxFileBytes.
+	request := &v2.DataServiceBeginImportRequest{Meta: center03Meta(true, &foundation.Revision{Value: proto.Int64(revision)}),
+		OwnerEpoch: epoch, SandboxId: scope, RelativePath: proto.String("data/oversize-import.bin"), ByteLength: proto.Uint64(maximum + 1),
+		Sha256: proto.String(digest), Overwrite: proto.Bool(false)}
+	var reply v2.DataServiceBeginImportResponse
+	center04Call(t, run, b, target, sandboxv2connect.DataServiceBeginImportProcedure, request, &reply, nil)
+	failure := reply.GetError()
+	correlation := request.GetMeta().GetCorrelationId()
+	if reply.GetValue() != nil || !v2.ValidateDataServiceBeginImportResponse(&reply) ||
+		failure.GetCategory() != foundation.ErrorCategory_ERROR_CATEGORY_RESOURCE || failure.GetCode() != "disk_space" ||
+		failure.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN ||
+		failure.GetRetry().GetMode() != foundation.RetryMode_RETRY_MODE_AFTER_TIME || failure.GetRetry().GetRetryAt() == nil ||
+		!proto.Equal(failure.GetCorrelationId(), correlation) || !proto.Equal(reply.GetMeta().GetCorrelationId(), correlation) ||
+		failure.GetDetails().GetState().GetReason() != "transfer_storage_limit" {
+		t.Fatalf("an oversized declared import must preserve the signed no-effect storage refusal, got %s/%s/%s",
+			failure.GetCategory(), failure.GetCode(), failure.GetEffect())
+	}
+	command := platform.ID(request.GetMeta().GetCommandId().GetValue())
+	identity, receipt, err := management.New(run.harness.center.Store).InspectOriginal(run.ctx, management.Authority{
+		Account: run.owner.id, Actor: run.owner.id, Node: target.node, Enrollment: target.enrollment,
+		Grant: target.grant, GrantRevision: target.revision,
+	}, command)
+	if err != nil || identity.OwnerEpoch != platform.ID(epoch.GetValue()) || identity.Method != "DataService.BeginImport" ||
+		receipt.State != management.StateRejected || receipt.Effect == nil || *receipt.Effect != management.EffectDidNotHappen ||
+		!receipt.MayHaveDelivered || receipt.DeliveryCount != 1 || receipt.FinalAt == nil || receipt.ResultID != nil ||
+		receipt.ResultKind != "" || len(receipt.ResultSHA256) != sha256.Size || receipt.Reason != "disk_space" {
+		t.Fatal("the original oversized import did not leave exactly one content-free rejected PostgreSQL receipt")
+	}
+	writeCenter03Observation(t, run, "oversize.json", map[string]string{"command": hex.EncodeToString(command[:])})
+	t.Log("the oversized import declared only metadata and retained its signed no-effect storage refusal")
+}
+
 func center04Upload(t *testing.T, run *center02NativeRun, b *browser, target center03Target, scope, epoch *foundation.Id,
 	revision int64, payload []byte, digest string) {
 	t.Helper()
@@ -280,7 +316,7 @@ func center04Export(t *testing.T, run *center02NativeRun, b *browser, target cen
 	revision int64, payload []byte, digest string) *v2.Transfer {
 	t.Helper()
 	request := &v2.DataServiceBeginExportRequest{Meta: center03Meta(true, &foundation.Revision{Value: proto.Int64(revision)}),
-		OwnerEpoch: epoch, SandboxId: scope, RelativePath: proto.String("round-trip.bin")}
+		OwnerEpoch: epoch, SandboxId: scope, RelativePath: proto.String("data/round-trip.bin")}
 	var begun v2.DataServiceBeginExportResponse
 	center04Call(t, run, b, target, sandboxv2connect.DataServiceBeginExportProcedure, request, &begun, nil)
 	center03Success(t, begun.GetError(), begun.GetValue())
@@ -323,7 +359,7 @@ func center04BeginImport(t *testing.T, run *center02NativeRun, b *browser, targe
 	revision int64, name string, size uint64, digest string) *v2.DataServiceBeginImportResponse {
 	t.Helper()
 	request := &v2.DataServiceBeginImportRequest{Meta: center03Meta(true, &foundation.Revision{Value: proto.Int64(revision)}),
-		OwnerEpoch: epoch, SandboxId: scope, RelativePath: proto.String(name), ByteLength: proto.Uint64(size),
+		OwnerEpoch: epoch, SandboxId: scope, RelativePath: proto.String("data/" + name), ByteLength: proto.Uint64(size),
 		Sha256: proto.String(digest), Overwrite: proto.Bool(false)}
 	var begun v2.DataServiceBeginImportResponse
 	center04Call(t, run, b, target, sandboxv2connect.DataServiceBeginImportProcedure, request, &begun, nil)
@@ -597,6 +633,92 @@ func center04Events(t *testing.T, run *center02NativeRun, b *browser, scope cent
 	t.Fatal("the bounded event resnapshot did not observe the original native Run")
 }
 
+func center04WatchQuota(t *testing.T, run *center02NativeRun, b *browser, scope center03Target, sandbox *foundation.Id) *v2.ResourceSnapshot {
+	t.Helper()
+	const capacity = 8
+	path := sandboxv2connect.ResourceServiceWatchUsageProcedure
+	var releases [capacity]func()
+	for i := range releases {
+		request := &v2.ResourceServiceWatchUsageRequest{Meta: center03Meta(false, nil), ScopeKind: proto.String("sandbox"),
+			ScopeId: sandbox, IntervalMs: proto.Uint32(60_000)}
+		stream, release := center04Stream(t, run, b, scope, path, request)
+		releases[i] = release
+		defer release()
+		var frame v2.ResourceServiceWatchUsageFrame
+		if err := stream.Receive(&frame); err != nil || !v2.ValidateResourceServiceWatchUsageFrame(&frame) ||
+			!proto.Equal(frame.GetMeta().GetCorrelationId(), request.GetMeta().GetCorrelationId()) ||
+			frame.GetError() != nil || !proto.Equal(frame.GetSnapshot().GetScopeId(), sandbox) {
+			t.Fatalf("owned idle resource watch %d of %d was not admitted: %s/%s, transport %v",
+				i+1, capacity, frame.GetError().GetCategory(), frame.GetError().GetCode(), connect.CodeOf(err))
+		}
+	}
+
+	ninth := &v2.ResourceServiceWatchUsageRequest{Meta: center03Meta(false, nil), ScopeKind: proto.String("sandbox"),
+		ScopeId: sandbox, IntervalMs: proto.Uint32(60_000)}
+	stream, closeNinth := center04Stream(t, run, b, scope, path, ninth)
+	defer closeNinth()
+	var refused v2.ResourceServiceWatchUsageFrame
+	if err := stream.Receive(&refused); err != nil || !center04QuotaRefusal(&refused, ninth.GetMeta().GetCorrelationId()) {
+		t.Fatalf("the ninth live view did not return its exact typed, correlated RESOURCE/overloaded frame: %s/%s, transport %v",
+			refused.GetError().GetCategory(), refused.GetError().GetCode(), connect.CodeOf(err))
+	}
+	if err := stream.Receive(new(v2.ResourceServiceWatchUsageFrame)); !errors.Is(err, io.EOF) {
+		t.Fatal("the overloaded resource stream did not close after its one error frame")
+	}
+	closeNinth()
+	for _, release := range releases {
+		release()
+	}
+
+	released, cancel := context.WithTimeout(run.ctx, 4*time.Second)
+	defer cancel()
+	tick := time.NewTicker(40 * time.Millisecond)
+	defer tick.Stop()
+	client := center04TransferClient(b, scope, nil, t, run)
+	for {
+		request := &v2.ResourceServiceWatchUsageRequest{Meta: center03Meta(false, nil), ScopeKind: proto.String("sandbox"),
+			ScopeId: sandbox, IntervalMs: proto.Uint32(1000)}
+		canResume, err := client.CallServerStream(released, connect.Spec{Procedure: path, StreamType: connect.StreamTypeServer}, request)
+		if err != nil {
+			t.Fatalf("the resource stream could not reopen after owned cancellation: %s", connect.CodeOf(err))
+		}
+		var frame v2.ResourceServiceWatchUsageFrame
+		correlation := request.GetMeta().GetCorrelationId()
+		err = canResume.Receive(&frame)
+		if err == nil && center04QuotaRefusal(&frame, correlation) {
+			// The HTTP handlers can still be processing the just-issued cancellations.
+			_ = canResume.Close()
+			select {
+			case <-tick.C:
+				continue
+			case <-released.Done():
+				t.Fatal("the owned resource watches did not release their capacity")
+			}
+		}
+		for err == nil && v2.ValidateResourceServiceWatchUsageFrame(&frame) && frame.GetError() == nil &&
+			proto.Equal(frame.GetMeta().GetCorrelationId(), correlation) && proto.Equal(frame.GetSnapshot().GetScopeId(), sandbox) {
+			sample := frame.GetSnapshot()
+			if !sample.GetStale() && sample.GetSampleSequence() > 0 && sample.GetSampleEpoch() != "" && sample.GetSampledAt() != nil {
+				_ = canResume.Close()
+				t.Log("eight live resource watches admitted, the ninth closed overloaded, and cancellation permitted a fresh resnapshot")
+				return sample
+			}
+			frame.Reset()
+			err = canResume.Receive(&frame)
+		}
+		_ = canResume.Close()
+		t.Fatal("released capacity did not deliver the authorized fresh resource snapshot")
+	}
+}
+
+func center04QuotaRefusal(frame *v2.ResourceServiceWatchUsageFrame, correlation *foundation.Id) bool {
+	failure := frame.GetError()
+	return v2.ValidateResourceServiceWatchUsageFrame(frame) && frame.GetSnapshot() == nil &&
+		failure.GetCategory() == foundation.ErrorCategory_ERROR_CATEGORY_RESOURCE && failure.GetCode() == "overloaded" &&
+		failure.GetEffect() == foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN &&
+		proto.Equal(frame.GetMeta().GetCorrelationId(), correlation) && proto.Equal(failure.GetCorrelationId(), correlation)
+}
+
 func center04Usage(t *testing.T, run *center02NativeRun, b *browser, scope center03Target, sandbox *foundation.Id,
 	previous *v2.ResourceSnapshot) *v2.ResourceSnapshot {
 	t.Helper()
@@ -617,9 +739,6 @@ func center04Usage(t *testing.T, run *center02NativeRun, b *browser, scope cente
 		}
 		if sample.GetStale() || sample.GetSampleSequence() == 0 {
 			continue
-		}
-		if previous == nil {
-			return sample
 		}
 		previousAt, currentAt := previous.GetSampledAt(), sample.GetSampledAt()
 		newer := currentAt.GetUnixSeconds() > previousAt.GetUnixSeconds() ||
