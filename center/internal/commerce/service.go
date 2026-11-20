@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+
+// Package commerce manages hosted web checkout and reconciles verified billing facts.
 package commerce
 
 import (

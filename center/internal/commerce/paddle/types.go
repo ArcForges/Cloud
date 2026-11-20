@@ -38,11 +38,11 @@ const IntentField = "arcforges_checkout_intent"
 var (
 	ErrConfiguration    = errors.New("invalid Paddle configuration")
 	ErrInvalidRequest   = errors.New("invalid Paddle request")
-	ErrRefused          = errors.New("Paddle refused the request")
-	ErrUncertain        = errors.New("Paddle response could not establish an outcome")
-	ErrSignature        = errors.New("Paddle notification signature refused")
+	ErrRefused          = errors.New("request refused by Paddle")
+	ErrUncertain        = errors.New("outcome unconfirmed by Paddle")
+	ErrSignature        = errors.New("invalid Paddle notification signature")
 	ErrInvalidEvent     = errors.New("invalid Paddle notification")
-	ErrUnsupportedEvent = errors.New("Paddle notification type is outside the configured commerce surface")
+	ErrUnsupportedEvent = errors.New("notification type outside the configured Paddle commerce surface")
 )
 
 // Error contains only bounded, classified provider diagnostics. It never
