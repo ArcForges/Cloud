@@ -465,19 +465,47 @@ func TestRebuildEquivalenceOverTheFixtureAccounts(t *testing.T) {
 	}
 }
 
-// TestTheRuntimeRoleCannotEditOrDeleteARecord holds the privileges of 0003 from the runtime role's side: it appends, and it never
-// updates or deletes a record (the snapshot and the revision are derived and may be rewritten).
+// TestTheRuntimeRoleCannotEditOrDeleteARecord checks the runtime role's append-only history permissions through schema 16.
+// Derived snapshots and revisions may be rewritten.
 func TestTheRuntimeRoleCannotEditOrDeleteARecord(t *testing.T) {
 	s := newScenario(t).at(0)
 	grant := s.issue(capabilityRequest("cloud.sync", 0, nil, "s1"))
+	s.addTerm("owned-term", 0, Day)
+	term := termUUID("owned-term")
 	ctx := context.Background()
+	appendAction := `INSERT INTO entitlement.service_term_action
+    (action_id, account_id, term_id, kind, effective_at, recorded_at, source_ref)
+VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 2, now(), now(), $3)`
+	err := s.db.runtime.InTx(ctx, "append hosted entitlement facts", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO entitlement.account_status_fact
+    (status_fact_id, account_id, recorded_at, status, auto_renew, purchase_pending, source_ref)
+VALUES (gen_random_uuid(), $1::uuid, now(), 1, true, false, 'runtime-status')`, s.account); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, appendAction, s.account, term, "runtime-action")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("schema 16 must admit an account status fact and an action on its own term: %v", err)
+	}
+	other := s.db.account()
+	err = s.db.runtime.InTx(ctx, "append a foreign term action", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, appendAction, other, term, "foreign-action")
+		return err
+	})
+	var foreign *store.Error
+	if !errors.As(err, &foreign) || foreign.SQLState != "23503" || foreign.Constraint != "service_term_action_term" {
+		t.Fatalf("an action on another account's term must fail the term ownership constraint: %v", err)
+	}
 	for _, statement := range []string{
 		"UPDATE entitlement.grant SET reason = 'x' WHERE grant_id = '" + grant.GrantID + "'::uuid",
 		"DELETE FROM entitlement.grant WHERE grant_id = '" + grant.GrantID + "'::uuid",
 		"UPDATE entitlement.revocation SET reason_code = 'x'",
-		"INSERT INTO entitlement.account_status_fact (status_fact_id, account_id, recorded_at, status, auto_renew, purchase_pending, source_ref) VALUES (gen_random_uuid(), '" + s.account + "'::uuid, now(), 1, true, false, 'x')",
+		"UPDATE entitlement.account_status_fact SET auto_renew = false WHERE source_ref = 'runtime-status'",
+		"DELETE FROM entitlement.account_status_fact WHERE source_ref = 'runtime-status'",
 		"INSERT INTO entitlement.feature_release (feature_key, released_at) VALUES ('x.y', now())",
-		"INSERT INTO entitlement.service_term_action (action_id, account_id, term_id, kind, effective_at, recorded_at, source_ref) VALUES (gen_random_uuid(), '" + s.account + "'::uuid, gen_random_uuid(), 2, now(), now(), 'x')",
+		"UPDATE entitlement.service_term_action SET effective_at = now() WHERE source_ref = 'runtime-action'",
+		"DELETE FROM entitlement.service_term_action WHERE source_ref = 'runtime-action'",
 		"INSERT INTO identity.operator (operator_id, user_id, granted_at, expires_at, granted_by, reason) VALUES (gen_random_uuid(), '" + s.account + "'::uuid, now(), now() + interval '1 day', 'x', 'x')",
 		"DELETE FROM entitlement.snapshot",
 	} {
@@ -491,7 +519,7 @@ func TestTheRuntimeRoleCannotEditOrDeleteARecord(t *testing.T) {
 		}
 	}
 	// What it may do: rewrite the derived snapshot.
-	err := s.db.runtime.InTx(ctx, "rewrite", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.runtime.InTx(ctx, "rewrite", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "UPDATE entitlement.snapshot SET entitlement_version = entitlement_version WHERE account_id = $1::uuid", s.account)
 		return err
 	})
