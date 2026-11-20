@@ -20,6 +20,7 @@ import (
 	managementv2 "github.com/ArcForges/Contracts/go/arcforges/management/v2"
 	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
+	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -244,14 +245,15 @@ func (h *harness) v2UpgradeRefusal(token string) (int, string, upgradeRefusal) {
 	return response.StatusCode, header, refusal
 }
 
-// sessionReads are the session methods A1a serves, with an empty request each.
+// sessionReads lists the active read methods with a typed request for each.
 func sessionReads() map[string]proto.Message {
 	return map[string]proto.Message{
 		profilePath:  &publicapiv1.IdentityServiceGetProfileRequest{Meta: meta()},
 		identities:   &publicapiv1.IdentityServiceListAuthIdentitiesRequest{Meta: meta(), Page: page(10)},
 		sessionsPath: &publicapiv1.IdentityServiceListSessionsRequest{Meta: meta(), Page: page(10)},
 		devicesPath:  &publicapiv1.DeviceServiceListRequest{Meta: meta(), Page: page(10)},
-		managementv2connect.DeviceServiceListProcedure: &managementv2.DeviceServiceListRequest{Meta: meta(), Limit: proto.Uint32(10)},
+		publicapiv1connect.EntitlementServiceGetSnapshotProcedure: &publicapiv1.EntitlementServiceGetSnapshotRequest{Meta: meta()},
+		managementv2connect.DeviceServiceListProcedure:            &managementv2.DeviceServiceListRequest{Meta: meta(), Limit: proto.Uint32(10)},
 	}
 }
 
@@ -361,6 +363,12 @@ func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
 	who := h.seedAccount(1, "")
 	owner := h.signIn(who, newClaim(t), caller{})
 	ownerDevice := h.enrollManagedDevice(who, bearer(owner.GetAccessToken()))
+	const snapshotPath = publicapiv1connect.EntitlementServiceGetSnapshotProcedure
+	ownerSnapshot := rpc(h, snapshotPath, &publicapiv1.EntitlementServiceGetSnapshotRequest{Meta: meta()},
+		bearer(owner.GetAccessToken()), &publicapiv1.EntitlementServiceGetSnapshotResponse{})
+	if ownerSnapshot.GetError() != nil || len(ownerSnapshot.GetValue().GetSnapshot().GetCapabilities()) != 3 {
+		t.Fatal("the authorized account did not receive the typed entitlement snapshot")
+	}
 	upgrade, found := access.Lookup(routes.NodeChannelV2Path)
 	if !found || upgrade.ID != routes.NodeChannelV2ID || !upgrade.Session ||
 		len(upgrade.Scopes) != 1 || upgrade.Scopes[0] != session.ScopeNode.String() {
@@ -423,13 +431,16 @@ func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
 	if failure(refreshed.GetError()) != "AUTHENTICATION/credential_revoked" {
 		t.Fatalf("a revoked node refresh: %s", failure(refreshed.GetError()))
 	}
-	if answer := h.post(profilePath, &publicapiv1.IdentityServiceGetProfileRequest{Meta: meta()}, caller{bearer: node.access}); answer.status != "16" ||
-		answer.message != "auth.credential_revoked" {
-		t.Fatalf("a revoked node bearer: %+v", answer)
+	reads := sessionReads()
+	for _, path := range []string{profilePath, snapshotPath} {
+		if answer := h.post(path, reads[path], caller{bearer: node.access}); answer.status != "16" ||
+			answer.message != "auth.credential_revoked" {
+			t.Fatalf("a revoked node bearer on %s: %+v", path, answer)
+		}
 	}
-	// mobile.limited reaches every A1a read.
+	// mobile.limited reaches every admitted read.
 	limited := h.issue(who.id, session.ScopeMobileLimited, false)
-	for path, request := range sessionReads() {
+	for path, request := range reads {
 		if refusal := domainError(t, h.post(path, request, caller{bearer: limited.access})); refusal != nil {
 			t.Errorf("mobile.limited on %s: %s", path, failure(refusal))
 		}
@@ -606,10 +617,8 @@ func TestADisabledSurfaceAnswersNotActivated(t *testing.T) {
 	}
 }
 
-// TestTheServedMethodsAreExactlyTheIdentitySet (F13): of the contract's IdentityService, DeviceService and WorkspaceService methods
-// the composed center serves exactly the pinned set of A1a (sign-in, refresh, reads) and A1b (step-up, profile, passkey
-// registration, credentials, sign-out and revocation, devices); every other method (AF-ID-02's among them) is UNIMPLEMENTED, and the
-// Worker table lists only the set.
+// TestTheServedMethodsAreExactlyTheIdentitySet (F13) pins the served IdentityService, DeviceService, WorkspaceService and
+// EntitlementService methods. Every other method of those published services is UNIMPLEMENTED, and the Worker table lists only the set.
 func TestTheServedMethodsAreExactlyTheIdentitySet(t *testing.T) {
 	h := newHarness(t, settings{})
 	pinned := map[string]bool{}
@@ -619,7 +628,8 @@ func TestTheServedMethodsAreExactlyTheIdentitySet(t *testing.T) {
 		"IdentityService/GetProfile", "IdentityService/ListAuthIdentities", "IdentityService/ListSessions", "DeviceService/List",
 		"IdentityService/BeginStepUp", "IdentityService/CompleteStepUp", "IdentityService/UpdateProfile", "IdentityService/BeginPasskeyRegistration",
 		"IdentityService/CompletePasskeyRegistration", "IdentityService/RenameAuthIdentity", "IdentityService/RemoveAuthIdentity",
-		"IdentityService/RevokeSession", "IdentityService/RevokeAllSessions", "DeviceService/Rename", "DeviceService/Revoke"} {
+		"IdentityService/RevokeSession", "IdentityService/RevokeAllSessions", "DeviceService/Rename", "DeviceService/Revoke",
+		"EntitlementService/GetSnapshot"} {
 		pinned["/arcforges.publicapi.v1."+name] = true
 	}
 	registered := map[string]bool{}
@@ -629,17 +639,30 @@ func TestTheServedMethodsAreExactlyTheIdentitySet(t *testing.T) {
 	if len(registered) != len(pinned) {
 		t.Fatalf("the registrations are not the pinned set: %v", registered)
 	}
-	services := publicapiv1.File_arcforges_publicapi_v1_identity_proto.Services()
+	identity := publicapiv1.File_arcforges_publicapi_v1_identity_proto.Services()
+	services := []protoreflect.ServiceDescriptor{
+		identity.ByName("IdentityService"),
+		identity.ByName("DeviceService"),
+		identity.ByName("WorkspaceService"),
+		publicapiv1.File_arcforges_publicapi_v1_commerce_proto.Services().ByName("EntitlementService"),
+	}
 	total := 0
-	for _, service := range []protoreflect.Name{"IdentityService", "DeviceService", "WorkspaceService"} {
-		methods := services.ByName(service).Methods()
+	for _, service := range services {
+		methods := service.Methods()
 		for index := range methods.Len() {
-			path := "/arcforges.publicapi.v1." + string(service) + "/" + string(methods.Get(index).Name())
+			path := "/" + string(service.FullName()) + "/" + string(methods.Get(index).Name())
 			total++
-			answer := h.post(path, &publicapiv1.IdentityServiceGetProfileRequest{Meta: meta()}, caller{})
+			request := proto.Message(&publicapiv1.IdentityServiceGetProfileRequest{Meta: meta()})
+			if path == publicapiv1connect.EntitlementServiceGetSnapshotProcedure {
+				request = &publicapiv1.EntitlementServiceGetSnapshotRequest{Meta: meta()}
+			}
+			answer := h.post(path, request, caller{})
 			served := !(answer.status == "12" && answer.message == "unimplemented")
 			if served != pinned[path] || registered[path] != pinned[path] {
 				t.Errorf("%s: served %v, pinned %v (%+v)", path, served, pinned[path], answer)
+			}
+			if path == publicapiv1connect.EntitlementServiceGetSnapshotProcedure && answer.status != "16" {
+				t.Errorf("anonymous entitlement snapshot: gRPC status %s", answer.status)
 			}
 		}
 	}

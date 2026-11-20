@@ -56,7 +56,7 @@ func TestResourceControlsAreChargedOnlyByCallsEveryEarlierStageAdmitted(t *testi
 		key                    string
 	}{
 		{"a node credential on a HUMAN operation", "RemoteView", node, nil, "AUTHORIZATION/permission_denied"},
-		{"an automation credential on a HUMAN operation", "Push", automation, nil, "AUTHORIZATION/permission_denied"},
+		{"an automation credential on a HUMAN operation", "RemoteView", automation, nil, "AUTHORIZATION/permission_denied"},
 		{"an account session on an AGENT operation", "Agent", human, nil, "AUTHORIZATION/permission_denied"},
 		{"a push credential", "RemoteView", push, nil, "AUTHORIZATION/permission_denied"},
 		{"a restricted account", "RemoteView", restrictedHuman, nil, "AUTHORIZATION/permission_denied"},

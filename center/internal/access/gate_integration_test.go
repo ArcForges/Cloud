@@ -474,8 +474,8 @@ func TestTheGateIsNeverReachedByACallAnEarlierStageRefuses(t *testing.T) {
 	// 4. AGENT/HUMAN separation, both ways.
 	got, _ = r.call("RemoteView", node, nil)
 	refused("a node credential on a HUMAN operation", got, "AUTHORIZATION/permission_denied", "probe.remote.view")
-	got, _ = r.call("Push", automation, nil)
-	refused("an automation credential on a HUMAN operation", got, "AUTHORIZATION/permission_denied", "probe.push")
+	got, _ = r.call("RemoteView", automation, nil)
+	refused("an automation credential on a HUMAN operation", got, "AUTHORIZATION/permission_denied", "probe.remote.view")
 	got, _ = r.call("Agent", human, nil)
 	refused("an account session on an AGENT operation", got, "AUTHORIZATION/permission_denied", "probe.agent")
 	// 5. Resource controls.
@@ -523,10 +523,15 @@ func TestACallThatCannotBeAuditedNeverReachesTheGate(t *testing.T) {
 	if got, _ := r.call("RemoteView", token, nil); !got.reached || r.gate.questions() != 1 {
 		t.Fatalf("after the fault is gone: %+v, %d questions", got, r.gate.questions())
 	}
+	if got, _ := r.call("RemoteControl", token, nil); got.reached || got.failure != "ENTITLEMENT/feature_not_entitled" ||
+		got.reason != "remote.control" || r.gate.questions() != 2 || r.audits(AuditGated, "probe.remote.control", "no_entitlement") != 1 {
+		t.Fatalf("the unentitled operation must reach the gate and audit its normal refusal: %+v", got)
+	}
 	// A refusal of the gate whose audit fails is not silent either: the caller gets the store failure, not a refusal that left no trace.
 	r.db.Exec("CREATE TRIGGER test_refuse BEFORE INSERT ON audit.audit_event FOR EACH ROW WHEN (NEW.event_type = 'access.gated') EXECUTE FUNCTION testfault.refuse()")
 	r.db.Exec("CREATE OR REPLACE FUNCTION testfault.refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'the audit is refused (test)' USING ERRCODE = '57P01'; END; $$")
-	if got, _ := r.call("Push", token, nil); got.reached || got.failure != "store-failure" {
+	if got, _ := r.call("RemoteControl", token, nil); got.reached || got.failure != "store-failure" ||
+		r.gate.questions() != 3 || r.audits(AuditGated, "probe.remote.control", "no_entitlement") != 1 {
 		t.Fatalf("a gate refusal that cannot be audited: %+v", got)
 	}
 }
