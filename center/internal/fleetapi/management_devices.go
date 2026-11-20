@@ -82,10 +82,10 @@ func (s *devices) view(account platform.ID, record management.DeviceRecord) *man
 	switch {
 	case record.DeviceRevoked || record.EnrollmentRevoked:
 		presence = "revoked"
-	case record.Connection != nil:
+	case record.ProtocolEpoch != nil && record.Connection != nil:
 		presence = "stale"
 		if s.channels != nil {
-			current, found := s.channels.V2Presence(account, record.Enrollment, record.Node, record.ProtocolEpoch)
+			current, found := s.channels.V2Presence(account, record.Enrollment, record.Node, *record.ProtocolEpoch)
 			if found && current.ConnectionID == *record.Connection && current.Platform == os && current.NodeEpoch != "" && !current.SeenAt.IsZero() {
 				presence = "online"
 				result.NodeEpoch = proto.String(current.NodeEpoch)

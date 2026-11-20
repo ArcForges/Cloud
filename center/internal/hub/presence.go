@@ -56,9 +56,6 @@ WHERE singleton AND fence=$1 AND expires_at > clock_timestamp() FOR SHARE`, fenc
 // used by V2. A delayed legacy hello cannot displace a committed V2 binding.
 func (h *Hub) markOnline(ctx context.Context, enrollmentID, connectionID platform.ID, fence int64, now time.Time) error {
 	return h.db.InTx(ctx, "record a node's channel", store.TxOptions{Timeout: presenceTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
-		if err := lockPresenceLease(ctx, tx, fence); err != nil {
-			return err
-		}
 		var current platform.ID
 		err := tx.QueryRow(ctx, `SELECT enrollment_id FROM fleet.node
 WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&current)
@@ -75,6 +72,9 @@ WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&c
 		}
 		if v2Bound {
 			return errProtocolChanged
+		}
+		if err = lockPresenceLease(ctx, tx, fence); err != nil {
+			return err
 		}
 		return writeOnline(ctx, tx, current, connectionID, fence, now)
 	})

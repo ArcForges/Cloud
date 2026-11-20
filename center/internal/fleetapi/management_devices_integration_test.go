@@ -82,8 +82,12 @@ func TestManagementDevicesOwnerPresenceAndRevocation(t *testing.T) {
 	if got := failure(revoke(other.bearer, first, wrong).GetError()); got != "STATE/not_found" {
 		t.Fatalf("foreign revocation: %s", got)
 	}
-	if got := failure(revoke(owner.bearer, first, wrong).GetError()); got != "CONFLICT/revision_mismatch" {
-		t.Fatalf("stale revision: %s", got)
+	mismatch := revoke(owner.bearer, first, wrong).GetError()
+	detail := mismatch.GetDetails().GetRevision()
+	if failure(mismatch) != "CONFLICT/revision_mismatch" || mismatch.GetMessageKey() != "error.conflict.revision_mismatch" ||
+		mismatch.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN ||
+		detail.GetExpected().GetValue() != revision+1 || detail.GetActual().GetValue() != revision {
+		t.Fatalf("stale revision: %s", failure(mismatch))
 	}
 	exact := command()
 	exact.ExpectedRev = &foundationv1.Revision{Value: proto.Int64(revision)}
@@ -139,6 +143,18 @@ func TestManagementDevicesOwnerPresenceAndRevocation(t *testing.T) {
 
 func (h *harness) v2RegistryEnrollment(owner *person) platform.ID {
 	h.t.Helper()
+	device := h.enrolledRegistryDevice(owner)
+	if _, err := h.db.Migration.Exec(context.Background(), `INSERT INTO management.node_protocol
+ (enrollment_id,node_id,account_id,protocol_major,protocol_epoch,initialized_at,rev)
+ SELECT enrollment_id,node_id,user_id,2,$1,clock_timestamp(),1 FROM fleet.node WHERE device_id=$2 AND user_id=$3`,
+		platform.NewID(), device, owner.id); err != nil {
+		h.t.Fatal(err)
+	}
+	return device
+}
+
+func (h *harness) enrolledRegistryDevice(owner *person) platform.ID {
+	h.t.Helper()
 	signIn, refusal := h.begin()
 	if refusal != nil {
 		h.t.Fatalf("begin enrollment: %s", failure(refusal))
@@ -149,12 +165,59 @@ func (h *harness) v2RegistryEnrollment(owner *person) platform.ID {
 		h.t.Fatalf("complete enrollment: %s", failure(complete.GetError()))
 	}
 	var device platform.ID
-	if err := h.db.Migration.QueryRow(context.Background(), `INSERT INTO management.node_protocol
- (enrollment_id,node_id,account_id,protocol_major,protocol_epoch,initialized_at,rev)
- SELECT enrollment_id,node_id,user_id,2,$1,clock_timestamp(),1 FROM fleet.node WHERE node_id=$2 AND user_id=$3
- RETURNING (SELECT device_id FROM fleet.node WHERE node_id=$2 AND user_id=$3)`,
-		platform.NewID(), signIn.node.ID, owner.id).Scan(&device); err != nil {
+	if err := h.db.Migration.QueryRow(context.Background(), `SELECT device_id FROM fleet.node WHERE node_id=$1 AND user_id=$2`,
+		signIn.node.ID, owner.id).Scan(&device); err != nil {
 		h.t.Fatal(err)
 	}
 	return device
+}
+
+func TestManagementDeviceBeforeFirstChannel(t *testing.T) {
+	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes"})
+	owner := h.person(1)
+	deviceID := h.enrolledRegistryDevice(owner)
+	target := &foundationv1.Id{Value: deviceID[:]}
+	inspect := func() *managementv2.Device {
+		t.Helper()
+		response := rpc(h, managementv2connect.DeviceServiceInspectProcedure,
+			&managementv2.DeviceServiceInspectRequest{Meta: meta(), DeviceId: target}, owner.bearer,
+			&managementv2.DeviceServiceInspectResponse{})
+		device := response.GetValue().GetDevice()
+		if device == nil || device.GetPresence() != "offline" || device.GetEnrollmentId() == nil ||
+			device.NodeEpoch != nil || len(device.GetCapabilities()) != 0 || device.GetRevision().GetValue() < 1 {
+			t.Fatalf("device without a V2 channel: %s", failure(response.GetError()))
+		}
+		return device
+	}
+	initial := inspect()
+	list := rpc(h, managementv2connect.DeviceServiceListProcedure, &managementv2.DeviceServiceListRequest{Meta: meta()}, owner.bearer,
+		&managementv2.DeviceServiceListResponse{}).GetValue().GetPage().GetDevices()
+	if len(list) != 1 || !proto.Equal(list[0], initial) {
+		t.Fatal("the account's newly enrolled device was missing from the inventory")
+	}
+
+	// A marker without protocol proof must not turn a V1 enrollment into a
+	// claimed V2 channel. Never create or authenticate a socket in this test.
+	if _, err := h.db.Migration.Exec(context.Background(), `UPDATE fleet.node SET connection_id=$1,
+ online_since=clock_timestamp(),last_heartbeat_at=clock_timestamp() WHERE device_id=$2`, platform.NewID(), deviceID); err != nil {
+		t.Fatal(err)
+	}
+	current := inspect()
+	revokeMeta := command()
+	revokeMeta.ExpectedRev = current.GetRevision()
+	h.stepUp(owner, "management.deviceRevoke", deviceID, false)
+	revoked := rpc(h, managementv2connect.DeviceServiceRevokeProcedure,
+		&managementv2.DeviceServiceRevokeRequest{Meta: revokeMeta, DeviceId: target}, owner.bearer,
+		&managementv2.DeviceServiceRevokeResponse{})
+	result := revoked.GetValue().GetDevice()
+	if result.GetPresence() != "revoked" || !proto.Equal(result.GetEnrollmentId(), current.GetEnrollmentId()) ||
+		result.GetRevision().GetValue() != current.GetRevision().GetValue()+1 {
+		t.Fatalf("owner revocation before the first channel: %s", failure(revoked.GetError()))
+	}
+	if h.count(`SELECT count(*) FROM identity.session s JOIN fleet.node n USING (installation_id) WHERE n.device_id=$1
+ AND n.revoked_at IS NOT NULL AND s.scope=3 AND s.revoked_at IS NOT NULL`, deviceID) != 1 ||
+		h.count(`SELECT count(*) FROM management.node_protocol p JOIN fleet.node n USING (enrollment_id) WHERE n.device_id=$1`,
+			deviceID) != 0 {
+		t.Fatal("revocation did not invalidate the enrollment and its Node credential independently of a V2 binding")
+	}
 }

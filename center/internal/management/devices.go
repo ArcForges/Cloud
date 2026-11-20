@@ -17,26 +17,26 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// DeviceRecord is one account-scoped device with a V2 enrollment.
-// Channel capabilities are intentionally absent from persistent registry reads.
+// DeviceRecord is an account-scoped enrolled Node device. ProtocolEpoch is
+// present only once the enrollment has an authenticated V2 binding.
 type DeviceRecord struct {
-	Device, Enrollment, Node, ProtocolEpoch platform.ID
-	Connection                              *platform.ID
-	Name                                    string
-	OS                                      int16
-	Revision                                int64
-	EnrolledAt, LastSeenAt                  time.Time
-	DeviceRevoked, EnrollmentRevoked        bool
+	Device, Enrollment, Node         platform.ID
+	ProtocolEpoch, Connection        *platform.ID
+	Name                             string
+	OS                               int16
+	Revision                         int64
+	EnrolledAt, LastSeenAt           time.Time
+	DeviceRevoked, EnrollmentRevoked bool
 }
 
 const deviceListing page.Listing = 5
 
-const deviceRecords = `SELECT d.device_id,p.enrollment_id,p.node_id,p.protocol_epoch,n.connection_id,n.display_name,
+const deviceRecords = `SELECT d.device_id,n.enrollment_id,n.node_id,p.protocol_epoch,n.connection_id,n.display_name,
  n.os,d.rev,n.enrolled_at,greatest(n.last_seen_at,n.last_heartbeat_at),
  d.revoked_at IS NOT NULL,n.revoked_at IS NOT NULL OR p.revoked_at IS NOT NULL
  FROM device.device d
  JOIN fleet.node n ON (n.device_id,n.user_id)=(d.device_id,d.user_id)
- JOIN management.node_protocol p ON (p.enrollment_id,p.node_id,p.account_id)=(n.enrollment_id,n.node_id,n.user_id)
+ LEFT JOIN management.node_protocol p ON (p.enrollment_id,p.node_id,p.account_id)=(n.enrollment_id,n.node_id,n.user_id)
  WHERE d.user_id=$1`
 
 func scanDevice(row interface{ Scan(...any) error }) (record DeviceRecord, err error) {
@@ -73,7 +73,7 @@ func devicePageRequest(account platform.ID, cursor string, limit *uint32) (page.
 	return request, nil
 }
 
-// ListDevices returns stable, account-scoped keyset pages of V2 enrollments.
+// ListDevices returns stable, account-scoped keyset pages of enrolled Nodes.
 func (s *Store) ListDevices(ctx context.Context, account platform.ID, cursor string, limit *uint32) (records []DeviceRecord, next string, err error) {
 	request, err := devicePageRequest(account, cursor, limit)
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *Store) ListDevices(ctx context.Context, account platform.ID, cursor str
 	return records, next, nil
 }
 
-// InspectDevice reads a current or revoked V2 device owned by account.
+// InspectDevice reads an enrolled or revoked device owned by account.
 func (s *Store) InspectDevice(ctx context.Context, account, id platform.ID) (record DeviceRecord, err error) {
 	err = s.db.InTx(ctx, "inspect V2 device", store.TxOptions{ReadOnly: true}, func(ctx context.Context, tx pgx.Tx) error {
 		var e error
@@ -136,7 +136,9 @@ func LockDeviceForRevoke(ctx context.Context, tx pgx.Tx, account, id platform.ID
 		return DeviceRecord{}, arc.NotFound("device", id[:])
 	}
 	if record.Revision != expected {
-		return DeviceRecord{}, arc.RevisionConflict(expected, record.Revision)
+		refusal := arc.RevisionConflict(expected, record.Revision)
+		refusal.Code = "revision_mismatch"
+		return DeviceRecord{}, refusal
 	}
 	return record, nil
 }

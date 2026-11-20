@@ -24,6 +24,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/pages"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
+	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
@@ -126,6 +127,15 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.refuse(writer, call, http.StatusForbidden, arc.InvalidState("node", "upgrade_required"))
 		return
 	}
+	var upgradeAccessHash [32]byte
+	if isV2 {
+		secret, valid := session.ParseToken(session.AccessPrefix, token)
+		if !valid {
+			h.refuse(writer, call, 0, arc.Unauthenticated())
+			return
+		}
+		upgradeAccessHash = secret.Digest()
+	}
 	release := func() {}
 	if h.options.Slot != nil {
 		var free bool
@@ -162,7 +172,8 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	c := &conn{hub: h, ws: ws, sessionID: parseID(caller.SessionID), userID: parseID(caller.UserID), deviceID: parseID(caller.DeviceID),
 		installationID: parseID(caller.InstallationID), nodeID: node.nodeID, enrollmentID: node.enrollmentID, nodeName: node.name, publicKey: node.publicKey,
 		connectionID: platform.NewID(), fence: fence, accessExpires: expires, tokenDigest: sha256.Sum256([]byte(token)), queue: make(chan outbound, h.settings.SendQueueFrames),
-		calls: map[platform.ID]*pending{}, stopWrites: make(chan struct{}), writerDone: make(chan struct{}), closeDone: make(chan struct{}),
+		upgradeAccessHash: upgradeAccessHash,
+		calls:             map[platform.ID]*pending{}, stopWrites: make(chan struct{}), writerDone: make(chan struct{}), closeDone: make(chan struct{}),
 		finished: make(chan struct{})}
 	if isV2 {
 		epoch := node.protocolEpoch

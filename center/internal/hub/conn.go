@@ -37,11 +37,12 @@ type conn struct {
 	sessionID, userID, deviceID, installationID platform.ID
 	nodeID, enrollmentID                        platform.ID
 	// nodeName is the node's registry name as the upgrade read it: ChannelAccepted.node_name (AF-CTR-05 E2a; Plan Q25).
-	nodeName      string
-	publicKey     []byte
-	connectionID  platform.ID
-	correlationID *platform.ID
-	fence         int64
+	nodeName          string
+	publicKey         []byte
+	connectionID      platform.ID
+	correlationID     *platform.ID
+	fence             int64
+	upgradeAccessHash [32]byte
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -338,6 +339,14 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 	case errors.Is(err, ErrNodeGone):
 		c.hub.metrics.ObserveChannel("hello", "node_gone")
 		c.closeWith(CloseCredential, "revoked")
+		return false
+	case errors.Is(err, errChannelCredentialChanged):
+		c.hub.metrics.ObserveChannel("hello", "node_gone")
+		c.closeWith(CloseCredential, "token_refused")
+		return false
+	case errors.Is(err, errChannelAccountBarred):
+		c.hub.metrics.ObserveChannel("hello", "node_gone")
+		c.closeWith(CloseRefused, "account_state")
 		return false
 	case errors.Is(err, errProtocolChanged):
 		if c.v2 == nil {

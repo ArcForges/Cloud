@@ -12,10 +12,15 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/management"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
-var errProtocolChanged = errors.New("the enrollment protocol's epoch changed before registration")
+var (
+	errProtocolChanged          = errors.New("the enrollment protocol's epoch changed before registration")
+	errChannelCredentialChanged = errors.New("the channel's credential changed before registration")
+	errChannelAccountBarred     = errors.New("the channel's account no longer admits a node session")
+)
 
 // V2Presence reads the live channel snapshot for the registry's exact account,
 // node, enrollment and protocol binding. Presence is never inferred from a V1 channel.
@@ -52,16 +57,16 @@ func (h *Hub) V2Presence(accountID, enrollmentID, nodeID, protocolEpoch platform
 // generation cannot record an online channel.
 func (c *conn) markV2Online(ctx context.Context, now time.Time) error {
 	return c.hub.db.InTx(ctx, "record a V2 node's channel", store.TxOptions{Timeout: presenceTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
-		if err := lockPresenceLease(ctx, tx, c.fence); err != nil {
+		expires, err := c.lockV2Credential(ctx, tx)
+		if err != nil {
 			return err
 		}
 
 		var enrollment platform.ID
-		err := tx.QueryRow(ctx, `SELECT n.enrollment_id FROM fleet.node n
-JOIN device.installation i ON i.installation_id = n.installation_id
-WHERE n.enrollment_id=$1 AND n.node_id=$2 AND n.user_id=$3 AND n.installation_id=$4
-  AND n.device_id=$5 AND n.revoked_at IS NULL AND i.revoked_at IS NULL
-FOR UPDATE OF n`, c.enrollmentID, c.nodeID, c.userID, c.installationID, c.deviceID).Scan(&enrollment)
+		err = tx.QueryRow(ctx, `SELECT enrollment_id FROM fleet.node
+WHERE enrollment_id=$1 AND node_id=$2 AND user_id=$3 AND installation_id=$4
+  AND device_id=$5 AND revoked_at IS NULL FOR UPDATE`,
+			c.enrollmentID, c.nodeID, c.userID, c.installationID, c.deviceID).Scan(&enrollment)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNodeGone
 		}
@@ -87,8 +92,59 @@ WHERE enrollment_id=$1 AND node_id=$2 AND account_id=$3 FOR SHARE`, enrollment, 
 		if epoch != c.v2.epoch {
 			return errProtocolChanged
 		}
+		if err = lockPresenceLease(ctx, tx, c.fence); err != nil {
+			return err
+		}
+		if !c.hub.clock().Before(expires) {
+			return errChannelCredentialChanged
+		}
 		return writeOnline(ctx, tx, enrollment, c.connectionID, c.fence, now)
 	})
+}
+
+// Hold the same account, device, installation and session order as enrollment
+// and revocation, before the fleet row. The proof's key and presented access
+// credential must still be current at the point this transaction admits it.
+func (c *conn) lockV2Credential(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	security, err := session.LockAccountSecurity(ctx, tx, c.userID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !security.AdmitsScope(session.ScopeNode) {
+		return time.Time{}, errChannelAccountBarred
+	}
+
+	var live bool
+	err = tx.QueryRow(ctx, `SELECT true FROM device.device
+WHERE device_id=$1 AND user_id=$2 AND revoked_at IS NULL FOR SHARE`,
+		c.deviceID, c.userID).Scan(&live)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, ErrNodeGone
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	err = tx.QueryRow(ctx, `SELECT true FROM device.installation
+WHERE installation_id=$1 AND user_id=$2 AND device_id=$3 AND public_key=$4 AND revoked_at IS NULL FOR SHARE`,
+		c.installationID, c.userID, c.deviceID, c.publicKey).Scan(&live)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, errChannelCredentialChanged
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	var expires time.Time
+	err = tx.QueryRow(ctx, `SELECT least(expires_at,access_expires_at) FROM identity.session
+WHERE session_id=$1 AND user_id=$2 AND device_id=$3 AND installation_id=$4 AND scope=$5
+  AND credential_kind=1 AND revoked_at IS NULL AND access_expires_at IS NOT NULL
+  AND auth_epoch=$6 AND recovery_generation=$7 AND access_token_hash=$8 FOR SHARE`,
+		c.sessionID, c.userID, c.deviceID, c.installationID, session.ScopeNode,
+		security.AuthEpoch, security.RecoveryGeneration, c.upgradeAccessHash[:]).Scan(&expires)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, errChannelCredentialChanged
+	}
+	return expires, err
 }
 
 func (c *conn) markV2Heartbeat(ctx context.Context, now time.Time) error {
