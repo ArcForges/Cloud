@@ -1247,7 +1247,7 @@ func (f *commerceDBFixture) requireApplied(event paddle.Event) {
 	}
 }
 
-func TestCommerceCreditReversalRetainsOriginalCashOccurrence(t *testing.T) {
+func TestCommerceReversalsRetainOriginalCashOccurrences(t *testing.T) {
 	f := newCommerceDBFixture(t)
 	_, intent := f.openCheckout()
 	txn, sub, customer := commerceProviderID("txn", 1), commerceProviderID("sub", 1), commerceProviderID("ctm", 1)
@@ -1291,5 +1291,29 @@ func TestCommerceCreditReversalRetainsOriginalCashOccurrence(t *testing.T) {
 	f.requireEntitlement(f.actor.Account, true)
 	if f.db.Count("SELECT count(*) FROM entitlement.service_term_action WHERE account_id=$1", f.actor.Account) != 0 {
 		t.Fatal("a credit or its reversal modified the original paid service authority")
+	}
+
+	disputed := f.advance(time.Second)
+	chargebackID, chargebackReversalID := commerceProviderID("adj", 3), commerceProviderID("adj", 4)
+	chargeback := f.adjustment(chargebackID, txn, sub, "chargeback", "full", amount, disputed)
+	chargebackReversedAt := f.advance(time.Second)
+	chargeback["status"] = "reversed"
+	chargeback["updated_at"] = chargebackReversedAt
+	chargebackReversal := f.adjustment(chargebackReversalID, txn, sub, "chargeback_reverse", "full", -amount, chargebackReversedAt)
+	f.adjustmentReads(txn, chargebackReversalID, paid, credit, reversal, chargeback, chargebackReversal)
+	chargebackEvent := f.event(20, "adjustment.created", chargebackReversalID, f.now())
+	f.process(chargebackEvent)
+	f.requireApplied(chargebackEvent)
+	if f.db.Count(`SELECT count(*) FROM commerce.billing_entry WHERE account_id=$1 AND provider_entry_ref=$2
+		AND kind=3 AND amount_minor=$3 AND occurred_at=$4`, f.actor.Account, chargebackID, amount, disputed) != 1 ||
+		f.db.Count(`SELECT count(*) FROM commerce.billing_entry WHERE account_id=$1 AND provider_entry_ref=$2
+		AND kind=6 AND amount_minor=$3 AND occurred_at=$4`, f.actor.Account, chargebackReversalID, -amount, chargebackReversedAt) != 1 ||
+		f.db.Count("SELECT count(*) FROM commerce.billing_entry WHERE account_id=$1", f.actor.Account) != 5 {
+		t.Fatal("a chargeback first seen after reversal lost either financial occurrence")
+	}
+	f.requirePeriods(f.actor.Account, 1)
+	f.requireEntitlement(f.actor.Account, true)
+	if f.db.Count("SELECT count(*) FROM entitlement.service_term_action WHERE account_id=$1", f.actor.Account) != 0 {
+		t.Fatal("an already reversed chargeback changed the paid term")
 	}
 }

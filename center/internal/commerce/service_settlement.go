@@ -542,7 +542,8 @@ func (s *Service) appendFinancialFacts(ctx context.Context, tx pgx.Tx, account, 
 		}
 		seen[adjustment.ID] = struct{}{}
 		kind := financialAdjustmentKind(adjustment.Action)
-		if kind == 0 || (adjustment.Status != "approved" && !(kind == 4 && adjustment.Status == "reversed")) {
+		reversed := adjustment.Status == "reversed"
+		if kind == 0 || (adjustment.Status != "approved" && !(reversed && (kind == 3 || kind == 4))) {
 			continue
 		}
 		if (kind == 2 || kind == 3) && adjustment.TotalMinor <= 0 ||
@@ -561,7 +562,9 @@ func (s *Service) appendFinancialFacts(ctx context.Context, tx pgx.Tx, account, 
 				observed.cutoff = adjustment.UpdatedAt.UTC().Truncate(time.Microsecond)
 			}
 		case 3:
-			if observed.cutoff.IsZero() {
+			if reversed {
+				observed.chargebackReversed = true
+			} else if observed.cutoff.IsZero() {
 				observed.cutoff = adjustment.UpdatedAt.UTC().Truncate(time.Microsecond)
 			}
 		case 6:
