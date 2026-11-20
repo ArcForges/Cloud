@@ -19,13 +19,13 @@ import (
 	managementv2 "github.com/ArcForges/Contracts/go/arcforges/management/v2"
 	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/correlation"
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
@@ -180,7 +180,28 @@ func (h *harness) enrollManagedDevice(owner account, from caller) managedDeviceT
 	return target
 }
 
-func (h *harness) v2UpgradeRefusal(token string) (int, string, *foundationv1.ArcError) {
+// upgradeRefusal is the HTTP browser-error projection of ArcError, whose
+// enum names and correlation identifier differ from protobuf JSON.
+type upgradeRefusal struct {
+	Category      string `json:"category"`
+	Code          string `json:"code"`
+	MessageKey    string `json:"messageKey"`
+	Effect        string `json:"effect"`
+	CorrelationID string `json:"correlationId"`
+	Retry         struct {
+		Mode                    string `json:"mode"`
+		RetryAt                 string `json:"retryAt"`
+		ReconciliationOperation string `json:"reconciliationOperation"`
+	} `json:"retry"`
+	Details struct {
+		State struct {
+			State  string `json:"state"`
+			Reason string `json:"reason"`
+		} `json:"state"`
+	} `json:"details"`
+}
+
+func (h *harness) v2UpgradeRefusal(token string) (int, string, upgradeRefusal) {
 	h.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -203,15 +224,23 @@ func (h *harness) v2UpgradeRefusal(token string) (int, string, *foundationv1.Arc
 	if response.StatusCode == http.StatusSwitchingProtocols {
 		h.t.Fatal("the authorization probe unexpectedly upgraded")
 	}
-	var body struct{ Error json.RawMessage }
+	var body struct {
+		Error upgradeRefusal `json:"error"`
+	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, routes.UpgradeRefusalBytes)).Decode(&body); err != nil {
 		h.t.Fatal(err)
 	}
-	var refusal foundationv1.ArcError
-	if err := protojson.Unmarshal(body.Error, &refusal); err != nil || !retryAdvice(&refusal) {
-		h.t.Fatal("the upgrade refusal did not carry a valid ArcError")
+	header := response.Header.Get(routes.RefusalHeader)
+	refusal := body.Error
+	if response.Header.Get("Content-Type") != "application/json" ||
+		refusal.Category == "" || refusal.Code == "" || strings.ToUpper(refusal.Category)+"/"+refusal.Code != header ||
+		refusal.MessageKey != "error."+refusal.Category+"."+refusal.Code || len(correlation.IDBytes(refusal.CorrelationID)) != 16 ||
+		refusal.Retry.Mode != "never" || refusal.Retry.RetryAt != "" || refusal.Retry.ReconciliationOperation != "" ||
+		refusal.Effect != "didNotHappen" {
+		h.t.Fatalf("the V2 upgrade returned an invalid HTTP refusal: status %d, header %q, category %q, code %q, retry %q, effect %q",
+			response.StatusCode, header, refusal.Category, refusal.Code, refusal.Retry.Mode, refusal.Effect)
 	}
-	return response.StatusCode, response.Header.Get(routes.RefusalHeader), &refusal
+	return response.StatusCode, header, refusal
 }
 
 // sessionReads are the session methods A1a serves, with an empty request each.
@@ -341,8 +370,7 @@ func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
 		before, receipts, audits := h.writes(), h.receipts(), h.audits("access.refused")
 		status, header, refusal := h.v2UpgradeRefusal(token)
 		if status != http.StatusForbidden || header != "AUTHORIZATION/permission_denied" ||
-			failure(refusal) != header || refusal.GetDetails().GetState().GetReason() != upgrade.ID ||
-			refusal.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+			refusal.Details.State.State != "operation" || refusal.Details.State.Reason != upgrade.ID {
 			t.Errorf("the V2 WebSocket authorization refusal: HTTP %d %q %v", status, header, refusal)
 		}
 		if h.writes() != before || h.receipts() != receipts || h.audits("access.refused") != audits+1 {
@@ -371,7 +399,7 @@ func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
 			audits, receipts := h.audits("access.authorized"), h.receipts()
 			status, header, failureValue := h.v2UpgradeRefusal(credential.access)
 			if status != http.StatusUnauthorized || header != "AUTHENTICATION/unauthenticated" ||
-				failure(failureValue) != header || h.audits("access.authorized") != audits+1 ||
+				h.audits("access.authorized") != audits+1 ||
 				h.receipts() != receipts || h.count("SELECT count(*) FROM management.node_protocol") != 0 {
 				t.Errorf("the unenrolled Node's V2 WebSocket: HTTP %d %q %v", status, header, failureValue)
 			}
