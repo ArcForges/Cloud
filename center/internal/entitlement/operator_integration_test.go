@@ -29,8 +29,8 @@ import (
 // illustrative fixture or a test-injected production-classified document, and the step-up proof is seeded as a proved challenge row,
 // the WebAuthn ceremony itself being proved by the identity tests).
 
-const productionCatalogue = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
-"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]}`
+const productionCatalogue = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","remote.view","remote.control"],
+"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","remote.control"]}]}`
 
 type grantFixture struct {
 	t             *testing.T
@@ -111,7 +111,7 @@ func TestAnOperatorGrantsFeaturesWithItsEvidenceInOneTransaction(t *testing.T) {
 	f := newGrantFixture(t, development)
 	user, session := f.operatorAccount()
 	target := f.db.Account(1)
-	request := f.request(target, "remote.view", "push")
+	request := f.request(target, "remote.view", "remote.control")
 	call := f.call(user, session, request, true)
 	result, err := f.operator.Grant(context.Background(), call)
 	if err != nil || result.Replayed || len(result.GrantIDs) != 2 || result.TermID == "" {
@@ -123,7 +123,7 @@ func TestAnOperatorGrantsFeaturesWithItsEvidenceInOneTransaction(t *testing.T) {
 	}
 	for _, key := range []string{"center.nodes", "center.execute", "remote.view", "remote.control", "center.mcp", "push"} {
 		entry, ok := snapshot.Capability(key)
-		want := key == "remote.view" || key == "push"
+		want := key == "remote.view" || key == "remote.control"
 		if !ok || entry.Granted != want {
 			t.Errorf("%s: %+v %v", key, entry, ok)
 		}
@@ -279,7 +279,7 @@ func TestTheBoundsOfAnOperatorGrantRequest(t *testing.T) {
 		{"a source reference that is not valid UTF-8", func(r *entitlement.OperatorRequest) { r.SourceRef = "ticket-\xfe" }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a justification that is not valid UTF-8", func(r *entitlement.OperatorRequest) { r.Account, r.SelfApproval = user.String(), "bad \xff byte" }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"an unknown feature", func(r *entitlement.OperatorRequest) { r.Features = []string{"remote.nothing"} }, "VALIDATION/invalid_argument", "invalid_argument"},
-		{"a repeated feature", func(r *entitlement.OperatorRequest) { r.Features = []string{"push", "push"} }, "VALIDATION/invalid_argument", "invalid_argument"},
+		{"a repeated feature", func(r *entitlement.OperatorRequest) { r.Features = []string{"remote.control", "remote.control"} }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a blank reason", func(r *entitlement.OperatorRequest) { r.Reason = "   " }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a reason with a control character", func(r *entitlement.OperatorRequest) { r.Reason = "a\nb" }, "VALIDATION/invalid_argument", "invalid_argument"},
 		{"a reason of 513 characters", func(r *entitlement.OperatorRequest) { r.Reason = long }, "VALIDATION/invalid_argument", "invalid_argument"},
@@ -336,7 +336,7 @@ func TestTheProductionConfigurationBoundsTheGrant(t *testing.T) {
 	f := newGrantFixture(t, feature.Settings{Mode: config.OfficialHosted, Injected: []byte(productionCatalogue), InjectedClass: feature.ClassProduction})
 	user, session := f.operatorAccount()
 	target := f.db.Account(1)
-	all := []string{"center.nodes", "center.execute", "remote.view", "remote.control", "center.mcp", "push"}
+	all := []string{"center.nodes", "remote.view", "remote.control"}
 	for name, mutate := range map[string]func(*entitlement.OperatorRequest){
 		"every key named":              func(r *entitlement.OperatorRequest) { r.Features = all },
 		"the catalogue-wide shorthand": func(r *entitlement.OperatorRequest) { r.Features, r.All = nil, true },
@@ -362,8 +362,8 @@ func TestTheProductionConfigurationBoundsTheGrant(t *testing.T) {
 			}
 		})
 	}
-	// Five of six keys for 89 days are admitted.
-	request := f.request(target, all[:5]...)
+	// Two of three keys for 89 days are admitted.
+	request := f.request(target, all[:2]...)
 	request.ExpiresAt = entitlement.FromTime(time.Now().Add(89 * 24 * time.Hour))
 	if _, err := f.operator.Grant(context.Background(), f.call(user, session, request, true)); err != nil {
 		t.Fatal(err)
@@ -374,7 +374,7 @@ func TestTheProductionConfigurationBoundsTheGrant(t *testing.T) {
 	devTarget := dev.db.Account(1)
 	wide := dev.request(devTarget)
 	wide.All = true
-	if result, err := dev.operator.Grant(context.Background(), dev.call(devUser, devSession, wide, true)); err != nil || len(result.Features) != 6 {
+	if result, err := dev.operator.Grant(context.Background(), dev.call(devUser, devSession, wide, true)); err != nil || len(result.Features) != 3 {
 		t.Fatalf("a catalogue-wide grant under the fixtures: %+v %v", result, err)
 	}
 }
@@ -422,7 +422,7 @@ func TestASelfGrantNeedsItsJustificationAndRecordsIt(t *testing.T) {
 		t.Fatalf("the stored reason: %q", reason)
 	}
 	// The reason and the justification together fit one stored reason.
-	long := f.request(user, "push")
+	long := f.request(user, "remote.control")
 	long.SourceRef = "ticket-long"
 	long.Reason, long.SelfApproval = strings.Repeat("r", 300), strings.Repeat("s", 300)
 	_, err = f.operator.Grant(context.Background(), f.call(user, session, long, true))
@@ -437,7 +437,7 @@ func TestAReusedSourceReferenceIsRefusedAndWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := f.written()
-	_, err := f.operator.Grant(context.Background(), f.call(user, session, f.request(target, "remote.view", "push"), true))
+	_, err := f.operator.Grant(context.Background(), f.call(user, session, f.request(target, "remote.view", "remote.control"), true))
 	wantArc(t, err, "CONFLICT/already_exists")
 	if f.written() != before {
 		t.Fatal("a refused grant wrote")
@@ -517,7 +517,7 @@ func TestTwoOperatorsGrantingTheSameAccountAtOnceBothSucceed(t *testing.T) {
 	errs := make([]error, 3)
 	for i := range errs {
 		user, session := f.operatorAccount()
-		request := f.request(target, []string{"remote.view", "push", "center.nodes"}[i])
+		request := f.request(target, []string{"remote.view", "remote.control", "center.nodes"}[i])
 		request.SourceRef = "ticket-" + string(rune('a'+i))
 		call := f.call(user, session, request, true)
 		group.Add(1)
@@ -536,7 +536,7 @@ func TestTwoOperatorsGrantingTheSameAccountAtOnceBothSucceed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"remote.view", "push", "center.nodes"} {
+	for _, key := range []string{"remote.view", "remote.control", "center.nodes"} {
 		if entry, ok := snapshot.Capability(key); !ok || !entry.Granted {
 			t.Errorf("%s: %+v", key, entry)
 		}
@@ -549,7 +549,7 @@ func TestTwoOperatorsGrantingTheSameAccountAtOnceBothSucceed(t *testing.T) {
 
 func TestTheCanonicalRequestCoversEveryFieldAndHashesTheSameWhateverTheOrder(t *testing.T) {
 	operator, other := platform.NewID(), platform.NewID()
-	base := entitlement.OperatorRequest{Account: platform.NewID().String(), Features: []string{"push", "remote.view"}, Reason: "r", ExpiresAt: 5, SourceRef: "ref", SelfApproval: ""}
+	base := entitlement.OperatorRequest{Account: platform.NewID().String(), Features: []string{"remote.control", "remote.view"}, Reason: "r", ExpiresAt: 5, SourceRef: "ref", SelfApproval: ""}
 	hash := base.TargetHashHex(operator)
 	if len(hash) != 64 {
 		t.Fatal(hash)
@@ -558,13 +558,13 @@ func TestTheCanonicalRequestCoversEveryFieldAndHashesTheSameWhateverTheOrder(t *
 		t.Fatal(err)
 	}
 	reordered := base
-	reordered.Features = []string{"remote.view", "push"}
+	reordered.Features = []string{"remote.view", "remote.control"}
 	if reordered.TargetHashHex(operator) != hash {
 		t.Fatal("the order of the features changed the hash")
 	}
 	for name, change := range map[string]func(*entitlement.OperatorRequest){
 		"account":      func(r *entitlement.OperatorRequest) { r.Account = platform.NewID().String() },
-		"features":     func(r *entitlement.OperatorRequest) { r.Features = []string{"push"} },
+		"features":     func(r *entitlement.OperatorRequest) { r.Features = []string{"remote.control"} },
 		"all":          func(r *entitlement.OperatorRequest) { r.All = true },
 		"reason":       func(r *entitlement.OperatorRequest) { r.Reason = "r " },
 		"expiry":       func(r *entitlement.OperatorRequest) { r.ExpiresAt = 6 },

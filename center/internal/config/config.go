@@ -124,11 +124,9 @@ type Config struct {
 	CommandKeys []CommandKey
 }
 
-// GatedFeatureKeys are the six gated feature keys of AD-0021 section 13a. Package feature owns the keys (feature.Gated); the list is
-// here so the configuration can refuse an unknown key at start without importing it, and a test of package feature pins that the two
-// lists are equal.
+// GatedFeatureKeys are the three active V2 service keys. Package feature pins this list to its catalogue vocabulary.
 func GatedFeatureKeys() []string {
-	return []string{"center.nodes", "center.execute", "remote.view", "remote.control", "center.mcp", "push"}
+	return []string{"center.nodes", "remote.view", "remote.control"}
 }
 
 // ErrInvalid is the error of every refused configuration.
@@ -263,10 +261,12 @@ func loadDisabledFeatures(lookup func(string) (string, bool), mode Mode) ([]stri
 	if value == "" {
 		return nil, nil
 	}
+	// Preserve an existing operator restriction on the finite V1 submission route while it remains registered.
+	knownKeys := append(GatedFeatureKeys(), "center.execute")
 	var keys []string
 	for item := range strings.SplitSeq(value, ",") {
-		if !slices.Contains(GatedFeatureKeys(), item) {
-			return nil, invalid("%s must be a comma-separated list of known feature keys (%s)", EnvDisabledFeatures, strings.Join(GatedFeatureKeys(), ", "))
+		if !slices.Contains(knownKeys, item) {
+			return nil, invalid("%s must be a comma-separated list of known feature keys (%s)", EnvDisabledFeatures, strings.Join(knownKeys, ", "))
 		}
 		if slices.Contains(keys, item) {
 			return nil, invalid("%s lists a feature key twice", EnvDisabledFeatures)

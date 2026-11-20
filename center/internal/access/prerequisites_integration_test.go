@@ -197,8 +197,8 @@ func TestEveryFeatureRowCarriesTheKeyOfItsGroup(t *testing.T) {
 			continue
 		}
 		gated++
-		if key, named := feature.KeyOfGroup(operation.Group); !named || key != operation.Feature {
-			t.Errorf("%s carries %s, its group %q names %q", operation.ID, operation.Feature, operation.Group, key)
+		if !keyOfGroup(operation) {
+			t.Errorf("%s carries %s for group %q", operation.ID, operation.Feature, operation.Group)
 		}
 		if err := CheckRow(operation); err != nil {
 			t.Error(err)
@@ -230,11 +230,11 @@ func TestEveryFeatureRowCarriesTheKeyOfItsGroup(t *testing.T) {
 		}
 	}
 	for name, fabricated := range map[string]Operation{
-		"a gated row without a group":       row(feature.RemoteView, ""),
-		"a gated row of an unknown group":   row(feature.RemoteView, "status"),
-		"a group on an essential row":       {Path: probePrefix + "Fabricated", ID: "probe.fabricated", Risk: "R1", Session: true, Group: feature.GroupStatusAndOutput},
-		"a group on an essential R3 row":    {Path: probePrefix + "Fabricated", ID: "probe.fabricated", Risk: "R3", Session: true, Group: feature.GroupControl, Audit: AuditInTransaction},
-		"the push key on the control group": row(feature.Push, feature.GroupControl),
+		"a gated row without a group":        row(feature.RemoteView, ""),
+		"a gated row of an unknown group":    row(feature.RemoteView, "status"),
+		"a group on an essential row":        {Path: probePrefix + "Fabricated", ID: "probe.fabricated", Risk: "R1", Session: true, Group: feature.GroupStatusAndOutput},
+		"a group on an essential R3 row":     {Path: probePrefix + "Fabricated", ID: "probe.fabricated", Risk: "R3", Session: true, Group: feature.GroupControl, Audit: AuditInTransaction},
+		"a retired key on the control group": row(feature.Key("push"), feature.GroupControl),
 	} {
 		cases++
 		if CheckRow(fabricated) == nil {

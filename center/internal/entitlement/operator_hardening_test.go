@@ -108,10 +108,10 @@ func TestARevocationThatCommitsWhileAGrantIsInFlightIsHonoured(t *testing.T) {
 
 func TestTheBoundariesOfTheExpiryAreExact(t *testing.T) {
 	operator := platform.NewID()
-	policy := entitlement.OperatorPolicy{MaxExpiry: 90 * 24 * time.Hour, AllowCatalogueWide: true, Keys: []string{"push", "remote.view"}}
+	policy := entitlement.OperatorPolicy{MaxExpiry: 90 * 24 * time.Hour, AllowCatalogueWide: true, Keys: []string{"remote.control", "remote.view"}}
 	now := entitlement.Micros(1_800_000_000_000_000)
 	request := func(expires entitlement.Micros) entitlement.OperatorRequest {
-		return entitlement.OperatorRequest{Account: platform.NewID().String(), Features: []string{"push"}, Reason: "r", ExpiresAt: expires, SourceRef: "ticket-1"}
+		return entitlement.OperatorRequest{Account: platform.NewID().String(), Features: []string{"remote.control"}, Reason: "r", ExpiresAt: expires, SourceRef: "ticket-1"}
 	}
 	longest := entitlement.Micros(policy.MaxExpiry.Microseconds())
 	for name, test := range map[string]struct {
@@ -139,7 +139,7 @@ func TestTwoOperatorsMayUseTheSameCommandID(t *testing.T) {
 	f := newGrantFixture(t, development)
 	target := f.db.Account(1)
 	command := platform.NewID()
-	for _, key := range []string{"remote.view", "push"} {
+	for _, key := range []string{"remote.view", "remote.control"} {
 		user, session := f.operatorAccount()
 		request := f.request(target, key)
 		request.SourceRef = "ticket-" + key

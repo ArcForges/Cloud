@@ -40,8 +40,8 @@ func TestTheDisabledFeaturesAreASelfHostedOperatorLimit(t *testing.T) {
 	self := func(value string) map[string]string {
 		return withIdentity(SelfHosted, map[string]string{EnvDisabledFeatures: value})
 	}
-	loaded, err := Load(environment(self("push,remote.control")))
-	if err != nil || !slices.Equal(loaded.DisabledFeatures, []string{"push", "remote.control"}) {
+	loaded, err := Load(environment(self("center.execute,remote.control")))
+	if err != nil || !slices.Equal(loaded.DisabledFeatures, []string{"center.execute", "remote.control"}) {
 		t.Fatalf("two keys: %v %v", loaded.DisabledFeatures, err)
 	}
 	if loaded, err = Load(environment(self(""))); err != nil || len(loaded.DisabledFeatures) != 0 {
@@ -50,7 +50,7 @@ func TestTheDisabledFeaturesAreASelfHostedOperatorLimit(t *testing.T) {
 	if loaded, err = Load(environment(withIdentity(SelfHosted, nil))); err != nil || loaded.DisabledFeatures != nil {
 		t.Fatalf("unset: %v %v", loaded.DisabledFeatures, err)
 	}
-	for _, value := range []string{"remote.contol", "push,", ",push", "push,push", " push", "push ", "Push", "center.nodes,unknown", "push;center.mcp"} {
+	for _, value := range []string{"center.mcp", "push", "remote.contol", "remote.view,remote.view", "push,", ",push", "push,push", " push", "push ", "Push", "center.nodes,unknown", "push;center.mcp"} {
 		if _, err = Load(environment(self(value))); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), EnvDisabledFeatures) {
 			t.Errorf("%q: %v", value, err)
 		}

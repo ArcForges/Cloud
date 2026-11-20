@@ -61,7 +61,7 @@ func (s *slotControl) counts() (int, int, int) {
 // ingress pipeline, a slot a control took is given back once the call ends, whether the handler returned, a later control refused the
 // call, a control panicked or the request's context was cancelled. The pipeline's deferred Call.Finish is what gives it back.
 func TestTheIngressPipelineReleasesASlotWhenTheCallEnds(t *testing.T) {
-	r := newRig(t, feature.Settings{Mode: config.SelfHosted, PushSender: true})
+	r := newRig(t, feature.Settings{Mode: config.SelfHosted})
 	token, _ := r.credential(r.db.Account(1), session.ScopeAccount)
 	slots := &slotControl{}
 	*r.controls = []Control{slots.control()}

@@ -28,7 +28,8 @@ type IdentityMethod struct {
 
 // IdentityMethods are the IdentityService and DeviceService methods AF-CTR-03 serves, in registration order: A1a's sign-in, refresh
 // and reads, then A1b's step-up, profile, passkey registration, credential, sign-out and revocation, and device management. Every
-// AFV2-ID-01 adds BeginRecovery, CompleteRecovery and GetAccountDeletion. Other
+// AFV2-ID-01 adds BeginRecovery, CompleteRecovery and GetAccountDeletion.
+// AFV2-HOST-01 adds the published entitlement snapshot read. Other
 // methods remain unregistered. In particular the published legacy deletion
 // mutations cannot express the complete plan/revision/proof binding, so deletion
 // mutations and export use the exact typed page protocol. Email change stays
@@ -60,6 +61,7 @@ func IdentityMethods() []IdentityMethod {
 		{publicapiv1connect.IdentityServiceRevokeAllSessionsProcedure, true, identityRequestBytes},
 		{publicapiv1connect.DeviceServiceRenameProcedure, true, identityRequestBytes},
 		{publicapiv1connect.DeviceServiceRevokeProcedure, true, identityRequestBytes},
+		{publicapiv1connect.EntitlementServiceGetSnapshotProcedure, true, identityRequestBytes},
 	}
 }
 

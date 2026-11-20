@@ -43,6 +43,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/identityapi"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/mail"
+	"github.com/ArcForges/Cloud/center/internal/management"
 	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/pages"
@@ -329,6 +330,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	}
 	server := identityapi.New(service, authorizer, c.Store, clock, logger)
 	dispatcher.Register(server.Methods()...)
+	dispatcher.Register(management.EntitlementStatusMethod(authorizer, clock, logger))
 	var fleetDirect *fleetapi.Direct
 	if c.Config.Identity.Enabled(config.SurfaceFleet) {
 		nodes := fleet.New(fleet.Options{DB: c.Store, Policy: c.Config.Identity.Policy, Clock: clock, Events: c.Metrics, Logger: logger,
@@ -492,6 +494,8 @@ func checkIdentityComposition(modules []routes.Module) error {
 	for _, method := range identityapi.New(nil, nil, nil, nil, nil).Methods() {
 		served[method.Spec.Procedure] = method.Spec.StreamType
 	}
+	status := management.EntitlementStatusMethod(nil, nil, nil).Spec
+	served[status.Procedure] = status.StreamType
 	fleetServer := fleetapi.New(nil, nil, nil, nil, nil)
 	for _, method := range slices.Concat(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods(),
 		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0), fleetServer.V2WatchMethods(nil, 1)) {

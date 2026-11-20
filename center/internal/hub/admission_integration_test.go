@@ -92,6 +92,47 @@ func TestUpgradeAdmission(t *testing.T) {
 	}
 }
 
+func TestV2UpgradeNamesHostedAndOperatorLimits(t *testing.T) {
+	for _, scenario := range []struct {
+		name     string
+		settings settings
+		reason   string
+		code     string
+		category string
+	}{
+		{"official without entitlement", settings{mode: config.OfficialHosted, plan: config.PlanDevelopmentFixtures},
+			"ENTITLEMENT/hosted_access_required", "hosted_access_required", "entitlement"},
+		{"self-hosted operator limit", settings{disabled: "center.nodes"},
+			"RESOURCE/overloaded", "overloaded", "resource"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			h := newHarness(t, scenario.settings)
+			node := h.enroll()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			socket, response, err := dialV2Channel(ctx, h.url, node.access)
+			if socket != nil {
+				t.Cleanup(func() { _ = socket.CloseNow() })
+			}
+			if response != nil && response.Body != nil {
+				t.Cleanup(func() { _ = response.Body.Close() })
+			}
+			got := refusalOf(t, &nodetest.Channel{Response: response}, err)
+			if got.status != http.StatusForbidden || got.reason != scenario.reason ||
+				got.body["category"] != scenario.category || got.body["code"] != scenario.code || got.body["effect"] != "didNotHappen" {
+				t.Fatalf("expected typed V2 refusal with no effect: %+v", got)
+			}
+			if scenario.code == "overloaded" {
+				details, _ := got.body["details"].(map[string]any)
+				state, _ := details["state"].(map[string]any)
+				if state["reason"] != "operator_limit" || got.retry == "" {
+					t.Fatalf("expected the scoped operator limit and retry instant: %+v", got)
+				}
+			}
+		})
+	}
+}
+
 // TestUpgradeRefusesUnknownRevokedExpiredAndAccountTokens is E1-3 (CTR5-HUB-02, PN-3, PN-4, SEC-22): the credential is checked before
 // the upgrade, and each failure says which in its header: an unknown token is unauthenticated, an expired one token_expired (the node
 // refreshes), a revoked one credential_revoked (it signs in again), an account session is permission_denied (the AGENT row admits the

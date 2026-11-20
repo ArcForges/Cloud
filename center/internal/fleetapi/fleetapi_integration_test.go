@@ -9,13 +9,20 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
 	fleetv1 "github.com/ArcForges/Contracts/go/arcforges/fleet/v1"
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
+	v2 "github.com/ArcForges/Contracts/go/arcforges/sandbox/v2"
+	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -23,11 +30,69 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/identity"
+	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
+
+type operatorLimitHTTPClient func(*http.Request) (*http.Response, error)
+
+func (do operatorLimitHTTPClient) Do(request *http.Request) (*http.Response, error) {
+	return do(request)
+}
+
+func TestV2OperatorLimitPreservesPublishedUnaryAndWatchErrors(t *testing.T) {
+	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay,nodes", disabled: "remote.view"})
+	node := h.enroll(1)
+	bearer := h.issue(node.user, session.ScopeAccount).AccessToken
+	grant, sandbox, correlationID := platform.NewID(), platform.NewID(), platform.NewID()
+	httpClient := operatorLimitHTTPClient(func(request *http.Request) (*http.Response, error) {
+		request.Header.Set("Authorization", "Bearer "+bearer)
+		request.Header.Set(ingress.RemoteNodeHeader, node.node.ID.String())
+		request.Header.Set(ingress.RemoteEnrollmentHeader, node.result.EnrollmentID.String())
+		request.Header.Set(ingress.RemoteGrantHeader, grant.String())
+		request.Header.Set(ingress.RemoteGrantRevisionHeader, "1")
+		return http.DefaultClient.Do(request)
+	})
+	client := connect.NewClient(connecthttp.NewTransport(httpClient, h.client.URL, connecthttp.WithGRPCWeb()))
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	requestMeta := &foundationv1.RequestMeta{CorrelationId: &foundationv1.Id{Value: correlationID[:]}}
+	scopeID := &foundationv1.Id{Value: sandbox[:]}
+	check := func(err *foundationv1.ArcError) {
+		t.Helper()
+		if err.GetCategory() != foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE || err.GetCode() != "overloaded" ||
+			err.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN ||
+			err.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_AFTER_TIME || err.GetRetry().GetRetryAt() == nil ||
+			err.GetDetails().GetState().GetReason() != "operator_limit" || !proto.Equal(err.GetCorrelationId(), requestMeta.GetCorrelationId()) {
+			t.Fatalf("the operator limit has no valid scoped error: %v", err)
+		}
+	}
+	var unary v2.ResourceServiceGetBudgetResponse
+	if err := client.CallUnary(ctx, connect.Spec{Procedure: sandboxv2connect.ResourceServiceGetBudgetProcedure, StreamType: connect.StreamTypeUnary},
+		&v2.ResourceServiceGetBudgetRequest{Meta: requestMeta, ScopeKind: proto.String("sandbox"), ScopeId: scopeID}, &unary); err != nil ||
+		!v2.ValidateResourceServiceGetBudgetResponse(&unary) {
+		t.Fatalf("the operator limit unary failed the published contract: %v, %v", err, unary.GetError())
+	}
+	check(unary.GetError())
+
+	stream, err := client.CallServerStream(ctx, connect.Spec{Procedure: sandboxv2connect.ResourceServiceWatchUsageProcedure, StreamType: connect.StreamTypeServer},
+		&v2.ResourceServiceWatchUsageRequest{Meta: requestMeta, ScopeKind: proto.String("sandbox"), ScopeId: scopeID, IntervalMs: proto.Uint32(1000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stream.Close() }()
+	var frame v2.ResourceServiceWatchUsageFrame
+	if err := stream.Receive(&frame); err != nil || !v2.ValidateResourceServiceWatchUsageFrame(&frame) {
+		t.Fatalf("the operator limit watch failed the published contract: %v, %v", err, frame.GetError())
+	}
+	check(frame.GetError())
+	if err := stream.Receive(&frame); !errors.Is(err, io.EOF) {
+		t.Fatalf("the operator limit watch did not end after its refusal: %v", err)
+	}
+}
 
 // TestFleetRowsAreTheServedMethods (E1-1, contracts-8): parts E1a, E1b and E2 serve exactly the browser sign-in (BeginNodeSignIn,
 // GetNodeSignInFlow, ApproveNodeSignIn, CompleteNodeSignIn), the device-code sign-in (StartDeviceAuthorization,
@@ -91,7 +156,7 @@ func TestFleetRowsAreTheServedMethods(t *testing.T) {
 // with the node scope); an account token is permission_denied; a revoked device, an expired family and a suspended account refuse;
 // a restricted account's node keeps refreshing. Never gated: the gated feature keys are all disabled here.
 func TestRefreshNodeSession(t *testing.T) {
-	h := newHarness(t, settings{disabled: "center.nodes,center.execute,remote.view,remote.control,center.mcp,push"})
+	h := newHarness(t, settings{disabled: "center.nodes,remote.view,remote.control"})
 	ctx := context.Background()
 	now := time.Now().UTC()
 	register := func(kid string, notBefore time.Time) {

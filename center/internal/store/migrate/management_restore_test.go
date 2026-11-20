@@ -31,6 +31,10 @@ func TestRemoteObservationBackupRestoreRetainsIdentityAndUncertainty(t *testing.
 	testManagementBackupRestore(t, 14)
 }
 
+func TestHostedEntitlementBackupRestoreRetainsOriginalProjection(t *testing.T) {
+	testManagementBackupRestore(t, 15)
+}
+
 func testManagementBackupRestore(t *testing.T, version int) {
 	t.Helper()
 	ctx := context.Background()
@@ -41,8 +45,18 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	if version >= 13 {
 		build = centerBuild(t)[:version]
 	}
+	var hosted hostedProjectionFixture
+	if version == 15 {
+		if _, err := Apply(ctx, owner, build[:14], Options{Runner: "isolated-schema14-projection-source", RuntimeRole: group}); err != nil {
+			t.Fatal(err)
+		}
+		hosted = seedHostedProjection(t, owner, seedNamespaceFixture(t, owner).account)
+	}
 	if _, err := Apply(ctx, owner, build, Options{Runner: "isolated-schema12-backup-source", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
+	}
+	if version == 15 {
+		hosted.check(t, owner, group)
 	}
 	var authority lifecycleAuthority
 	var export, recovery, deletion platform.ID
@@ -78,7 +92,7 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	runtime, sqlRuntime := managementRuntime(t, owner, url, group)
 	identity := management.Identity{Account: f.account, Command: platform.NewID(), Enrollment: f.enrollment, Node: f.node, OwnerEpoch: [16]byte(platform.NewID()), IntentSHA256: sha256.Sum256([]byte("supplied unresolved operation identity")), Method: "RunService.Start", CreatedAt: time.Now().UTC(), ReplayUntil: time.Now().Add(time.Hour).UTC()}
 	lease := management.Lease{Holder: holder, ChannelEpoch: channel, Fence: 1}
-	if version == 14 {
+	if version >= 14 {
 		identity.Actor, identity.Grant, identity.GrantRevision = platform.NewID(), platform.NewID(), 4
 		lease.ProtocolEpoch = protocol
 	}
@@ -86,7 +100,7 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	if err != nil || !inserted {
 		t.Fatalf("reserve input fixture: %v", err)
 	}
-	if version == 14 {
+	if version >= 14 {
 		if _, won, err := runtime.MarkPossiblyDelivered(ctx, identity, lease, reserved); err != nil || !won {
 			t.Fatalf("claim the original routing observation: %v", err)
 		}
@@ -116,6 +130,9 @@ func testManagementBackupRestore(t *testing.T, version int) {
 		t.Fatalf("schema%d real restore: %v", version, err)
 	}
 	destination := pgtest.Connect(t, cfg.URL)
+	if version == 15 {
+		hosted.check(t, destination, targetRole)
+	}
 	status, err := Inspect(ctx, destination, build)
 	if err != nil || status.State != StateCurrent || status.RuntimeRole != targetRole {
 		t.Fatalf("target-specific admission: %v", err)
@@ -152,7 +169,7 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	if err != nil || inserted || retained.State != 7 || !retained.MayHaveDelivered || retained.Effect == nil || *retained.Effect != 3 {
 		t.Fatalf("unknown identity was forgotten or re-executed: inserted=%v err=%v", inserted, err)
 	}
-	if version == 14 {
+	if version >= 14 {
 		authority := management.Authority{
 			Account: identity.Account, Actor: identity.Actor, Enrollment: identity.Enrollment,
 			Node: identity.Node, Grant: identity.Grant, GrantRevision: identity.GrantRevision,

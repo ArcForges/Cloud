@@ -65,6 +65,7 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.publicapi.v1.IdentityService/RevokeAllSessions session 4096",
 		"/arcforges.publicapi.v1.DeviceService/Rename session 4096",
 		"/arcforges.publicapi.v1.DeviceService/Revoke session 4096",
+		"/arcforges.publicapi.v1.EntitlementService/GetSnapshot session 4096",
 		// AF-CTR-04 E1b: the browser sign-in; E2: the device-code sign-in; E1a: the node methods.
 		"/arcforges.fleet.v1.NodeEnrollmentService/BeginNodeSignIn anonymous 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/GetNodeSignInFlow session 4096",

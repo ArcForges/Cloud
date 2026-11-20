@@ -49,39 +49,32 @@ func TestOfficialHostedEnablesNoGatedFeatureWithoutPlanConfiguration(t *testing.
 	}
 }
 
-func TestSelfHostedEnablesTheGatedFeaturesByDefaultExceptPushWithoutASender(t *testing.T) {
+func TestSelfHostedEnablesTheV2ServicesByDefault(t *testing.T) {
 	gate := NewGate(Configure(Settings{Mode: config.SelfHosted}), nil)
 	for _, key := range Gated() {
-		want, reason := true, ReasonSelfHostedDefault
-		if key == Push {
-			want, reason = false, ReasonPushSenderNotConfigured
-		}
-		if decision := gate.Availability(t.Context(), key); decision.Available != want || decision.Reason != reason {
+		if decision := gate.Availability(t.Context(), key); !decision.Available || decision.Reason != ReasonSelfHostedDefault {
 			t.Fatalf("%s: %+v", key, decision)
-		}
-	}
-	withSender := NewGate(Configure(Settings{Mode: config.SelfHosted, PushSender: true}), nil)
-	for _, key := range Gated() {
-		if decision := withSender.Availability(t.Context(), key); !decision.Available || decision.Reason != ReasonSelfHostedDefault {
-			t.Fatalf("%s with a push sender: %+v", key, decision)
 		}
 	}
 }
 
 func TestSelfHostedOperatorLimitsDisableTheNamedKeysOnly(t *testing.T) {
-	gate := NewGate(Configure(Settings{Mode: config.SelfHosted, PushSender: true, Disabled: []Key{RemoteControl, Push}}), nil)
+	gate := NewGate(Configure(Settings{Mode: config.SelfHosted, Disabled: []Key{RemoteControl, CenterExecute}}), nil)
 	for _, key := range Gated() {
-		disabled := key == RemoteControl || key == Push
+		disabled := key == RemoteControl
 		decision := gate.Availability(t.Context(), key)
 		if decision.Available == disabled || disabled && decision.Reason != ReasonOperatorLimit || !disabled && decision.Reason != ReasonSelfHostedDefault {
 			t.Fatalf("%s: %+v", key, decision)
 		}
 	}
+	if decision := LegacyAvailability(gate, t.Context(), CenterExecute); decision.Available || decision.Reason != ReasonOperatorLimit {
+		t.Fatalf("the named V1 restriction: %+v", decision)
+	}
 }
 
 func TestUnknownKeysAndModesFailClosed(t *testing.T) {
 	for _, mode := range []config.Mode{config.OfficialHosted, config.SelfHosted, "", "hosted"} {
-		for _, key := range []Key{"", "center.Nodes", "hello", "remote", "center.nodes "} {
+		for _, key := range []Key{"", "center.Nodes", "hello", "remote", "center.nodes ", CenterExecute, CenterMCP, Push} {
 			if decision := NewGate(Configure(Settings{Mode: mode}), nil).Availability(t.Context(), key); decision.Available || decision.Reason != ReasonUnknownFeature {
 				t.Fatalf("%s/%q: %+v", mode, key, decision)
 			}
@@ -92,8 +85,8 @@ func TestUnknownKeysAndModesFailClosed(t *testing.T) {
 			t.Fatalf("%q: %+v", mode, decision)
 		}
 	}
-	if len(Gated()) != 6 {
-		t.Fatal("the catalogue keys of AD-0021 section 13a")
+	if !slices.Equal(Gated(), []Key{CenterNodes, RemoteView, RemoteControl}) {
+		t.Fatal("wrong V2 service keys")
 	}
 }
 
@@ -107,23 +100,17 @@ func TestTheKeysOfTheGateAreTheKeysOfTheConfiguration(t *testing.T) {
 	}
 }
 
-// TestOperationKeysAreTheRoutedTaskControlTable pins the routed task control table (plan section (g)): every gated key gates one
-// group of routed operations, once.
-func TestOperationKeysAreTheRoutedTaskControlTable(t *testing.T) {
+func TestOperationKeysAreTheV2HostedServiceTable(t *testing.T) {
 	want := map[Key]string{
-		RemoteControl: "control of existing tasks (cancel, retry, priority)",
-		CenterExecute: "submission, and file and workspace operations",
-		RemoteView:    "status and output",
+		RemoteControl: "Sandbox, Run, resource and data mutations",
+		RemoteView:    "Sandbox, Run, resource and data reads and watches",
 		CenterNodes:   "node connection",
-		CenterMCP:     "MCP",
-		Push:          "push",
 	}
 	rows := OperationKeys()
 	if len(rows) != len(want) {
 		t.Fatalf("%d rows", len(rows))
 	}
-	groups := map[Key]Group{RemoteControl: GroupControl, CenterExecute: GroupSubmission, RemoteView: GroupStatusAndOutput, CenterNodes: GroupNodeConnection,
-		CenterMCP: GroupMCP, Push: GroupPush}
+	groups := map[Key]Group{RemoteControl: GroupControl, RemoteView: GroupStatusAndOutput, CenterNodes: GroupNodeConnection}
 	for _, row := range rows {
 		if key, named := KeyOfGroup(row.Group); groups[row.Key] != row.Group || !named || key != row.Key {
 			t.Errorf("%s names the group %q", row.Key, row.Group)
@@ -131,6 +118,17 @@ func TestOperationKeysAreTheRoutedTaskControlTable(t *testing.T) {
 	}
 	if _, named := KeyOfGroup("status"); named {
 		t.Error("an unknown group names a key")
+	}
+	if _, named := KeyOfGroup(GroupSubmission); named {
+		t.Error("the V1 submission group has no V2 service key")
+	}
+	if key, named := LegacyKeyOfGroup(GroupSubmission); !named || key != CenterExecute {
+		t.Error("the retained V1 group lost its historical key")
+	}
+	for _, group := range []Group{GroupMCP, GroupPush} {
+		if _, named := LegacyKeyOfGroup(group); named {
+			t.Errorf("retired group %q still names a route key", group)
+		}
 	}
 	for _, row := range rows {
 		if want[row.Key] != row.Gates || !IsGated(row.Key) {
@@ -180,29 +178,29 @@ func TestTheCenterDocumentPrintsTheRoutedTaskControlTable(t *testing.T) {
 	}
 }
 
-func TestTheDevelopmentFixturesAreTheIllustrativeEmbeddedCatalogue(t *testing.T) {
+func TestTheDevelopmentFixturesOnlyOfferTheV2Services(t *testing.T) {
 	catalogue, err := DevelopmentFixtures()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !catalogue.Fixture || !strings.HasPrefix(catalogue.Version, "dev-") || catalogue.Class != ClassDevelopment || !strings.Contains(catalogue.Notice, "not approved prices") {
+	if !catalogue.Fixture || catalogue.Version != "dev-host-v2" || catalogue.Class != ClassDevelopment || !strings.Contains(catalogue.Notice, "Sales and prices are not configured") {
 		t.Fatalf("%+v", catalogue)
 	}
 	if !slices.Equal(catalogue.Capabilities, Gated()) {
 		t.Fatalf("the capabilities %v", catalogue.Capabilities)
 	}
-	prices := map[string]int{}
+	plans := map[string][]Key{}
 	for _, plan := range catalogue.Plans {
-		prices[plan.ID] = plan.IllustrativePriceUSD
-		if !strings.HasPrefix(plan.Name, "Fixture ") || !strings.Contains(plan.Name, "illustrative") {
-			t.Errorf("the plan %s is not labelled illustrative: %q", plan.ID, plan.Name)
+		plans[plan.ID] = plan.Features
+		if !strings.HasPrefix(plan.Name, "Fixture ") {
+			t.Errorf("the plan %s is not labelled a fixture: %q", plan.ID, plan.Name)
 		}
 	}
-	if len(prices) != 2 || prices["fixture-all"] != 15 || prices["fixture-view"] != 5 {
-		t.Fatalf("plans %v", prices)
+	if len(plans) != 2 || !slices.Equal(plans["fixture-all"], Gated()) || !slices.Equal(plans["fixture-view"], []Key{RemoteView}) {
+		t.Fatalf("plans %v", plans)
 	}
 	definitions := catalogue.Definitions(false)
-	if definitions.Version != catalogue.Version || definitions.IsSelfHostRealm || len(definitions.Capabilities) != 6 || len(definitions.Quotas) != 0 || len(definitions.Allowances) != 0 {
+	if definitions.Version != catalogue.Version || definitions.IsSelfHostRealm || len(definitions.Capabilities) != len(Gated()) || len(definitions.Quotas) != 0 || len(definitions.Allowances) != 0 {
 		t.Fatalf("%+v", definitions)
 	}
 	for _, capability := range definitions.Capabilities {
@@ -216,12 +214,12 @@ func TestTheDevelopmentFixturesAreTheIllustrativeEmbeddedCatalogue(t *testing.T)
 }
 
 // validProduction is a catalogue of the production classification: no fixture marker, no notice, no price (this code invents none).
-const validProduction = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
-"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]}`
+const validProduction = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","remote.view","remote.control"],
+"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","remote.control"]}]}`
 
 func TestACatalogueOfTheProductionClassificationStatesNoFixtureNoNoticeAndNoPrice(t *testing.T) {
 	catalogue, err := ParseCatalogue([]byte(validProduction), ClassProduction)
-	if err != nil || catalogue.Fixture || !catalogue.Production() || len(catalogue.Plans) != 1 || catalogue.Plans[0].IllustrativePriceUSD != 0 {
+	if err != nil || catalogue.Fixture || !catalogue.Production() || len(catalogue.Plans) != 1 {
 		t.Fatalf("%+v %v", catalogue, err)
 	}
 	// A non-fixture catalogue is just as valid under the development classification.
@@ -231,11 +229,11 @@ func TestACatalogueOfTheProductionClassificationStatesNoFixtureNoNoticeAndNoPric
 }
 
 // The catalogue's rules, each pinned by a document that breaks that rule alone: the refusal must be the rule's own text, so a case
-// cannot pass on another rule's refusal (config-2). fixtureJSON is a valid development fixture of one plan priced at USD 5.
+// cannot pass on another rule's refusal (config-2). fixtureJSON is a valid development fixture of one plan.
 func TestEveryInvalidCatalogueIsRefusedByItsOwnRuleWithoutEchoingItsValues(t *testing.T) {
 	replace := func(old, new string) string { return strings.Replace(validProduction, old, new, 1) }
 	fixtureJSON := strings.Replace(strings.Replace(strings.Replace(validProduction, `"fixture":false`, `"fixture":true,"notice":"Illustrative."`, 1), `"2026-q4"`, `"dev-2026-q4"`, 1),
-		`"Plan under test"`, `"Fixture plan (illustrative)","illustrativePriceUsd":5`, 1)
+		`"Plan under test"`, `"Fixture plan (illustrative)"`, 1)
 	if _, err := ParseCatalogue([]byte(fixtureJSON), ClassDevelopment); err != nil {
 		t.Fatalf("the base fixture of the cases is refused: %v", err)
 	}
@@ -259,7 +257,6 @@ func TestEveryInvalidCatalogueIsRefusedByItsOwnRuleWithoutEchoingItsValues(t *te
 		"the version repeated in another case":    {strings.TrimSuffix(validProduction, "}") + `,"Version":"2026-q5"}`, ClassDevelopment, "unknown or not spelled exactly"},
 		"a plan field in another case":            {replace(`"name":"Plan under test"`, `"Name":"Plan under test"`), ClassDevelopment, "plan field is unknown or not spelled exactly"},
 		"a plan name repeated in another case":    {replace(`"name":"Plan under test"`, `"name":"Plan under test","NAME":"Other"`), ClassDevelopment, "plan field is unknown or not spelled exactly"},
-		"the price field spelled with capitals":   {fixture(`illustrativePriceUsd`, `illustrativePriceUSD`), ClassDevelopment, "plan field is unknown or not spelled exactly"},
 		"an unknown classification":               {validProduction, Classification(9), "the classification is unknown"},
 		"a fixture under production":              {fixtureJSON, ClassProduction, "a fixture catalogue under the production classification"},
 		"a fixture whose version lacks dev-":      {fixture(`"dev-2026-q4"`, `"2026-q5"`), ClassDevelopment, "a fixture's version starts with dev-"},
@@ -269,21 +266,20 @@ func TestEveryInvalidCatalogueIsRefusedByItsOwnRuleWithoutEchoingItsValues(t *te
 		"a fixture with a blank notice":           {fixture(`"notice":"Illustrative."`, `"notice":"  "`), ClassDevelopment, "a fixture carries its illustrative notice"},
 		"a fixture with a notice of control text": {fixture(`"notice":"Illustrative."`, `"notice":"Illustrative.\u0007"`), ClassDevelopment, "a fixture carries its illustrative notice"},
 		"a notice without the marker":             {replace(`"fixture":false`, `"fixture":false,"notice":"x"`), ClassDevelopment, "only a fixture carries a notice"},
-		"a price without the marker":              {replace(`"Plan under test"`, `"Plan under test","illustrativePriceUsd":5`), ClassDevelopment, "only a fixture may state a price"},
-		"a fixture price of seven":                {fixture(`"illustrativePriceUsd":5`, `"illustrativePriceUsd":7`), ClassDevelopment, "illustrative price is USD 5 or USD 15"},
-		"a fixture price of zero":                 {fixture(`,"illustrativePriceUsd":5`, ``), ClassDevelopment, "illustrative price is USD 5 or USD 15"},
+		"a production price field":                {replace(`"Plan under test"`, `"Plan under test","illustrativePriceUsd":5`), ClassDevelopment, "plan field is unknown or not spelled exactly"},
+		"a fixture price field":                   {fixture(`"Fixture plan (illustrative)"`, `"Fixture plan (illustrative)","illustrativePriceUsd":7`), ClassDevelopment, "plan field is unknown or not spelled exactly"},
 		"a fixture plan not named Fixture":        {fixture(`Fixture plan`, `Plan`), ClassDevelopment, "a fixture plan's name starts with Fixture"},
 		"a fixture plan named Fixture and a word": {fixture(`Fixture plan`, `FixtureX plan`), ClassDevelopment, "a fixture plan's name starts with Fixture"},
 		"a fixture plan named fixture in lower":   {fixture(`Fixture plan`, `fixture plan`), ClassDevelopment, "a fixture plan's name starts with Fixture"},
-		"a missing capability":                    {strings.Replace(replace(`,"push"],`, `],`), `"features":["remote.view","push"]`, `"features":["remote.view"]`, 1), ClassDevelopment, "defines exactly the"},
-		"an unknown capability":                   {replace(`"push"],`, `"push.extra"],`), ClassDevelopment, "a capability is not a gated key or is repeated"},
-		"a repeated capability":                   {replace(`"center.mcp","push"],`, `"center.mcp","center.mcp"],`), ClassDevelopment, "a capability is not a gated key or is repeated"},
-		"a plan feature outside":                  {replace(`"remote.view","push"`, `"remote.view","unknown"`), ClassDevelopment, "a plan feature is not a capability"},
-		"a repeated plan feature":                 {replace(`"remote.view","push"`, `"remote.view","remote.view"`), ClassDevelopment, "a plan feature is not a capability"},
-		"a plan without features":                 {replace(`"features":["remote.view","push"]`, `"features":[]`), ClassDevelopment, "a plan carries from 1 to"},
-		"no plans":                                {replace(`"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]`, `"plans":[]`), ClassDevelopment, "plans"},
+		"a missing capability":                    {strings.Replace(replace(`,"remote.control"],`, `],`), `"features":["remote.view","remote.control"]`, `"features":["remote.view"]`, 1), ClassDevelopment, "defines exactly the"},
+		"an unknown capability":                   {replace(`"remote.control"],`, `"push.extra"],`), ClassDevelopment, "a capability is not a gated key or is repeated"},
+		"a repeated capability":                   {replace(`"remote.view","remote.control"],`, `"remote.view","remote.view"],`), ClassDevelopment, "a capability is not a gated key or is repeated"},
+		"a plan feature outside":                  {replace(`"features":["remote.view","remote.control"]`, `"features":["remote.view","unknown"]`), ClassDevelopment, "a plan feature is not a capability"},
+		"a repeated plan feature":                 {replace(`"features":["remote.view","remote.control"]`, `"features":["remote.view","remote.view"]`), ClassDevelopment, "a plan feature is not a capability"},
+		"a plan without features":                 {replace(`"features":["remote.view","remote.control"]`, `"features":[]`), ClassDevelopment, "a plan carries from 1 to"},
+		"no plans":                                {replace(`"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","remote.control"]}]`, `"plans":[]`), ClassDevelopment, "plans"},
 		"a plan ID in capitals":                   {replace(`"plan-test"`, `"Plan-Test"`), ClassDevelopment, "a plan ID is malformed or repeated"},
-		"a repeated plan ID":                      {replace(`"features":["remote.view","push"]}]`, `"features":["remote.view","push"]},{"id":"plan-test","name":"Other","features":["push"]}]`), ClassDevelopment, "a plan ID is malformed or repeated"},
+		"a repeated plan ID":                      {replace(`"features":["remote.view","remote.control"]}]`, `"features":["remote.view","remote.control"]},{"id":"plan-test","name":"Other","features":["remote.control"]}]`), ClassDevelopment, "a plan ID is malformed or repeated"},
 		"a blank plan name":                       {replace(`"Plan under test"`, `"  "`), ClassDevelopment, "a plan name is blank, long or holds a control character"},
 		"a plan name with a control":              {replace(`"Plan under test"`, `"Plan\u0007"`), ClassDevelopment, "a plan name is blank, long or holds a control character"},
 	}
@@ -331,7 +327,7 @@ func TestAPlanIDAndAPlanNameAreBoundedAtSixtyFour(t *testing.T) {
 // characters after dev-) and the groups of a plan ID (8), each from both sides.
 func TestTheOtherBoundsOfTheCatalogueAreExact(t *testing.T) {
 	fixtureJSON := strings.Replace(strings.Replace(strings.Replace(validProduction, `"fixture":false`, `"fixture":true,"notice":"Illustrative."`, 1), `"2026-q4"`, `"dev-2026-q4"`, 1),
-		`"Plan under test"`, `"Fixture plan (illustrative)","illustrativePriceUsd":5`, 1)
+		`"Plan under test"`, `"Fixture plan (illustrative)"`, 1)
 	fixture := func(old, new string) string { return strings.Replace(fixtureJSON, old, new, 1) }
 	plain := func(old, new string) string { return strings.Replace(validProduction, old, new, 1) }
 	for _, item := range []struct {
@@ -363,9 +359,9 @@ func TestSixteenPlansAreAcceptedAndSeventeenAreTooMany(t *testing.T) {
 	withPlans := func(count int) string {
 		var plans []string
 		for index := range count {
-			plans = append(plans, fmt.Sprintf(`{"id":"plan-%d","name":"Plan %d","features":["push"]}`, index, index))
+			plans = append(plans, fmt.Sprintf(`{"id":"plan-%d","name":"Plan %d","features":["remote.control"]}`, index, index))
 		}
-		return strings.Replace(validProduction, `[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]`, "["+strings.Join(plans, ",")+"]", 1)
+		return strings.Replace(validProduction, `[{"id":"plan-test","name":"Plan under test","features":["remote.view","remote.control"]}]`, "["+strings.Join(plans, ",")+"]", 1)
 	}
 	if catalogue, err := ParseCatalogue([]byte(withPlans(maxPlans)), ClassDevelopment); err != nil || len(catalogue.Plans) != maxPlans {
 		t.Fatalf("%d plans: %v", maxPlans, err)
@@ -453,6 +449,60 @@ func TestTheConfigurationStatesAndTheirOperatorGrantPolicy(t *testing.T) {
 			policy, err := item.configuration.OperatorGrants()
 			if !errors.Is(err, item.refusal) || policy.MaxExpiry != item.expiry || policy.AllowCatalogueWide != item.wide {
 				t.Fatalf("%+v %v", policy, err)
+			}
+			if err == nil && !slices.Equal(policy.Keys, config.GatedFeatureKeys()) {
+				t.Fatalf("the operator can issue keys outside V2: %v", policy.Keys)
+			}
+		})
+	}
+}
+
+func TestStatusUsesOneHostedSnapshotAndNoReaderForStaticModes(t *testing.T) {
+	storeErr := errors.New("the store is down")
+	ctx := WithAccount(t.Context(), "account-one")
+	for _, item := range []struct {
+		name          string
+		configuration Configuration
+		readerError   error
+		calls         int
+		version       bool
+		reasons       []Reason
+	}{
+		{"self-hosted", Configure(Settings{Mode: config.SelfHosted, Disabled: []Key{RemoteControl}}), storeErr, 0, false,
+			[]Reason{ReasonSelfHostedDefault, ReasonSelfHostedDefault, ReasonOperatorLimit}},
+		{"missing catalogue", hosted(config.PlanNone), storeErr, 0, false,
+			[]Reason{ReasonPlanConfigurationMissing, ReasonPlanConfigurationMissing, ReasonPlanConfigurationMissing}},
+		{"invalid catalogue", Configure(Settings{Mode: config.OfficialHosted, Injected: []byte("{"), InjectedClass: ClassProduction}), storeErr, 0, false,
+			[]Reason{ReasonPlanConfigurationInvalid, ReasonPlanConfigurationInvalid, ReasonPlanConfigurationInvalid}},
+		{"official", hosted(config.PlanDevelopmentFixtures), nil, 1, true,
+			[]Reason{ReasonNoEntitlement, ReasonEntitled, ReasonSubscriptionExpired}},
+		{"official reader failure", hosted(config.PlanDevelopmentFixtures), storeErr, 1, false, nil},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			reader := &fakeReader{err: item.readerError, content: "cap=center.nodes|0|NoEntitlement|\n" +
+				"cap=remote.view|1|Available|g1\ncap=remote.control|0|SubscriptionExpired|\ncap=center.execute|1|Available|g2\n"}
+			actual, err := Status(ctx, NewGate(item.configuration, reader))
+			if reader.calls != item.calls || (actual.Version != nil) != item.version || len(actual.Features) != len(item.reasons) {
+				t.Fatalf("status=%+v reads=%d error=%v", actual, reader.calls, err)
+			}
+			if item.reasons == nil {
+				if !errors.Is(err, storeErr) {
+					t.Fatalf("store failure: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if item.calls > 0 && reader.account != "account-one" {
+				t.Fatalf("read account %q", reader.account)
+			}
+			for index, state := range actual.Features {
+				reason := item.reasons[index]
+				available := reason == ReasonSelfHostedDefault || reason == ReasonEntitled
+				if state.Key != Gated()[index] || state.Decision.Reason != reason || state.Decision.Available != available {
+					t.Errorf("service %d: %+v", index, state)
+				}
 			}
 		})
 	}

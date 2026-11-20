@@ -304,13 +304,13 @@ func (r *rig) grant(account platform.ID, days int, keys ...string) {
 	}
 }
 
-const productionCatalogue = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
-"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]}`
+const productionCatalogue = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","remote.view","remote.control"],
+"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","remote.control"]}]}`
 
-// fixtureCatalogue is a VALID development fixture (a notice, the "Fixture " name, a price of USD 15): under the production
+// fixtureCatalogue is a valid development fixture (a notice and the "Fixture " name): under the production
 // classification it is refused by that rule alone, which is what its row of TestEachCatalogueStateDecidesEveryGatedKey isolates.
-var fixtureCatalogue = `{"version":"dev-test","fixture":true,"notice":"Illustrative.","capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
-"plans":[{"id":"fixture-all","name":"Fixture all","illustrativePriceUsd":15,"features":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"]}]}`
+var fixtureCatalogue = `{"version":"dev-test","fixture":true,"notice":"Illustrative.","capabilities":["center.nodes","remote.view","remote.control"],
+"plans":[{"id":"fixture-all","name":"Fixture all","features":["center.nodes","remote.view","remote.control"]}]}`
 
 func gatedKeys() []string {
 	var keys []string
@@ -338,13 +338,12 @@ func TestEachCatalogueStateDecidesEveryGatedKey(t *testing.T) {
 		{"an invalid catalogue", hosted(feature.Settings{Injected: []byte("{"), InjectedClass: feature.ClassProduction}), nil, nil, "plan_configuration_invalid"},
 		{"a fixture catalogue under the production classification", hosted(feature.Settings{Injected: []byte(fixtureCatalogue), InjectedClass: feature.ClassProduction}), nil, nil, "plan_configuration_invalid"},
 		{"the development fixtures without a grant", hosted(feature.Settings{Plan: config.PlanDevelopmentFixtures}), nil, nil, "no_entitlement"},
-		{"the development fixtures with a grant of two keys", hosted(feature.Settings{Plan: config.PlanDevelopmentFixtures}), []string{"remote.view", "push"}, []string{"remote.view", "push"}, "no_entitlement"},
+		{"the development fixtures with a grant of two keys", hosted(feature.Settings{Plan: config.PlanDevelopmentFixtures}), []string{"remote.view", "remote.control"}, []string{"remote.view", "remote.control"}, "no_entitlement"},
 		{"a production-classified test catalogue without a grant", hosted(feature.Settings{Injected: []byte(productionCatalogue), InjectedClass: feature.ClassProduction}), nil, nil, "no_entitlement"},
 		{"a production-classified test catalogue with a grant", hosted(feature.Settings{Injected: []byte(productionCatalogue), InjectedClass: feature.ClassProduction}), []string{"remote.view"}, []string{"remote.view"}, "no_entitlement"},
-		{"a self-hosted center", feature.Settings{Mode: config.SelfHosted, PushSender: true}, nil, gatedKeys(), ""},
-		{"a self-hosted center without a push sender", feature.Settings{Mode: config.SelfHosted}, nil, []string{"center.nodes", "center.execute", "remote.view", "remote.control", "center.mcp"}, "push_sender_not_configured"},
-		{"a self-hosted center with a key disabled", feature.Settings{Mode: config.SelfHosted, PushSender: true, Disabled: []feature.Key{feature.CenterExecute}},
-			nil, []string{"center.nodes", "remote.view", "remote.control", "center.mcp", "push"}, "operator_limit"},
+		{"a self-hosted center", feature.Settings{Mode: config.SelfHosted}, nil, gatedKeys(), ""},
+		{"a self-hosted center with a key disabled", feature.Settings{Mode: config.SelfHosted, Disabled: []feature.Key{feature.RemoteControl}},
+			nil, []string{"center.nodes", "remote.view"}, "operator_limit"},
 	}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {
@@ -475,8 +474,8 @@ func TestTheGateIsNeverReachedByACallAnEarlierStageRefuses(t *testing.T) {
 	// 4. AGENT/HUMAN separation, both ways.
 	got, _ = r.call("RemoteView", node, nil)
 	refused("a node credential on a HUMAN operation", got, "AUTHORIZATION/permission_denied", "probe.remote.view")
-	got, _ = r.call("Push", automation, nil)
-	refused("an automation credential on a HUMAN operation", got, "AUTHORIZATION/permission_denied", "probe.push")
+	got, _ = r.call("RemoteView", automation, nil)
+	refused("an automation credential on a HUMAN operation", got, "AUTHORIZATION/permission_denied", "probe.remote.view")
 	got, _ = r.call("Agent", human, nil)
 	refused("an account session on an AGENT operation", got, "AUTHORIZATION/permission_denied", "probe.agent")
 	// 5. Resource controls.
@@ -524,10 +523,15 @@ func TestACallThatCannotBeAuditedNeverReachesTheGate(t *testing.T) {
 	if got, _ := r.call("RemoteView", token, nil); !got.reached || r.gate.questions() != 1 {
 		t.Fatalf("after the fault is gone: %+v, %d questions", got, r.gate.questions())
 	}
+	if got, _ := r.call("RemoteControl", token, nil); got.reached || got.failure != "ENTITLEMENT/feature_not_entitled" ||
+		got.reason != "remote.control" || r.gate.questions() != 2 || r.audits(AuditGated, "probe.remote.control", "no_entitlement") != 1 {
+		t.Fatalf("the unentitled operation must reach the gate and audit its normal refusal: %+v", got)
+	}
 	// A refusal of the gate whose audit fails is not silent either: the caller gets the store failure, not a refusal that left no trace.
 	r.db.Exec("CREATE TRIGGER test_refuse BEFORE INSERT ON audit.audit_event FOR EACH ROW WHEN (NEW.event_type = 'access.gated') EXECUTE FUNCTION testfault.refuse()")
 	r.db.Exec("CREATE OR REPLACE FUNCTION testfault.refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'the audit is refused (test)' USING ERRCODE = '57P01'; END; $$")
-	if got, _ := r.call("Push", token, nil); got.reached || got.failure != "store-failure" {
+	if got, _ := r.call("RemoteControl", token, nil); got.reached || got.failure != "store-failure" ||
+		r.gate.questions() != 3 || r.audits(AuditGated, "probe.remote.control", "no_entitlement") != 1 {
 		t.Fatalf("a gate refusal that cannot be audited: %+v", got)
 	}
 }

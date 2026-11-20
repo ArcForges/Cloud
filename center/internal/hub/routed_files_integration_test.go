@@ -26,6 +26,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/correlation"
+	"github.com/ArcForges/Cloud/center/internal/entitlement"
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/hub"
 	"github.com/ArcForges/Cloud/center/internal/nodetest"
@@ -742,7 +743,16 @@ func TestCTR06RelayedHumanAuthorizationPrecedesOfficialEntitlement(t *testing.T)
 		t.Fatalf("unentitled calls reached target: %v", frame)
 	default:
 	}
-	h.grant(user, "center.execute")
+	now := time.Now()
+	end := entitlement.FromTime(now.Add(time.Hour))
+	if _, _, err := h.center.Entitlements.IssueGrant(t.Context(), entitlement.IssueGrantRequest{
+		AccountID: user.String(), Kind: entitlement.KindCapability, Subject: "center.execute", Value: entitlement.CapabilityValue{},
+		Source: entitlement.SourceAdminGrant, SourceRef: proto.String("legacy-v1-test"), IssuedByActor: "operator:test",
+		Reason: proto.String("test persisted V1 grant"), EffectiveFrom: entitlement.FromTime(now.Add(-time.Minute)),
+		EffectiveUntil: &end,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if reply := send(nodev1.Origin_ORIGIN_HUMAN, nonces[2]); reply.GetError() != nil {
 		t.Fatalf("entitled own-node human: %v", reply.GetError())
 	}

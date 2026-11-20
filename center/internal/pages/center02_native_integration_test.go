@@ -64,6 +64,11 @@ type center02NativeRun struct {
 // validation and the installed product. The browser's input uses the existing virtual passkey helper.
 func TestCenter02InstalledNode(t *testing.T) {
 	run := startCenter02InstalledNode(t, "ArcForges.ClosedLoop.Tests.CloudLinkCenterControlTests")
+	finishCenter02InstalledNode(t, run, nil)
+}
+
+func finishCenter02InstalledNode(t *testing.T, run *center02NativeRun, beforeOutage func(center02Owner, platform.ID)) {
+	t.Helper()
 	approval := center02Observation[center02Approval](t, run, "approval.json")
 	h, owner, ctx, coordination, done := run.harness, run.owner, run.ctx, run.coordination, run.done
 	center02ApproveBrowserFlow(t, ctx, h, run.ownerBrowser, owner, approval.VerificationURI)
@@ -90,6 +95,9 @@ func TestCenter02InstalledNode(t *testing.T) {
 			t.Fatal("the real Node credential family did not rotate")
 		}
 	}
+	if beforeOutage != nil {
+		beforeOutage(reported, reconnected)
+	}
 	h.stopHub()
 	h.native.Close()
 	if err := os.WriteFile(filepath.Join(coordination, "outage-ready"), nil, 0600); err != nil {
@@ -112,7 +120,13 @@ func TestCenter02InstalledNodeDeviceApproval(t *testing.T) {
 
 func startCenter02InstalledNode(t *testing.T, testClass string) *center02NativeRun {
 	t.Helper()
-	if os.Getenv(center02Required) != "1" {
+	return startInstalledCenterNode(t, center02Required, testClass,
+		settings{surfaces: "identity,pages,fleet,relay", policy: writePolicy, relay: true}, nil)
+}
+
+func startInstalledCenterNode(t *testing.T, required, testClass string, options settings, prepare func(*harness)) *center02NativeRun {
+	t.Helper()
+	if os.Getenv(required) != "1" {
 		t.Skip("the installed Node supplement requires a scoped native fixture")
 	}
 	project := center02File(t, center02Project)
@@ -130,7 +144,11 @@ func startCenter02InstalledNode(t *testing.T, testClass string) *center02NativeR
 		t.Fatal("the scoped TLS identity must name localhost")
 	}
 
-	h := newHarness(t, settings{surfaces: "identity,pages,fleet,relay", policy: writePolicy, relay: true, nativeCertificate: &certificate})
+	options.nativeCertificate = &certificate
+	h := newHarness(t, options)
+	if prepare != nil {
+		prepare(h)
+	}
 	owner := h.seedAccount(1)
 	ownerBrowser := h.newBrowser()
 	ownerBrowser.mustSignIn(owner)
@@ -144,7 +162,7 @@ func startCenter02InstalledNode(t *testing.T, testClass string) *center02NativeR
 	command.Dir = filepath.Dir(project)
 	command.WaitDelay = 5 * time.Second
 	command.Env = center02NodeEnvironment(command.Environ())
-	command.Env = append(command.Env, center02URL+"="+h.origin, center02Evidence+"="+coordination)
+	command.Env = append(command.Env, center02Required+"=1", center02URL+"="+h.origin, center02Evidence+"="+coordination)
 	run := &center02NativeRun{harness: h, owner: owner, ownerBrowser: ownerBrowser, ctx: ctx, coordination: coordination, done: make(chan struct{})}
 	command.Stdout, command.Stderr = &run.output, &run.output
 	if err := command.Start(); err != nil {

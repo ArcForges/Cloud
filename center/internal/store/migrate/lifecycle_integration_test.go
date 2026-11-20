@@ -184,6 +184,7 @@ func TestRemoteObservationAppendKeepsTheQualifiedSchema13Authority(t *testing.T)
 	if len(build) < 14 || build[13].Name != next {
 		t.Fatal("the remote-observation migration is missing")
 	}
+	build = build[:14]
 	before, err := Apply(ctx, owner, build[:13], Options{Runner: "remote-observation-predecessor", RuntimeRole: group})
 	if err != nil || before.State != StateCurrent || before.Version != 13 {
 		t.Fatalf("apply the exact schema13 predecessor: %v", err)

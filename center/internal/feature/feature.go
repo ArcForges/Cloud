@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package feature answers whether a gated feature of the center is available to a caller (ArcForges-Design AD-0021 section 13a). In
-// official-hosted mode the answer comes from the plan catalogue and the account's entitlement snapshot (package entitlement); an
-// absent or invalid catalogue enables nothing. In self-hosted mode a built-in default enables every self-hostable gated feature,
-// minus the keys the operator disabled (ARCFORGES_CENTER_DISABLED_FEATURES) and `push` while no push sender is configured.
+// Package feature answers whether a hosted service is available to a caller. Official-hosted mode uses the plan catalogue and the
+// account's entitlement snapshot. Self-hosted mode uses the operator's local limits and needs no entitlement snapshot.
 // Availability is one more check after authentication, ownership, authorization, AGENT/HUMAN separation, audit and resource controls
 // (access.Authorize); it never bypasses them. Essential operations (Hello, health, sign-in, account, billing, security and recovery)
 // have no key and are never gated.
@@ -16,19 +14,23 @@ import (
 // Key is a feature key of the plan catalogue.
 type Key string
 
-// The gated feature keys of AD-0021 section 13a.
+// The active V2 service keys.
 const (
 	CenterNodes   Key = "center.nodes"
-	CenterExecute Key = "center.execute"
 	RemoteView    Key = "remote.view"
 	RemoteControl Key = "remote.control"
+)
+
+// The old keys retain their identity in historical entitlement replay. CenterExecute also gates the finite V1 routed adapter.
+const (
+	CenterExecute Key = "center.execute"
 	CenterMCP     Key = "center.mcp"
 	Push          Key = "push"
 )
 
-// Gated is every gated feature key, in catalogue order.
+// Gated is every active V2 service key, in catalogue order.
 func Gated() []Key {
-	return []Key{CenterNodes, CenterExecute, RemoteView, RemoteControl, CenterMCP, Push}
+	return []Key{CenterNodes, RemoteView, RemoteControl}
 }
 
 // IsGated reports whether a key is one of the gated keys.
@@ -56,30 +58,24 @@ const (
 	GroupPush            Group = "push"
 )
 
-// OperationKey is one row of the routed task control table (plan section (g)): the key that gates a group of the center's routed
-// operations once AF-CTR-05 (node connection, the first gated operation) and later tasks serve them; AF-CTR-04's node enrollment is
-// essential and carries no key. The table is the policy; docs/center.md prints it and a test compares the two. The operation table of
-// package access is linked to it in code (AF-CTR-05 E0): a row that carries a Feature names its Group, and access.CheckRow refuses the
-// row unless its key is the key this table names for that group.
+// OperationKey associates a V2 route group with its hosted service key. Node enrollment and account remediation are essential and
+// carry no key.
 type OperationKey struct {
 	Key   Key
 	Group Group
 	Gates string
 }
 
-// OperationKeys is the routed task control table.
+// OperationKeys is the active V2 hosted service table.
 func OperationKeys() []OperationKey {
 	return []OperationKey{
-		{RemoteControl, GroupControl, "control of existing tasks (cancel, retry, priority)"},
-		{CenterExecute, GroupSubmission, "submission, and file and workspace operations"},
-		{RemoteView, GroupStatusAndOutput, "status and output"},
+		{RemoteControl, GroupControl, "Sandbox, Run, resource and data mutations"},
+		{RemoteView, GroupStatusAndOutput, "Sandbox, Run, resource and data reads and watches"},
 		{CenterNodes, GroupNodeConnection, "node connection"},
-		{CenterMCP, GroupMCP, "MCP"},
-		{Push, GroupPush, "push"},
 	}
 }
 
-// KeyOfGroup is the key the routed task control table names for a group, and false for a group the table does not name.
+// KeyOfGroup is the key of an active V2 route group.
 func KeyOfGroup(group Group) (Key, bool) {
 	for _, row := range OperationKeys() {
 		if row.Group == group {
@@ -87,6 +83,14 @@ func KeyOfGroup(group Group) (Key, bool) {
 		}
 	}
 	return "", false
+}
+
+// LegacyKeyOfGroup is for retained V1 routes. Their submission authority has no V2 alias.
+func LegacyKeyOfGroup(group Group) (Key, bool) {
+	if group == GroupSubmission {
+		return CenterExecute, true
+	}
+	return KeyOfGroup(group)
 }
 
 // Reason explains a decision; it is a closed vocabulary, never request text.
@@ -103,8 +107,6 @@ const (
 	ReasonSelfHostedDefault Reason = "self_hosted_default"
 	// ReasonOperatorLimit is a key the operator of a self-hosted center disabled.
 	ReasonOperatorLimit Reason = "operator_limit"
-	// ReasonPushSenderNotConfigured is `push` on a self-hosted center that has no push sender (DC-22).
-	ReasonPushSenderNotConfigured Reason = "push_sender_not_configured"
 	// ReasonUnknownFeature is a key that is not in the catalogue; it is never available.
 	ReasonUnknownFeature Reason = "unknown_feature"
 	// ReasonModeInvalid is a gate without a valid mode; nothing is available.

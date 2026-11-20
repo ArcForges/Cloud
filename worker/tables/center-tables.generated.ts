@@ -509,6 +509,18 @@ export const surfaceRoutes: readonly SurfaceRoute[] = [
     surface: "identity",
   },
   {
+    path: "/arcforges.publicapi.v1.EntitlementService/GetSnapshot",
+    kind: "unary",
+    auth: "session",
+    maxRequestBytes: 4096,
+    maxFrameBytes: 65536,
+    maxUnaryResponseBytes: 65536,
+    maxDurationMs: 15000,
+    instance: "hello",
+    requestMeta: true,
+    surface: "identity",
+  },
+  {
     path: "/arcforges.fleet.v1.NodeEnrollmentService/BeginNodeSignIn",
     kind: "unary",
     auth: "anonymous",

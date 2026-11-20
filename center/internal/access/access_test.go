@@ -98,6 +98,7 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"identity.listAuthProviders":           "R1 anonymous",
 		"identity.refreshSession":              "R1 anonymous",
 		"identity.getProfile":                  "R1 allowed none - no-receipt active",
+		"entitlement.getSnapshot":              "R1 allowed none - no-receipt restricted",
 		"identity.getAccountDeletion":          "R1 upgrade none - no-receipt restricted",
 		"identity.listAuthIdentities":          "R1 allowed none - no-receipt restricted",
 		"identity.listSessions":                "R1 allowed none - no-receipt restricted",
@@ -369,8 +370,8 @@ func TestTheRoutedRowsAreGatedByTheirGroups(t *testing.T) {
 			continue
 		}
 		seen++
-		key, _ := feature.KeyOfGroup(group)
-		if operation.Group != group || operation.Feature != key || operation.Audit != AuditBeforeCall || operation.Object != ObjectNode ||
+		key, _ := feature.LegacyKeyOfGroup(group)
+		if operation.V2Hosted || operation.Group != group || operation.Feature != key || operation.Audit != AuditBeforeCall || operation.Object != ObjectNode ||
 			strings.Join(operation.RelayedScopes, ",") != "node" || CheckRow(operation) != nil {
 			t.Errorf("%s: %+v", operation.ID, operation)
 		}
@@ -406,7 +407,7 @@ func TestTypedManagementRowsAuthorizeOnlyTheOwningAccountAndRequiredFeature(t *t
 		key, _ := feature.KeyOfGroup(group)
 		if !declared || !operation.Session || operation.Restricted || operation.Object != ObjectNode ||
 			len(operation.Scopes) != 0 || len(operation.RelayedScopes) != 0 || operation.Audit != AuditBeforeCall ||
-			operation.Feature != key || operation.Group != group || CheckRow(operation) != nil {
+			!operation.V2Hosted || operation.Feature != key || operation.Group != group || CheckRow(operation) != nil {
 			t.Errorf("typed management operation %s: %+v", name, operation)
 		}
 		seen++

@@ -54,10 +54,10 @@ func selfHostedCenter(t *testing.T, disabled ...string) (*Center, *dbtest.Databa
 
 // TestSelfHostedComposedOverADatabaseHonoursDisabledKeys is E0-4 (gate-2, the first pin): a self-hosted center composed over a real
 // database has an authorizer, and the disabled-key table runs through that authorizer's gate (not a gate built apart from the
-// center's): each disabled key answers operator_limit, push without a sender push_sender_not_configured, every other key the
-// self-hosted default; the center's own gate answers the same.
+// center's): each disabled key answers operator_limit and every other key the self-hosted default. The center's own gate
+// answers the same.
 func TestSelfHostedComposedOverADatabaseHonoursDisabledKeys(t *testing.T) {
-	for _, disabled := range [][]string{nil, {"center.mcp"}, {"center.nodes", "remote.control"}, {"center.execute", "remote.view", "push"}} {
+	for _, disabled := range [][]string{nil, {"remote.view"}, {"center.nodes", "remote.control"}, {"center.nodes", "remote.view", "remote.control"}} {
 		t.Run(strings.Join(disabled, ",")+"|", func(t *testing.T) {
 			center, db := selfHostedCenter(t, disabled...)
 			if center.Authorizer == nil || center.Authorizer.Gate() == nil {
@@ -66,11 +66,8 @@ func TestSelfHostedComposedOverADatabaseHonoursDisabledKeys(t *testing.T) {
 			ctx := feature.WithAccount(t.Context(), db.Account(1).String())
 			for _, key := range feature.Gated() {
 				want := feature.ReasonSelfHostedDefault
-				switch {
-				case strings.Contains(","+strings.Join(disabled, ",")+",", ","+string(key)+","):
+				if strings.Contains(","+strings.Join(disabled, ",")+",", ","+string(key)+",") {
 					want = feature.ReasonOperatorLimit
-				case key == feature.Push:
-					want = feature.ReasonPushSenderNotConfigured
 				}
 				for name, gate := range map[string]feature.Gate{"the authorizer's gate": center.Authorizer.Gate(), "the center's gate": center.Features} {
 					if decision := gate.Availability(ctx, key); decision.Reason != want || decision.Available != (want == feature.ReasonSelfHostedDefault) || decision.Err != nil {

@@ -184,7 +184,15 @@ func TestAnOperatorGrantsThroughThePageWithAFreshPasskey(t *testing.T) {
 	if form.status != 200 || !strings.Contains(form.text(), `action="/api/operations/grant/review"`) || !strings.Contains(form.text(), `name="feature-remote.view"`) {
 		t.Fatalf("the form: %d %s", form.status, form.text())
 	}
-	review := b.postForm("/operations/grant/review", grantForm(target.id, "remote.view", "push"))
+	for _, retired := range []string{"center.execute", "center.mcp", "push"} {
+		if strings.Contains(form.text(), `name="feature-`+retired+`"`) {
+			t.Errorf("the operator page offers retired feature %s", retired)
+		}
+		if refused := b.postForm("/operations/grant/review", grantForm(target.id, retired)); refused.status != 400 {
+			t.Errorf("an explicit retired feature %s was answered %d", retired, refused.status)
+		}
+	}
+	review := b.postForm("/operations/grant/review", grantForm(target.id, "remote.view", "remote.control"))
 	if review.status != 200 {
 		t.Fatalf("the review: %d %s", review.status, review.text())
 	}
@@ -197,13 +205,13 @@ func TestAnOperatorGrantsThroughThePageWithAFreshPasskey(t *testing.T) {
 	}
 	fields := hiddenFields(t, review.text())
 	targetHash := regexp.MustCompile(`data-step-up-target="([0-9a-f]{64})"`).FindStringSubmatch(review.text())
-	if targetHash == nil || !strings.Contains(review.text(), `data-step-up-class="center.operatorGrant"`) || fields.Get("features") != "push,remote.view" ||
+	if targetHash == nil || !strings.Contains(review.text(), `data-step-up-class="center.operatorGrant"`) || fields.Get("features") != "remote.control,remote.view" ||
 		fields.Get("account") != uuid(target.id) || fields.Get("command_id") == "" {
 		t.Fatalf("the review page: %s", review.text())
 	}
 	// The target the page names is the SHA-256 of the canonical request the confirmation will send.
 	expires, _ := time0(fields.Get("expires_at"))
-	request := entitlement.OperatorRequest{Account: fields.Get("account"), Features: []string{"push", "remote.view"}, Reason: fields.Get("reason"), SourceRef: fields.Get("source_ref"),
+	request := entitlement.OperatorRequest{Account: fields.Get("account"), Features: []string{"remote.control", "remote.view"}, Reason: fields.Get("reason"), SourceRef: fields.Get("source_ref"),
 		ExpiresAt: expires}
 	if request.TargetHashHex(operator.id) != targetHash[1] {
 		t.Fatalf("the target hash %s is not the request's %s", targetHash[1], request.TargetHashHex(operator.id))
@@ -231,7 +239,7 @@ func TestAnOperatorGrantsThroughThePageWithAFreshPasskey(t *testing.T) {
 		t.Fatalf("the step-up: %d %s", proved.status, proved.text())
 	}
 	done := b.postForm("/operations/grant/confirm", cloneValues(fields))
-	if done.status != 200 || !strings.Contains(done.text(), "The grant was written.") || !strings.Contains(done.text(), "push, remote.view") {
+	if done.status != 200 || !strings.Contains(done.text(), "The grant was written.") || !strings.Contains(done.text(), "remote.control, remote.view") {
 		t.Fatalf("the grant: %d %s", done.status, done.text())
 	}
 	if h.count("SELECT count(*) FROM entitlement.grant WHERE account_id = $1 AND source = 5", target.id) != 2 ||
@@ -260,7 +268,7 @@ func TestAnOperatorGrantsThroughThePageWithAFreshPasskey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]bool{"remote.view": true, "push": true, "center.nodes": false, "center.mcp": false} {
+	for key, want := range map[string]bool{"remote.view": true, "remote.control": true, "center.nodes": false} {
 		if entry, ok := snapshot.Capability(key); !ok || entry.Granted != want {
 			t.Errorf("%s: %+v %v", key, entry, ok)
 		}
@@ -288,7 +296,7 @@ func TestACatalogueWideGrantIsConfirmedAsReviewed(t *testing.T) {
 	if proved := b.stepUpFor(operator, access.OperatorGrantClass, hash[1]); proved.status != 200 {
 		t.Fatalf("the step-up: %d", proved.status)
 	}
-	if done := b.postForm("/operations/grant/confirm", fields); done.status != 200 || h.count("SELECT count(*) FROM entitlement.grant WHERE account_id = $1", target.id) != 6 ||
+	if done := b.postForm("/operations/grant/confirm", fields); done.status != 200 || h.count("SELECT count(*) FROM entitlement.grant WHERE account_id = $1", target.id) != 3 ||
 		h.count("SELECT count(*) FROM audit.audit_event WHERE convert_from(payload, 'UTF8') LIKE '%\"catalogueWide\":true%'") != 1 {
 		t.Fatalf("the catalogue-wide grant: %d %s", done.status, done.text())
 	}
@@ -391,19 +399,19 @@ func TestTheReviewRefusesWhatAGrantRefuses(t *testing.T) {
 	}
 	// The catalogue-wide shorthand is allowed on the development fixtures and names every key at the review.
 	reply := with(func(f url.Values) { f.Del("feature-remote.view"); f.Set("all", "on") })
-	if reply.status != 200 || hiddenFields(t, reply.text()).Get("features") != "center.execute,center.mcp,center.nodes,push,remote.control,remote.view" {
+	if reply.status != 200 || hiddenFields(t, reply.text()).Get("features") != "center.nodes,remote.control,remote.view" {
 		t.Errorf("the whole catalogue: %d %s", reply.status, reply.text())
 	}
 	// Every key named one by one is the same request as the shorthand: the review's target is that of the normalized request, which is
 	// catalogue-wide, so the confirmation (which sends the normalized request) proves the target the page named.
-	every := []string{"center.execute", "center.mcp", "center.nodes", "push", "remote.control", "remote.view"}
+	every := []string{"center.nodes", "remote.control", "remote.view"}
 	explicit := grantForm(target.id, every...)
 	reviewed := b.postForm("/operations/grant/review", explicit)
 	fields := hiddenFields(t, reviewed.text())
 	expires, _ := time0(fields.Get("expires_at"))
 	wide := entitlement.OperatorRequest{Account: fields.Get("account"), Features: every, All: true, Reason: fields.Get("reason"), SourceRef: fields.Get("source_ref"), ExpiresAt: expires}
 	if reviewed.status != 200 || !strings.Contains(reviewed.text(), `data-step-up-target="`+wide.TargetHashHex(operator.id)+`"`) {
-		t.Errorf("the six keys one by one: %d %s", reviewed.status, reviewed.text())
+		t.Errorf("the current keys one by one: %d %s", reviewed.status, reviewed.text())
 	}
 	// A grant to oneself with its justification reaches the review and says so.
 	reply = with(func(f url.Values) {

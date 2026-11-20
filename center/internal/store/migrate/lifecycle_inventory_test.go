@@ -25,6 +25,10 @@ func TestRemoteObservationInventoryForBackup(t *testing.T) {
 	captureBackupInventory(t, 14, "ARCFORGES_CENTER03_INVENTORY_DIR")
 }
 
+func TestHostedEntitlementInventoryForBackup(t *testing.T) {
+	captureBackupInventory(t, 15, "ARCFORGES_HOST01_INVENTORY_DIR")
+}
+
 func captureBackupInventory(t *testing.T, version int, evidenceRoot string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -99,6 +103,10 @@ func captureBackupInventory(t *testing.T, version int, evidenceRoot string) {
 	}
 	sort.Strings(inventory)
 	canonical := strings.Join(inventory, "\n") + "\n"
+	if os.WriteFile(filepath.Join(dir, schemaName+"-inventory.txt"), []byte(canonical), 0o600) != nil || os.WriteFile(filepath.Join(dir, schemaName+"-catalogue-sha256.txt"), []byte(catalogue+"\n"), 0o600) != nil {
+		t.Fatal("inventory evidence write failed")
+	}
+	t.Logf("Schema%d native facts: catalogue=%s inventorySHA256=%s objects=%d output=%s", version, catalogue, ctr06SHA([]byte(canonical)), len(inventory), dir)
 	qualifiedInventory, qualifiedCatalogue, err := backupDefinition(version)
 	if err != nil {
 		t.Fatal(err)
@@ -106,10 +114,6 @@ func captureBackupInventory(t *testing.T, version int, evidenceRoot string) {
 	if err := ctr06ArchiveInventoryFor(raw, qualifiedInventory, nil); err != nil {
 		t.Fatal(err)
 	}
-	if os.WriteFile(filepath.Join(dir, schemaName+"-inventory.txt"), []byte(canonical), 0o600) != nil || os.WriteFile(filepath.Join(dir, schemaName+"-catalogue-sha256.txt"), []byte(catalogue+"\n"), 0o600) != nil {
-		t.Fatal("inventory evidence write failed")
-	}
-	t.Logf("Schema%d native facts: catalogue=%s inventorySHA256=%s objects=%d output=%s", version, catalogue, ctr06SHA([]byte(canonical)), len(inventory), dir)
 	if catalogue != qualifiedCatalogue || canonical != qualifiedInventory {
 		t.Fatalf("schema%d native catalogue or inventory changed from its archive qualification", version)
 	}

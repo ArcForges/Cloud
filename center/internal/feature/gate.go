@@ -35,9 +35,6 @@ type Settings struct {
 	InjectedClass Classification
 	// Disabled are the keys the operator of a self-hosted center disabled (ARCFORGES_CENTER_DISABLED_FEATURES).
 	Disabled []Key
-	// PushSender is true when a push sender is configured; self-hosted `push` is available only then (DC-22). No sender exists until
-	// AF-CLD-06.
-	PushSender bool
 }
 
 // Configuration is the validated plan configuration of one center process.
@@ -50,15 +47,14 @@ type Configuration struct {
 	// catalogue), Development with the fixtures.
 	Class Classification
 	// Problem says why State is StateInvalid; it names a rule, never a value.
-	Problem    string
-	Disabled   []Key
-	PushSender bool
+	Problem  string
+	Disabled []Key
 }
 
 // Configure reads the plan configuration at start. It never fails: an official-hosted center whose catalogue is absent or invalid
 // serves with every gated key unavailable (the caller logs Problem), and nothing here ever enables a key.
 func Configure(settings Settings) Configuration {
-	configuration := Configuration{Mode: settings.Mode, State: StateMissing, Class: ClassProduction, Disabled: settings.Disabled, PushSender: settings.PushSender}
+	configuration := Configuration{Mode: settings.Mode, State: StateMissing, Class: ClassProduction, Disabled: slices.Clone(settings.Disabled)}
 	if settings.Mode != config.OfficialHosted {
 		return configuration
 	}
@@ -88,7 +84,14 @@ func (c Configuration) Definitions() entitlement.Definitions {
 	if c.Catalogue == nil {
 		return entitlement.Definitions{Version: "none", IsSelfHostRealm: c.Mode == config.SelfHosted}
 	}
-	return c.Catalogue.Definitions(c.Mode == config.SelfHosted)
+	definitions := c.Catalogue.Definitions(c.Mode == config.SelfHosted)
+	// Resolve derives the stored version from the complete decision history under these inputs. Replay the original meanings of
+	// the retired keys so switching to the V2 catalogue cannot roll that version backwards. These entries are outside V2 status
+	// and grant issuance. Only CenterExecute remains callable through the retained, separately selected V1 route group.
+	for _, key := range []Key{CenterExecute, CenterMCP, Push} {
+		definitions.Capabilities = append(definitions.Capabilities, entitlement.CapabilityDefinition{Key: string(key), RequiresPaidTerm: true})
+	}
+	return definitions
 }
 
 // Current makes a Configuration the entitlement service's definition source.
@@ -139,42 +142,114 @@ func (g gate) Availability(ctx context.Context, key Key) Decision {
 	if !IsGated(key) {
 		return Decision{Reason: ReasonUnknownFeature}
 	}
-	switch g.configuration.Mode {
-	case config.SelfHosted:
-		switch {
-		case slices.Contains(g.configuration.Disabled, key):
-			return Decision{Reason: ReasonOperatorLimit}
-		case key == Push && !g.configuration.PushSender:
-			return Decision{Reason: ReasonPushSenderNotConfigured}
-		}
-		return Decision{Available: true, Reason: ReasonSelfHostedDefault}
-	case config.OfficialHosted:
-	default:
+	return g.availability(ctx, key)
+}
+
+// LegacyAvailability permits the original V1 submission key for callers that selected the retained V1 route.
+func LegacyAvailability(g Gate, ctx context.Context, key Key) Decision {
+	if g == nil {
 		return Decision{Reason: ReasonModeInvalid}
+	}
+	if configured, ok := g.(gate); ok && key == CenterExecute {
+		return configured.availability(ctx, key)
+	}
+	return g.Availability(ctx, key)
+}
+
+func (g gate) selfHostedDecision(key Key) Decision {
+	if slices.Contains(g.configuration.Disabled, key) {
+		return Decision{Reason: ReasonOperatorLimit}
+	}
+	return Decision{Available: true, Reason: ReasonSelfHostedDefault}
+}
+
+func (g gate) availability(ctx context.Context, key Key) Decision {
+	if g.configuration.Mode == config.SelfHosted {
+		return g.selfHostedDecision(key)
+	}
+	snapshot, refusal := g.readHosted(ctx)
+	if refusal.Reason != "" {
+		return refusal
+	}
+	return snapshotDecision(snapshot, key)
+}
+
+func (g gate) readHosted(ctx context.Context) (entitlement.StoredSnapshot, Decision) {
+	if g.configuration.Mode != config.OfficialHosted {
+		return entitlement.StoredSnapshot{}, Decision{Reason: ReasonModeInvalid}
 	}
 	switch g.configuration.State {
 	case StateMissing:
-		return Decision{Reason: ReasonPlanConfigurationMissing}
+		return entitlement.StoredSnapshot{}, Decision{Reason: ReasonPlanConfigurationMissing}
 	case StateValid:
 	default:
-		return Decision{Reason: ReasonPlanConfigurationInvalid}
+		return entitlement.StoredSnapshot{}, Decision{Reason: ReasonPlanConfigurationInvalid}
 	}
 	account, ok := AccountFrom(ctx)
 	if !ok {
-		return Decision{Reason: ReasonNoAccount}
+		return entitlement.StoredSnapshot{}, Decision{Reason: ReasonNoAccount}
 	}
 	if g.reader == nil {
-		return Decision{Reason: ReasonEntitlementUnavailable, Err: ErrNoEntitlementStore}
+		return entitlement.StoredSnapshot{}, Decision{Reason: ReasonEntitlementUnavailable, Err: ErrNoEntitlementStore}
 	}
 	snapshot, err := g.reader.Read(ctx, account)
 	if err != nil {
-		return Decision{Reason: ReasonEntitlementUnavailable, Err: err}
+		return entitlement.StoredSnapshot{}, Decision{Reason: ReasonEntitlementUnavailable, Err: err}
 	}
+	return snapshot, Decision{}
+}
+
+func snapshotDecision(snapshot entitlement.StoredSnapshot, key Key) Decision {
 	entry, found := snapshot.Capability(string(key))
 	if !found {
 		return Decision{Reason: ReasonFeatureUnavailable}
 	}
 	return decisionOf(entry)
+}
+
+// FeatureStatus is one eligible V2 service decision in the account's hosting snapshot.
+type FeatureStatus struct {
+	Key      Key
+	Decision Decision
+}
+
+// SnapshotStatus contains the V2 service decisions. A version is present only for an actual official entitlement snapshot.
+type SnapshotStatus struct {
+	Version  *int64
+	Features []FeatureStatus
+}
+
+// Status reads the three active service decisions from one account snapshot. Static self-hosted and unconfigured official modes
+// consult no entitlement record. Store errors are returned without fabricating unavailable or expired account decisions.
+func Status(ctx context.Context, source Gate) (SnapshotStatus, error) {
+	g, ok := source.(gate)
+	if !ok {
+		return SnapshotStatus{}, ErrNoEntitlementStore
+	}
+	status := SnapshotStatus{}
+	selfHosted := g.configuration.Mode == config.SelfHosted
+	var snapshot entitlement.StoredSnapshot
+	var refusal Decision
+	if !selfHosted {
+		snapshot, refusal = g.readHosted(ctx)
+		if refusal.Err != nil {
+			return SnapshotStatus{}, refusal.Err
+		}
+		if refusal.Reason == "" {
+			status.Version = &snapshot.Version
+		}
+	}
+	for _, key := range Gated() {
+		decision := refusal
+		switch {
+		case selfHosted:
+			decision = g.selfHostedDecision(key)
+		case refusal.Reason == "":
+			decision = snapshotDecision(snapshot, key)
+		}
+		status.Features = append(status.Features, FeatureStatus{key, decision})
+	}
+	return status, nil
 }
 
 // decisionOf maps the resolver's reason of a capability to the gate's closed vocabulary.

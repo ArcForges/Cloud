@@ -410,8 +410,7 @@ func TestTheModeSelectsTheFeatureGate(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, key := range feature.Gated() {
-			// A self-hosted center enables every gated key but `push`, which needs a push sender nobody has built yet (DC-22).
-			if center.Features.Availability(t.Context(), key).Available != (available && key != feature.Push) {
+			if center.Features.Availability(t.Context(), key).Available != available {
 				t.Fatalf("%s %s", mode, key)
 			}
 		}
