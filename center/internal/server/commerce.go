@@ -51,18 +51,9 @@ func (c *Center) composeCommerce(options Options, clock func() time.Time) (http.
 		}
 	}
 	environment := paddle.Environment(settings.Environment)
-	client, err := paddle.NewClient(paddle.Config{Environment: environment, APIKey: settings.APIKey.Reveal(),
-		CheckoutOrigins: settings.CheckoutOrigins, PortalOrigins: settings.PortalOrigins, Transport: options.commerceTransport})
+	client, verifier, err := paddle.NewConfigured(settings, options.commerceTransport)
 	if err != nil {
-		return nil, errors.New("invalid Paddle API credential or approved origins for the configured environment")
-	}
-	var previous []string
-	if !settings.PreviousWebhookSecret.Empty() {
-		previous = append(previous, settings.PreviousWebhookSecret.Reveal())
-	}
-	verifier, err := paddle.NewWebhookVerifier(environment, settings.WebhookSecret.Reveal(), previous...)
-	if err != nil {
-		return nil, errors.New("invalid Paddle webhook signing secrets")
+		return nil, err
 	}
 	c.commerce, err = commerce.NewService(commerce.Options{DB: c.Store, Provider: client, Entitlements: c.Entitlements,
 		Environment: environment, Catalogue: merchant, Clock: clock})

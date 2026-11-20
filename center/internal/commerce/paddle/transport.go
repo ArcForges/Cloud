@@ -5,10 +5,12 @@ package paddle
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -61,11 +63,21 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 	transport := cfg.Transport
 	if transport == nil {
-		transport = http.DefaultTransport
-		if original, ok := transport.(*http.Transport); ok {
-			qualified := original.Clone()
-			qualified.MaxResponseHeaderBytes = 64 << 10
-			transport = qualified
+		transport = &http.Transport{
+			DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+				ServerName: strings.TrimPrefix(origin, "https://"),
+			},
+			TLSHandshakeTimeout:    5 * time.Second,
+			ResponseHeaderTimeout:  10 * time.Second,
+			ExpectContinueTimeout:  time.Second,
+			IdleConnTimeout:        time.Minute,
+			MaxResponseHeaderBytes: 64 << 10,
+			MaxConnsPerHost:        16,
+			MaxIdleConns:           16,
+			MaxIdleConnsPerHost:    8,
+			ForceAttemptHTTP2:      true,
 		}
 	}
 	return &Client{origin: origin, apiKey: cfg.APIKey, checkouts: checkouts, portals: portals, http: &http.Client{
