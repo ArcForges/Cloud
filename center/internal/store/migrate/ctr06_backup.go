@@ -188,6 +188,11 @@ func ctr06SupportedACL(item []string, objects map[string]int) bool {
 		typ, schemaName, name := item[1], item[0], strings.Trim(item[2], `"`)
 		if typ == "TABLE" || typ == "SEQUENCE" {
 			_, ok := objects[typ+" "+schemaName+" "+name]
+			if !ok && typ == "TABLE" {
+				// pg_dump labels view ACLs as TABLE. Require the exact
+				// view in the already selected native inventory.
+				_, ok = objects["VIEW "+schemaName+" "+name]
+			}
 			return ok
 		}
 	}
@@ -434,6 +439,9 @@ func ctr06CatalogueSHA(ctx context.Context, q Querier) (string, error) {
  SELECT 'table' kind,n.nspname||'.'||c.relname object,
    c.relkind::text||'|'||c.relpersistence::text||'|'||c.relrowsecurity::text||'|'||c.relforcerowsecurity::text definition
  FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=ANY($1) AND c.relkind IN ('r','p')
+ UNION ALL SELECT 'view',n.nspname||'.'||c.relname,
+   pg_catalog.pg_get_viewdef(c.oid,true)||'|'||coalesce(c.reloptions::text,'')
+ FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=ANY($1) AND c.relkind='v'
  UNION ALL SELECT 'column',n.nspname||'.'||c.relname||'.'||a.attname,
    pg_catalog.format_type(a.atttypid,a.atttypmod)||'|'||a.attnotnull::text||'|'||a.attidentity::text||'|'||a.attgenerated::text||'|'||coalesce(pg_catalog.pg_get_expr(d.adbin,d.adrelid),'')
  FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace

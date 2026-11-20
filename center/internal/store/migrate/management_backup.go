@@ -33,6 +33,8 @@ func backupDefinition(version int) (inventory, catalogue string, err error) {
 		return remoteObservationBackupDefinition()
 	case 15:
 		return hostedEntitlementBackupDefinition()
+	case 16:
+		return hostedCommerceBackupDefinition()
 	default:
 		return "", "", errors.New("unsupported logical backup schema")
 	}

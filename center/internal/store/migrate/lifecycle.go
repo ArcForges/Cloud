@@ -91,6 +91,7 @@ func guardLifecycle(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Opti
 	if a == nil || !a.active || a.conn != conn || a.artifactDigest == "" {
 		return ErrLifecycleTransitionRequired
 	}
+	predecessorSchemas, _ := schema.AtVersion(12)
 	if a.source == 12 {
 		if a.targetRole != options.RuntimeRole || a.oldRole == options.RuntimeRole || a.executableDigest == "" {
 			return ErrLifecycleTransitionRequired
@@ -101,7 +102,7 @@ func guardLifecycle(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Opti
 		if _, _, err := readyCTR06Admission(ctx, tx, a.oldRole); err != nil || requireManagementReady(ctx, tx) != nil {
 			return ErrLifecycleTransitionRequired
 		}
-		retired, err := fenceManagementWritersIn(ctx, tx, a.oldRole, schema.Schemas)
+		retired, err := fenceManagementWritersIn(ctx, tx, a.oldRole, predecessorSchemas)
 		if err != nil {
 			return err
 		}
@@ -120,7 +121,7 @@ func guardLifecycle(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Opti
 		} else if _, _, err := readyCTR06Admission(ctx, tx, options.RuntimeRole); err != nil || requireManagementReady(ctx, tx) != nil {
 			return ErrLifecycleTransitionRequired
 		}
-		retired, err := fenceManagementWritersIn(ctx, tx, options.RuntimeRole, schema.Schemas)
+		retired, err := fenceManagementWritersIn(ctx, tx, options.RuntimeRole, predecessorSchemas)
 		if err != nil {
 			return err
 		}

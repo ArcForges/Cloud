@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -35,6 +36,10 @@ func TestHostedEntitlementBackupRestoreRetainsOriginalProjection(t *testing.T) {
 	testManagementBackupRestore(t, 15)
 }
 
+func TestHostedCommerceBackupRestoreRetainsProviderEvidence(t *testing.T) {
+	testManagementBackupRestore(t, 16)
+}
+
 func testManagementBackupRestore(t *testing.T, version int) {
 	t.Helper()
 	ctx := context.Background()
@@ -57,6 +62,23 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	}
 	if version == 15 {
 		hosted.check(t, owner, group)
+	}
+	var commerceAccount platform.ID
+	var commerceEvidence []ctr06BackupTable
+	commerceTables := []string{
+		"commerce.provider_environment", "commerce.customer", "commerce.purchase", "commerce.checkout",
+		"commerce.subscription", "commerce.renewal", "commerce.provider_event", "commerce.settled_period", "commerce.billing_entry",
+	}
+	if version == 16 {
+		commerceAccount = seedNamespaceFixture(t, owner).account
+		seedHostedCommerceFacts(t, owner, commerceAccount)
+		seedQueuedCommerceEvent(t, owner)
+		checkCommercePending(t, owner, commerceAccount, true)
+		var err error
+		commerceEvidence, err = ctr06SnapshotData(ctx, owner, commerceTables)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	var authority lifecycleAuthority
 	var export, recovery, deletion platform.ID
@@ -133,6 +155,12 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	if version == 15 {
 		hosted.check(t, destination, targetRole)
 	}
+	if version == 16 {
+		actual, err := ctr06SnapshotData(ctx, destination, commerceTables)
+		if err != nil || !slices.Equal(actual, commerceEvidence) {
+			t.Fatalf("restored commerce identities or facts changed: %v", err)
+		}
+	}
 	status, err := Inspect(ctx, destination, build)
 	if err != nil || status.State != StateCurrent || status.RuntimeRole != targetRole {
 		t.Fatalf("target-specific admission: %v", err)
@@ -164,7 +192,10 @@ func testManagementBackupRestore(t *testing.T, version int) {
 			t.Fatalf("restored account/lifecycle authority or evidence differs: %v", store.Sanitize("inspect restored lifecycle facts", err))
 		}
 	}
-	restoredRuntime, _ := managementRuntime(t, destination, cfg.URL, targetRole)
+	restoredRuntime, restoredSQL := managementRuntime(t, destination, cfg.URL, targetRole)
+	if version == 16 {
+		checkCommercePending(t, restoredSQL, commerceAccount, true)
+	}
 	retained, inserted, err := restoredRuntime.Reserve(ctx, identity, lease)
 	if err != nil || inserted || retained.State != 7 || !retained.MayHaveDelivered || retained.Effect == nil || *retained.Effect != 3 {
 		t.Fatalf("unknown identity was forgotten or re-executed: inserted=%v err=%v", inserted, err)
