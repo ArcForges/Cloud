@@ -5,6 +5,7 @@ package identityapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -214,7 +215,7 @@ func (h *harness) v2UpgradeRefusal(token string) (int, string, upgradeRefusal) {
 	request.Header.Set("Connection", "Upgrade")
 	request.Header.Set("Upgrade", "websocket")
 	request.Header.Set("Sec-WebSocket-Version", "13")
-	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	request.Header.Set("Sec-WebSocket-Key", base64.StdEncoding.EncodeToString(randomBytes(h.t, 16)))
 	request.Header.Set("Sec-WebSocket-Protocol", routes.NodeChannelV2Subprotocol)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
