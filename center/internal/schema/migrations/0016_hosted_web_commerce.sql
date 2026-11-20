@@ -35,6 +35,12 @@ CREATE TABLE commerce.purchase (
     product_ref text NOT NULL CHECK (product_ref ~ '^[A-Za-z0-9._:-]{1,128}$'),
     price_ref text NOT NULL CHECK (price_ref ~ '^[A-Za-z0-9._:-]{1,128}$'),
     price_version text NOT NULL CHECK (price_version ~ '^[A-Za-z0-9._:-]{1,128}$'),
+    definition_version text NOT NULL CHECK (definition_version ~ '^[A-Za-z0-9._:-]{1,128}$'),
+    currency text NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+    amount_minor bigint NOT NULL CHECK (amount_minor > 0),
+    billing_interval text NOT NULL CHECK (billing_interval IN ('month', 'year')),
+    region text NOT NULL CHECK (region ~ '^[A-Z]{2}$'),
+    adjustment_policy text NOT NULL CHECK (adjustment_policy = 'preserve_partial_end_full_or_chargeback'),
     intent_sha256 bytea NOT NULL CHECK (octet_length(intent_sha256) = 32),
     state smallint NOT NULL CHECK (state BETWEEN 1 AND 4),
     created_at timestamptz NOT NULL,
@@ -222,8 +228,9 @@ CREATE INDEX settled_period_view_grant ON commerce.settled_period (view_grant_id
 CREATE INDEX settled_period_control_grant ON commerce.settled_period (control_grant_id, account_id);
 CREATE INDEX settled_period_event ON commerce.settled_period (provider, environment, event_ref);
 
--- Billing kinds: 1 payment, 2 refund, 3 chargeback. Kind carries the
--- direction, and amount_minor is the verified nonnegative magnitude.
+-- Billing kinds: 1 payment, 2 refund, 3 chargeback, 4 credit,
+-- 5 credit reversal, 6 chargeback reversal. The first three carry
+-- verified magnitudes. The remaining kinds retain the provider's sign.
 CREATE TABLE commerce.billing_entry (
     entry_id uuid PRIMARY KEY,
     account_id uuid NOT NULL REFERENCES identity.user (user_id),
@@ -231,13 +238,14 @@ CREATE TABLE commerce.billing_entry (
     provider smallint NOT NULL CHECK (provider = 1),
     environment smallint NOT NULL REFERENCES commerce.provider_environment (environment),
     provider_entry_ref text NOT NULL CHECK (provider_entry_ref ~ '^[A-Za-z0-9._:-]{1,128}$'),
-    kind smallint NOT NULL CHECK (kind IN (1, 2, 3)),
+    kind smallint NOT NULL CHECK (kind BETWEEN 1 AND 6),
     currency text NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
-    amount_minor numeric(20, 0) NOT NULL CHECK (amount_minor >= 0),
+    amount_minor numeric(20, 0) NOT NULL,
     occurred_at timestamptz NOT NULL,
     recorded_at timestamptz NOT NULL,
     event_ref text,
     UNIQUE (provider, environment, provider_entry_ref, kind),
+    CHECK (kind > 3 OR amount_minor >= 0),
     FOREIGN KEY (subscription_id, account_id, provider, environment)
         REFERENCES commerce.subscription (subscription_id, account_id, provider, environment),
     FOREIGN KEY (provider, environment, event_ref) REFERENCES commerce.provider_event (provider, environment, event_ref)
@@ -268,10 +276,12 @@ BEGIN
     END IF;
     IF ROW(NEW.purchase_id, NEW.account_id, NEW.command_id, NEW.provider, NEW.environment,
            NEW.catalog_version, NEW.offer_ref, NEW.product_ref, NEW.price_ref, NEW.price_version,
+           NEW.definition_version, NEW.currency, NEW.amount_minor, NEW.billing_interval, NEW.region, NEW.adjustment_policy,
            NEW.intent_sha256, NEW.created_at, NEW.expires_at)
        IS DISTINCT FROM
        ROW(OLD.purchase_id, OLD.account_id, OLD.command_id, OLD.provider, OLD.environment,
            OLD.catalog_version, OLD.offer_ref, OLD.product_ref, OLD.price_ref, OLD.price_version,
+           OLD.definition_version, OLD.currency, OLD.amount_minor, OLD.billing_interval, OLD.region, OLD.adjustment_policy,
            OLD.intent_sha256, OLD.created_at, OLD.expires_at)
        OR NEW.rev <> OLD.rev + 1 OR NEW.updated_at < OLD.updated_at OR OLD.state IN (3, 4)
        OR (OLD.state = 2 AND NEW.state = 1) THEN

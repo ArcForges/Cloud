@@ -39,9 +39,10 @@ func seedHostedCommerceFacts(t *testing.T, owner *pgx.Conn, account platform.ID)
 	commerceFact(t, owner, `INSERT INTO commerce.customer(account_id,provider,environment,provider_customer_ref,created_at)
 VALUES($1,1,2,'ctm_archive',$2)`, account, now)
 	commerceFact(t, owner, `INSERT INTO commerce.purchase
-(purchase_id,account_id,command_id,provider,environment,catalog_version,offer_ref,product_ref,price_ref,price_version,intent_sha256,state,
- created_at,expires_at,updated_at,rev)
+(purchase_id,account_id,command_id,provider,environment,catalog_version,offer_ref,product_ref,price_ref,price_version,
+ definition_version,currency,amount_minor,billing_interval,region,adjustment_policy,intent_sha256,state,created_at,expires_at,updated_at,rev)
 VALUES($1,$2,gen_random_uuid(),1,2,'archive-catalog','archive-offer','pro_archive','pri_archive','archive-price',
+ 'archive-entitlement','USD',1234,'month','US','preserve_partial_end_full_or_chargeback',
  sha256('original purchase'),3,$3::timestamptz-interval '2 days',$3-interval '1 day',$3,1)`, f.purchase, account, now)
 	commerceFact(t, owner, `INSERT INTO commerce.checkout
 (checkout_id,purchase_id,account_id,command_id,provider,environment,intent_sha256,return_path,provider_intent_id,provider_checkout_ref,
@@ -81,7 +82,8 @@ VALUES(gen_random_uuid(),$1,$2,1,2,'txn_archive','archive-period',$3,$4,$5,$6,
 		f.subscription, account, term, nodes, view, control, now)
 	commerceFact(t, owner, `INSERT INTO commerce.billing_entry
 (entry_id,account_id,subscription_id,provider,environment,provider_entry_ref,kind,currency,amount_minor,occurred_at,recorded_at,event_ref)
-VALUES(gen_random_uuid(),$1,$2,1,2,'txn_archive',1,'USD',1234,$3,$3,'evt_archive')`, account, f.subscription, now)
+VALUES(gen_random_uuid(),$1,$2,1,2,'txn_archive',1,'USD',1234,$3,$3,'evt_archive'),
+      (gen_random_uuid(),$1,$2,1,2,'adj_archive',6,'USD',-725,$3,$3,'evt_archive')`, account, f.subscription, now)
 	return f
 }
 
@@ -166,11 +168,18 @@ VALUES(gen_random_uuid(),$1,1,'sub_unqualified','history-only',now()-interval '2
 	WHERE event_ref='evt_archive_queued'`)
 	checkCommercePending(t, owner, f.account, false)
 
+	commerceFact(t, owner, `INSERT INTO commerce.purchase
+(purchase_id,account_id,command_id,provider,environment,catalog_version,offer_ref,product_ref,price_ref,price_version,
+ definition_version,currency,amount_minor,billing_interval,region,adjustment_policy,intent_sha256,state,created_at,expires_at,updated_at,rev)
+SELECT gen_random_uuid(),$1,gen_random_uuid(),provider,environment,catalog_version,offer_ref,product_ref,price_ref,price_version,
+ definition_version,currency,amount_minor,billing_interval,region,adjustment_policy,sha256('pending quoted purchase'),
+ 1,now(),now()+interval '1 day',now(),1 FROM commerce.purchase WHERE purchase_id=$2`, other, f.purchase)
 	for _, statement := range []string{
 		"UPDATE commerce.provider_environment SET environment=1",
 		"DELETE FROM commerce.provider_environment",
 		"UPDATE commerce.customer SET provider_customer_ref='ctm_replaced'",
-		"UPDATE commerce.purchase SET state=1,rev=rev+1",
+		"UPDATE commerce.purchase SET state=1,rev=rev+1 WHERE state=3",
+		"UPDATE commerce.purchase SET amount_minor=1,rev=rev+1 WHERE state=1",
 		"UPDATE commerce.checkout SET send_claimed_at=NULL",
 		"UPDATE commerce.provider_event SET payload_sha256=sha256('replaced event') WHERE event_ref='evt_archive'",
 		"UPDATE commerce.subscription SET provider_snapshot_sha256=sha256('conflicting same revision'),rev=rev+1",
@@ -190,5 +199,10 @@ VALUES(gen_random_uuid(),$1,$2,1,2,'txn_cross_account',1,'USD',1234,now(),now())
 	if _, err := owner.Exec(ctx, `INSERT INTO commerce.customer (account_id,provider,environment,provider_customer_ref,created_at)
 VALUES($1,1,1,'ctm_wrong_env',now())`, other); !pgtest.IsCode(err, "23503") {
 		t.Fatalf("cross-environment customer reference: %v", Sanitize("check the durable provider environment", err))
+	}
+	if _, err := owner.Exec(ctx, `INSERT INTO commerce.billing_entry
+(entry_id,account_id,subscription_id,provider,environment,provider_entry_ref,kind,currency,amount_minor,occurred_at,recorded_at)
+VALUES(gen_random_uuid(),$1,$2,1,2,'txn_signed_payment',1,'USD',-725,now(),now())`, f.account, f.subscription); !pgtest.IsCode(err, "23514") {
+		t.Fatalf("signed payment magnitude: %v", Sanitize("check the typed billing amount", err))
 	}
 }
