@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -105,7 +106,7 @@ func TestLifecycleFiniteTransitionsRetainHistoryAndFenceSchema12(t *testing.T) {
 			if err != nil || auth != 7 || recovery != 4 || lowAuth != 2 || lowRecovery != 1 || !lowRevoked || currentRevoked || oldWriter || ownerFunction || receipt != oldReceipt || receipts != 2 {
 				t.Fatalf("schema12 authority or historical receipt survived incorrectly: %v", store.Sanitize("inspect lifecycle transition", err))
 			}
-			status, err := Inspect(ctx, owner, build)
+			status, err := Inspect(ctx, owner, build[:13])
 			if err != nil || status.State != StateCurrent || status.RuntimeRole != result.RuntimeRole {
 				t.Fatalf("actual schema13 admission: %v", err)
 			}
@@ -170,5 +171,51 @@ func TestLifecycleSQLFaultRollsBackNewGeneration(t *testing.T) {
 	var stateExists bool
 	if err != nil || status.Version != 12 || status.RuntimeRole != group || owner.QueryRow(ctx, "SELECT to_regclass('identity.account_security_state') IS NOT NULL").Scan(&stateExists) != nil || stateExists {
 		t.Fatal("failed schema13 transaction retained new authority or a moved runtime floor")
+	}
+}
+
+func TestRemoteObservationAppendKeepsTheQualifiedSchema13Authority(t *testing.T) {
+	ctx := context.Background()
+	url, name := pgtest.Database(t)
+	owner := pgtest.Connect(t, url)
+	group := name + "_runtime"
+	build := centerBuild(t)
+	const next = "0014_management_remote_observations.sql"
+	if len(build) < 14 || build[13].Name != next {
+		t.Fatal("the remote-observation migration is missing")
+	}
+	before, err := Apply(ctx, owner, build[:13], Options{Runner: "remote-observation-predecessor", RuntimeRole: group})
+	if err != nil || before.State != StateCurrent || before.Version != 13 {
+		t.Fatalf("apply the exact schema13 predecessor: %v", err)
+	}
+
+	receiptDigest := func() string {
+		t.Helper()
+		var digest string
+		if err := owner.QueryRow(ctx, `SELECT encode(sha256(convert_to(
+jsonb_agg(to_jsonb(c) ORDER BY c.target_schema)::text,'UTF8')),'hex') FROM management.cutover_receipt c`).Scan(&digest); err != nil {
+			t.Fatal(store.Sanitize("read the qualified cutover receipts", err))
+		}
+		return digest
+	}
+	original := receiptDigest()
+	pending, err := Inspect(ctx, owner, build)
+	if err != nil || pending.State != StatePending || pending.RuntimeRole != group || !slices.Equal(pending.Pending, []string{next}) {
+		t.Fatalf("inspect the preserved schema13 authority with one pending append: %v", err)
+	}
+	if _, err := Apply(ctx, owner, build, Options{Runner: "wrong-runtime", RuntimeRole: "center03_other_runtime"}); err == nil {
+		t.Fatal("a mismatched runtime generation admitted the append")
+	}
+
+	result, err := Apply(ctx, owner, build, Options{Runner: "remote-observation-append", RuntimeRole: group})
+	if err != nil || result.State != StateCurrent || result.Version != 14 || result.RuntimeRole != group ||
+		result.Grants != "reconciled" || len(result.Ran) != 1 || result.Ran[0].Name != next || result.Ran[0].SHA256 != build[13].SHA256 {
+		t.Fatalf("ordinary append did not retain the qualified runtime: %+v %v", result, err)
+	}
+	if !slices.EqualFunc(before.Applied, result.Applied[:13], func(old, current Applied) bool {
+		return old.Version == current.Version && old.Name == current.Name && old.SHA256 == current.SHA256 &&
+			old.AppliedAt.Equal(current.AppliedAt) && old.AppliedBy == current.AppliedBy
+	}) || receiptDigest() != original {
+		t.Fatal("the append changed an applied migration or a qualified cutover receipt")
 	}
 }

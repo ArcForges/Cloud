@@ -180,7 +180,7 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if epoch == (platform.ID{}) {
 			epoch = platform.NewID()
 		}
-		c.v2 = &v2Codec{enrollment: c.enrollmentID, epoch: epoch, account: c.userID, fence: fence}
+		c.v2 = &v2Codec{enrollment: c.enrollmentID, epoch: epoch, account: c.userID, fence: fence, maxFrameBytes: h.settings.MaxFrameBytes}
 	}
 	if raw := correlation.IDBytes(call.CorrelationID); len(raw) == 16 {
 		var id platform.ID

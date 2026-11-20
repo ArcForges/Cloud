@@ -27,6 +27,8 @@ const (
 	inboundNonceRequest
 	// inboundResult is a ChannelResult: the node's signed answer to a call (Plan CTR5-SIG-03).
 	inboundResult
+	// inboundV2ControlResult is private to the negotiated V2 control channel.
+	inboundV2ControlResult
 )
 
 // inbound is one decoded frame of a node.
@@ -39,6 +41,7 @@ type inbound struct {
 	requestID platform.ID
 	requestOK bool
 	result    resultFrame
+	v2Result  v2SignedControlResult
 }
 
 // resultFrame is a ChannelResult as received: the members as they were on the wire, nothing re-encoded. The header bytes are the ones

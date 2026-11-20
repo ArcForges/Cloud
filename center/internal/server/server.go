@@ -350,6 +350,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 				ReplayWindow: c.Config.Identity.Policy.RoutedReplayWindow, LongPolls: config.RoutedLongPolls(c.Config.MaxConnections), Events: c.Metrics})
 			dispatcher.Register(registry.Methods()...)
 			dispatcher.Register(fleetServer.DeviceMethods(c.Hub, service.RevokeDevice)...)
+			dispatcher.Register(fleetServer.V2ControlMethods(c.Hub, c.Config.Identity.Policy.RoutedReplayWindow)...)
 		}
 	}
 	var mobile *mobileauth.Service

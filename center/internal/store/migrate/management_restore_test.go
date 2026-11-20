@@ -35,7 +35,7 @@ func testManagementBackupRestore(t *testing.T, version int) {
 	group := name + "_runtime"
 	build := managementBuild(t)
 	if version == 13 {
-		build = centerBuild(t)
+		build = centerBuild(t)[:13]
 	}
 	if _, err := Apply(ctx, owner, build, Options{Runner: "isolated-schema12-backup-source", RuntimeRole: group}); err != nil {
 		t.Fatal(err)

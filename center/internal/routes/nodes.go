@@ -117,7 +117,7 @@ func nodesBudget(path string) Budget {
 	return Budget{MaxFrameBytes: reply, MaxUnaryResponseBytes: reply, MaxDurationMilliseconds: deadline, Instance: HealthInstance}
 }
 
-// Nodes is the nodes surface's module: its FleetService methods.
+// Nodes is the nodes surface's legacy, device and typed management module.
 func Nodes() (Module, error) {
 	module := Module{Name: "nodes", Surface: SurfaceNodes, Budgets: map[string]Budget{}}
 	for _, method := range append(NodesMethods(), managementDeviceMethods()...) {
@@ -134,6 +134,19 @@ func Nodes() (Module, error) {
 		}
 		module.Policies = append(module.Policies, policy)
 		module.Budgets[method.Path] = budget
+	}
+	for _, method := range ManagementMethods() {
+		policy, err := ingress.NewUnary(method.Path, ingress.Session, ingress.NoScope, ManagementRequestBytes, true)
+		if err != nil {
+			return Module{}, err
+		}
+		policy = policy.InSurface(SurfaceNodes).WithDeadline(RoutedDeadline)
+		policy.CarriesRemoteTarget = true
+		module.Policies = append(module.Policies, policy)
+		module.Budgets[method.Path] = Budget{
+			MaxFrameBytes: RoutedReplyBytes, MaxUnaryResponseBytes: RoutedReplyBytes,
+			MaxDurationMilliseconds: int(RoutedDeadline.Milliseconds()), Instance: HealthInstance,
+		}
 	}
 	return module, nil
 }

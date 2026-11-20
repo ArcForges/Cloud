@@ -4,6 +4,7 @@ package migrate
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -19,11 +20,20 @@ import (
 // This captures candidate schema facts, not an archive-admission oracle. Review
 // and pin the generated closed inventory before the V2 restore accepts it.
 func TestLifecycleInventoryForBackup(t *testing.T) {
+	captureBackupInventory(t, 13, "ARCFORGES_ID01_INVENTORY_DIR")
+}
+
+func TestRemoteObservationInventoryForBackup(t *testing.T) {
+	captureBackupInventory(t, 14, "ARCFORGES_CENTER03_INVENTORY_DIR")
+}
+
+func captureBackupInventory(t *testing.T, version int, evidenceRoot string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	url, name := pgtest.Database(t)
 	owner := pgtest.Connect(t, url)
-	if _, err := Apply(ctx, owner, centerBuild(t), Options{Runner: "isolated-inventory-fixture", RuntimeRole: name + "_runtime"}); err != nil {
+	if _, err := Apply(ctx, owner, centerBuild(t)[:version], Options{Runner: "isolated-inventory-fixture", RuntimeRole: name + "_runtime"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := owner.Exec(ctx, "SET search_path=pg_catalog; SET TIME ZONE 'UTC'"); err != nil {
@@ -33,13 +43,14 @@ func TestLifecycleInventoryForBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := os.Getenv("ARCFORGES_ID01_INVENTORY_DIR")
+	base := os.Getenv(evidenceRoot)
 	if base == "" {
 		base = t.TempDir()
 	} else if !filepath.IsAbs(base) {
 		t.Fatal("inventory output root must be absolute")
 	}
-	dir, err := os.MkdirTemp(base, "lifecycle-schema13-")
+	schemaName := fmt.Sprintf("schema%d", version)
+	dir, err := os.MkdirTemp(base, "lifecycle-"+schemaName+"-")
 	if err != nil {
 		t.Fatal("private inventory output unavailable")
 	}
@@ -93,8 +104,8 @@ func TestLifecycleInventoryForBackup(t *testing.T) {
 	if err := ctr06ArchiveInventoryFor(raw, canonical, nil); err != nil {
 		t.Fatal(err)
 	}
-	if os.WriteFile(filepath.Join(dir, "schema13-inventory.txt"), []byte(canonical), 0o600) != nil || os.WriteFile(filepath.Join(dir, "schema13-catalogue-sha256.txt"), []byte(catalogue+"\n"), 0o600) != nil {
+	if os.WriteFile(filepath.Join(dir, schemaName+"-inventory.txt"), []byte(canonical), 0o600) != nil || os.WriteFile(filepath.Join(dir, schemaName+"-catalogue-sha256.txt"), []byte(catalogue+"\n"), 0o600) != nil {
 		t.Fatal("inventory evidence write failed")
 	}
-	t.Logf("Schema13 candidate facts: catalogue=%s inventorySHA256=%s objects=%d output=%s; not yet archive admission", catalogue, ctr06SHA([]byte(canonical)), len(inventory), dir)
+	t.Logf("Schema%d candidate facts: catalogue=%s inventorySHA256=%s objects=%d output=%s; not yet archive admission", version, catalogue, ctr06SHA([]byte(canonical)), len(inventory), dir)
 }

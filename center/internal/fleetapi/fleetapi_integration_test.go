@@ -54,8 +54,7 @@ func TestFleetRowsAreTheServedMethods(t *testing.T) {
 	}
 	rows := 0
 	for _, operation := range access.Operations() {
-		if !strings.HasPrefix(operation.ID, "fleet.") || operation.Path == routes.NodeChannelPath ||
-			strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.FleetService/") {
+		if !strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.NodeEnrollmentService/") {
 			// The node channel's row is the relay surface's upgrade route (AF-CTR-05 E1a), not a NodeEnrollmentService method; the
 			// FleetService rows are the nodes surface's (AF-CTR-05 E2a; hub's TestTheRegistryRowsAreTheServedMethods).
 			continue

@@ -57,7 +57,7 @@ func (h *Hub) V2Presence(accountID, enrollmentID, nodeID, protocolEpoch platform
 // generation cannot record an online channel.
 func (c *conn) markV2Online(ctx context.Context, now time.Time) error {
 	return c.hub.db.InTx(ctx, "record a V2 node's channel", store.TxOptions{Timeout: presenceTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
-		expires, err := c.lockV2Credential(ctx, tx)
+		expires, err := c.lockV2Credential(ctx, tx, c.upgradeAccessHash)
 		if err != nil {
 			return err
 		}
@@ -105,7 +105,7 @@ WHERE enrollment_id=$1 AND node_id=$2 AND account_id=$3 FOR SHARE`, enrollment, 
 // Hold the same account, device, installation and session order as enrollment
 // and revocation, before the fleet row. The proof's key and presented access
 // credential must still be current at the point this transaction admits it.
-func (c *conn) lockV2Credential(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+func (c *conn) lockV2Credential(ctx context.Context, tx pgx.Tx, accessHash [32]byte) (time.Time, error) {
 	security, err := session.LockAccountSecurity(ctx, tx, c.userID)
 	if err != nil {
 		return time.Time{}, err
@@ -140,7 +140,7 @@ WHERE session_id=$1 AND user_id=$2 AND device_id=$3 AND installation_id=$4 AND s
   AND credential_kind=1 AND revoked_at IS NULL AND access_expires_at IS NOT NULL
   AND auth_epoch=$6 AND recovery_generation=$7 AND access_token_hash=$8 FOR SHARE`,
 		c.sessionID, c.userID, c.deviceID, c.installationID, session.ScopeNode,
-		security.AuthEpoch, security.RecoveryGeneration, c.upgradeAccessHash[:]).Scan(&expires)
+		security.AuthEpoch, security.RecoveryGeneration, accessHash[:]).Scan(&expires)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, errChannelCredentialChanged
 	}

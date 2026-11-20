@@ -199,6 +199,15 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 		caller = *authenticated
 	}
 
+	var remoteTarget *RemoteTarget
+	if policy.CarriesRemoteTarget {
+		remoteTarget, ok = parseRemoteTarget(request.Header)
+		if !ok {
+			p.refuse(writer, request, outcome, ReasonInvalidRequest)
+			return
+		}
+	}
+
 	// Each method states its own bound before any body byte is read.
 	if request.ContentLength > int64(policy.MaxRequestBytes) {
 		p.refuse(writer, request, outcome, ReasonRequestTooLarge)
@@ -240,7 +249,7 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 	call := &Call{
 		Policy: policy, Caller: caller, Owner: owner,
 		Correlation: correlation.ForRequest(request.Header.Values(TraceparentHeader), stated),
-		ClientIP:    clientIP, Origin: origin, Message: message,
+		ClientIP:    clientIP, Origin: origin, Message: message, RemoteTarget: remoteTarget,
 	}
 	outcome.Call = call
 	p.observe(request, outcome)

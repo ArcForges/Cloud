@@ -72,6 +72,8 @@ export interface ApiRoute {
    * correlation id from it; a method whose field 1 means something else (the Hello name) is never interpreted.
    */
   readonly requestMeta: boolean;
+  /** This typed management route requires the four bounded target headers. */
+  readonly remoteTarget?: true;
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
@@ -281,6 +283,12 @@ func Render(table routes.WorkerTable) (string, error) {
 		text.WriteString("  },\n")
 	}
 	text.WriteString("];\n\n")
+	text.WriteString("/** Selection metadata forwarded only for registered typed management routes. */\n")
+	text.WriteString(constant("remoteNodeHeader", quote(ingress.RemoteNodeHeader)))
+	text.WriteString(constant("remoteEnrollmentHeader", quote(ingress.RemoteEnrollmentHeader)))
+	text.WriteString(constant("remoteGrantHeader", quote(ingress.RemoteGrantHeader)))
+	text.WriteString(constant("remoteGrantRevisionHeader", quote(ingress.RemoteGrantRevisionHeader)))
+	text.WriteString("\n")
 	pageTable(&text, table)
 	mobileTables(&text, table)
 	upgradeTable(&text, table)
@@ -443,6 +451,9 @@ func route(text *strings.Builder, row routes.Row, indent string) {
 	text.WriteString(indent + "maxDurationMs: " + strconv.Itoa(row.MaxDurationMilliseconds) + ",\n")
 	text.WriteString(indent + "instance: " + quote(row.Instance) + ",\n")
 	text.WriteString(indent + "requestMeta: " + strconv.FormatBool(row.RequestMeta) + ",\n")
+	if row.RemoteTarget {
+		text.WriteString(indent + "remoteTarget: true,\n")
+	}
 }
 
 func quote(value string) string { return `"` + value + `"` }

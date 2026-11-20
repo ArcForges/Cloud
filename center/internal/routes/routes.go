@@ -186,6 +186,7 @@ type Row struct {
 	MaxDurationMilliseconds int
 	Instance                string
 	RequestMeta             bool
+	RemoteTarget            bool
 	// Surface is the row's switchable surface, or empty for a production row.
 	Surface string
 }
@@ -311,11 +312,15 @@ func Table(modules []Module) (WorkerTable, error) {
 			if policy.Surface != module.Surface {
 				return WorkerTable{}, fmt.Errorf("%w: the policy %s is not in its module's surface", ErrRegistration, policy.FullName)
 			}
+			if policy.CarriesRemoteTarget && (policy.Surface != SurfaceNodes || policy.Authentication != ingress.Session || policy.Kind != ingress.Unary ||
+				policy.Scope != ingress.NoScope || !policy.ReadsRequestMeta()) {
+				return WorkerTable{}, fmt.Errorf("%w: remote target headers require a typed nodes surface unary (%s)", ErrRegistration, policy.FullName)
+			}
 			row := Row{
 				Path: policy.FullName, Kind: kindName(policy.Kind), Auth: authName(policy.Authentication),
 				MaxRequestBytes: policy.MaxRequestBytes, MaxFrameBytes: budget.MaxFrameBytes,
 				MaxUnaryResponseBytes: budget.MaxUnaryResponseBytes, MaxDurationMilliseconds: budget.MaxDurationMilliseconds,
-				Instance: budget.Instance, RequestMeta: policy.ReadsRequestMeta(), Surface: policy.Surface,
+				Instance: budget.Instance, RequestMeta: policy.ReadsRequestMeta(), RemoteTarget: policy.CarriesRemoteTarget, Surface: policy.Surface,
 			}
 			if policy.Surface == "" {
 				rows = append(rows, row)
