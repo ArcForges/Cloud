@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "goVersion": "go1.27.4",
   "inputs": {
-    "go.mod": "d6459f9329016b874ae7c3806d6a5acd0012e70d62042927c0e9ec51f4c1d382",
-    "go.sum": "08ce135e7f4e2b8dd325df14f2b7325b106db53548d773cab737f64eab39e3f0",
+    "go.mod": "cba6ec4fc4c9c19a374b62380e88880814a7e8bdeccc2353e7d25ced82f9d7e1",
+    "go.sum": "69aeddd81f94f51c23c716cf3519972ace77f4e630331da9dc4b07288e803ed8",
     "toolchain.json": "21fdf09e75223ee537a1b43fd5e264c440d9f1d5f9eec4ee4e3b34abfcb79c4a",
     "tools/go.mod": "6f34fd06cad1d302b239520575fcb50a1116302852b7b59247b4a5ad517810b7",
     "tools/go.sum": "fd8bf37ab317a241ed938b175ae510d7aa2df6d9465653562b60c9f4b237da0a"
