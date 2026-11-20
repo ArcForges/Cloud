@@ -30,7 +30,7 @@ The database sample is shared by admin scrapes and the periodic log. A sample is
 
 Use `arcforges_center_pending_available` with the queue's `arcforges_center_pending_items`, `arcforges_center_pending_oldest_seconds` and `arcforges_center_pending_truncated`. An available sample with zero pending records has count and age zero. Failed samples have availability zero and no values. Disabled sources have no metric series and appear as `disabled` in the hosted pulse. Billing telemetry is enabled only with the configured merchant surface. The pulse contains no account, Node, commerce, command, payload or backup identifiers.
 
-The active [Center Prometheus rule group](../../deploy/monitoring/center-pulse.rules.json) maps these series to the indexed alert routes and runbooks. In a guarded hosted deployment, the corresponding log fields can supply the same predicates to the private collector. Treat a missing stream of samples as missing monitoring data. Enable remote notification only with the deployment owner's approval.
+The version-controlled [Center Prometheus rule group](../../deploy/monitoring/center-pulse.rules.json) maps these series to the indexed alert routes and runbooks. In a guarded hosted deployment, the corresponding log fields can supply the same predicates to the private collector. Treat a missing stream of samples as missing monitoring data. Enable remote notification only with the deployment owner's approval.
 
 ## Backup and restore evidence
 
