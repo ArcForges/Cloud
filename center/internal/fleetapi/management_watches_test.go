@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/management"
+	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
@@ -32,6 +33,40 @@ func TestV2WatchSlotsReleaseOwnAccountAndNode(t *testing.T) {
 	}
 	if slots.total != 0 || len(slots.accounts) != 0 || len(slots.nodes) != 0 {
 		t.Fatal("unused stream identities remained in memory")
+	}
+}
+
+func TestV2WatchSlotsObserveEnforcedScopesAndRelease(t *testing.T) {
+	metrics := observe.NewMetrics()
+	slots := watchSlots{
+		limit: 2 * watchPerIdentity, accounts: map[platform.ID]int{}, nodes: map[platform.ID]int{},
+		observe: metrics.ObserveManagementWatch,
+	}
+	for n := byte(1); n <= watchPerIdentity; n++ {
+		if !slots.take(management.Authority{Account: platform.ID{100}, Node: platform.ID{n}}) ||
+			!slots.take(management.Authority{Account: platform.ID{n}, Node: platform.ID{100}}) {
+			t.Fatal("an available watch slot was refused")
+		}
+	}
+	if slots.take(management.Authority{Account: platform.ID{101}, Node: platform.ID{101}}) {
+		t.Fatal("global limit admitted another watch")
+	}
+	slots.release(management.Authority{Account: platform.ID{1}, Node: platform.ID{100}})
+	if slots.take(management.Authority{Account: platform.ID{100}, Node: platform.ID{101}}) {
+		t.Fatal("account limit admitted another watch")
+	}
+	// Fill the Node's eight slots again with headroom for an independent
+	// Node refusal, by giving up one watch from the other account.
+	slots.release(management.Authority{Account: platform.ID{100}, Node: platform.ID{1}})
+	if !slots.take(management.Authority{Account: platform.ID{1}, Node: platform.ID{100}}) ||
+		slots.take(management.Authority{Account: platform.ID{101}, Node: platform.ID{100}}) {
+		t.Fatal("Node limit did not act independently below the global cap")
+	}
+	var pulse observe.OperationalPulse
+	metrics.ReadManagementWatch(&pulse)
+	if pulse.ManagementWatch != (observe.Capacity{Active: 2*watchPerIdentity - 1, Limit: 2 * watchPerIdentity}) ||
+		pulse.WatchGlobal != 1 || pulse.WatchAccount != 1 || pulse.WatchNode != 1 {
+		t.Fatalf("watch reservation pulse: %+v", pulse)
 	}
 }
 

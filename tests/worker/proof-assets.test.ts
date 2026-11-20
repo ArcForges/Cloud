@@ -5,12 +5,23 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { isProofPath } from "../../worker/foundation/proof-routes.ts";
+import { selfHostStaticOrigin } from "../../tooling/self-host-static-origin.ts";
 import {
   buildProofConfig as buildProofConfigWithKey,
   composeHeaders,
@@ -317,6 +328,133 @@ test("a well-formed WEB.40 bundle verifies and a digest that is not the pin is r
   const flipped = Buffer.from(built.archive);
   flipped[flipped.length - 2000] = (flipped[flipped.length - 2000] ?? 0) ^ 1;
   assert.throws(() => verifyProfileBundle(flipped, built.digest), /pinned digest/u);
+});
+
+async function selfHostStaticFixture(t: TestContext) {
+  const parent = await realpath(tmpdir());
+  const directory = await mkdtemp(path.join(parent, "arcforges-static-origin-"));
+  assert.equal(path.dirname(directory), parent);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const releases = path.join(directory, "releases");
+  await mkdir(releases);
+  return {
+    releases,
+    async archivePath(built: ReturnType<typeof profileBundle>, digest = built.digest) {
+      const file = path.join(directory, profileBundleAssetName(digest));
+      await writeFile(file, built.archive);
+      return file;
+    },
+  };
+}
+
+test("self-host static publication verifies one digest release and checks every selected byte", async (t) => {
+  const fixture = await selfHostStaticFixture(t);
+  const built = profileBundle();
+  const archive = await fixture.archivePath(built);
+  const releases = fixture.releases;
+  const finalists = await Promise.all([
+    selfHostStaticOrigin("stage", archive, built.digest, releases),
+    selfHostStaticOrigin("stage", archive, built.digest, releases),
+  ]);
+  const release = path.join(releases, built.digest);
+  assert.deepEqual(finalists, [release, release]);
+  assert.deepEqual(await readdir(releases), [built.digest]);
+  assert.equal(await selfHostStaticOrigin("verify", archive, built.digest, releases), release);
+  const site = path.join(release, "site");
+  assert.deepEqual((await readdir(site)).sort(), [
+    "_framework",
+    "account",
+    "app.css",
+    "chat",
+    "favicon.svg",
+    "robots.txt",
+  ]);
+
+  const fragment = await readFile(path.join(release, "static-origin.caddy"), "utf8");
+  assert(fragment.includes(`root "${site.split(path.sep).join("/")}"`));
+  assert(fragment.includes('"/account", "/account/", "/account/index.html"'));
+  assert(fragment.includes('"/chat", "/chat/", "/chat/index.html"'));
+  assert(fragment.includes('"/_framework/blazor.webassembly.js"'));
+  assert(fragment.includes('"/_framework/ArcForges.Web.App.w1s8cjv5ju.wasm"'));
+  assert(fragment.includes("{orig_uri} == {orig_path} + {orig_?query}"));
+  assert(fragment.includes("method GET HEAD\n"));
+  assert(fragment.includes("precompressed br gzip"));
+  assert(fragment.includes('Cache-Control "public, max-age=31536000, immutable, no-transform"'));
+  assert(fragment.includes('Cache-Control "public, no-cache, no-transform"'));
+  assert(fragment.includes(`Content-Security-Policy "${policyOf()}"`));
+  for (const disallowed of [
+    "/manifest.json",
+    "/_headers",
+    "/api/",
+    "/account/*",
+    ".wasm.gz",
+    ".wasm.br",
+    "try_files",
+    "browse",
+  ])
+    assert(!fragment.includes(disallowed), disallowed);
+
+  const asset = path.join(site, "app.css");
+  const original = await readFile(asset);
+  await writeFile(asset, Buffer.alloc(original.byteLength));
+  await assert.rejects(
+    selfHostStaticOrigin("stage", archive, built.digest, releases),
+    /Staged bytes differ/u,
+  );
+  assert.deepEqual(await readFile(asset), Buffer.alloc(original.byteLength));
+  await writeFile(asset, original);
+  const extra = path.join(site, "unexpected.txt");
+  await writeFile(extra, "outside the manifest");
+  await assert.rejects(
+    selfHostStaticOrigin("verify", archive, built.digest, releases),
+    /Unexpected release entry/u,
+  );
+  await unlink(extra);
+  await unlink(asset);
+  await assert.rejects(
+    selfHostStaticOrigin("verify", archive, built.digest, releases),
+    /missing expected entries/u,
+  );
+});
+
+test("self-host static admission leaves the release store empty after malformed or mismatched archives", async (t) => {
+  const fixture = await selfHostStaticFixture(t);
+  const built = profileBundle();
+  const wrongDigest = sha("wrong approval");
+  const wrongArchive = await fixture.archivePath(built, wrongDigest);
+  await assert.rejects(
+    selfHostStaticOrigin("stage", wrongArchive, wrongDigest, fixture.releases),
+    /pinned digest/u,
+  );
+  await assert.rejects(
+    selfHostStaticOrigin("stage", wrongArchive, built.digest, fixture.releases),
+    /archive name/u,
+  );
+  const mismatches: [ProfileSpec, RegExp][] = [
+    [{ tamper: (entries) => entries.splice(1, 1) }, /exactly the manifest's files/u],
+    [
+      { tamper: (entries) => entries.push({ path: "zz.txt", bytes: Buffer.from("x") }) },
+      /exactly the manifest's files/u,
+    ],
+    [
+      { tamper: (entries) => entries.splice(2, 0, entries[1] as TarEntry) },
+      /exactly the manifest's files/u,
+    ],
+    [
+      { tamper: (entries) => entries.push({ path: "../escape", bytes: Buffer.from("x") }) },
+      /plain relative path/u,
+    ],
+    [{ tarOptions: { type: "2" } }, /regular file with the canonical header/u],
+  ];
+  for (const [spec, pattern] of mismatches) {
+    const candidate = profileBundle(spec);
+    const archive = await fixture.archivePath(candidate);
+    await assert.rejects(
+      selfHostStaticOrigin("stage", archive, candidate.digest, fixture.releases),
+      pattern,
+    );
+    assert.deepEqual(await readdir(fixture.releases), []);
+  }
 });
 
 test("content that disagrees with the manifest is refused even when the digest is the new one", () => {

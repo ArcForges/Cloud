@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "center-capacity-exhausted",
+  "capabilityGroup": "realtime",
+  "condition": {
+    "signal": "capability.realtime.center-capacity-bp",
+    "operator": "gte",
+    "threshold": 10000,
+    "windowSeconds": 60,
+    "minimumSamples": 1
+  },
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/center-capacity-exhausted.md"
+}

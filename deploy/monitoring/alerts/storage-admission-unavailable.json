@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "storage-admission-unavailable",
+  "dependencyId": "primary-database",
+  "condition": {
+    "signal": "dependency.primary-database.center-admission-ready",
+    "operator": "lt",
+    "threshold": 1,
+    "windowSeconds": 60,
+    "minimumSamples": 1
+  },
+  "severity": "SEV1",
+  "routeClass": "page",
+  "runbook": "runbooks/storage-admission-unavailable.md"
+}

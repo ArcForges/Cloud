@@ -1,0 +1,15 @@
+{
+  "schema": "arcforges.cloud.alert.v1",
+  "id": "billing-reconciliation-review",
+  "dependencyId": "payment-provider",
+  "condition": {
+    "signal": "dependency.payment-provider.center-review-count",
+    "operator": "gt",
+    "threshold": 0,
+    "windowSeconds": 60,
+    "minimumSamples": 1
+  },
+  "severity": "SEV2",
+  "routeClass": "page",
+  "runbook": "runbooks/billing-reconciliation-review.md"
+}

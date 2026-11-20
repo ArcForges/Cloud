@@ -18,7 +18,7 @@ const policy = loadMonitoring();
 test("capability objectives are user-visible, bounded and independent", () => {
   assert.deepEqual(
     new Set(policy.objectives.capabilities.map((row) => row.id)),
-    new Set(["cloud-api", "identity", "sync-control-plane", "realtime", "managed-ai"]),
+    new Set(["cloud-api", "identity", "sync-control-plane", "realtime"]),
   );
   assert.equal(policy.objectives.scope, "internal-engineering-objectives");
   assert.equal(policy.dashboard.aggregateAcrossCapabilities, false);
@@ -32,16 +32,13 @@ test("synthetic user-visible failures burn only their capability and dependency 
     { capability: "identity", outcome: "good", dependency: "identity-delivery" },
     { capability: "sync-control-plane", outcome: "good", dependency: null },
     { capability: "realtime", outcome: "bad", dependency: "realtime-transport" },
-    { capability: "managed-ai", outcome: "bad", dependency: "managed-ai-provider" },
   ]);
 
   assert.equal(result.capabilities["cloud-api"].successRateBasisPoints, 10000);
   assert.equal(result.capabilities.identity.successRateBasisPoints, 10000);
   assert.equal(result.capabilities["sync-control-plane"].successRateBasisPoints, 10000);
   assert.equal(result.capabilities.realtime.successRateBasisPoints, 0);
-  assert.equal(result.capabilities["managed-ai"].successRateBasisPoints, 0);
   assert.equal(result.dependencies["realtime-transport"].badCount, 1);
-  assert.equal(result.dependencies["managed-ai-provider"].badCount, 1);
   assert.equal(result.dependencies["identity-delivery"].goodCount, 1);
   assert.equal(result.dependencies["primary-database"].status, "insufficient-data");
 });
@@ -125,8 +122,13 @@ test("the alert set is complete, page-routed and every link resolves to an index
     "remote-connection-collapse",
     "backup-lag-beyond-objective",
     "payment-provider-webhook-backlog",
-    "managed-ai-routes-unavailable",
     "data-integrity-alarm",
+    "center-capacity-exhausted",
+    "center-watch-admission-refused",
+    "remote-outcome-uncertain",
+    "storage-admission-unavailable",
+    "billing-reconciliation-review",
+    "center-pending-source-unavailable",
   ]);
   assert.deepEqual(new Set(policy.alerts.map((alert) => alert.id)), expected);
   assert.equal(policy.alerts.length, expected.size);
@@ -150,6 +152,39 @@ test("page, ticket and dashboard classes resolve only to distinct logical destin
     () => routeAlert({ routeClass: "email-everyone" }, policy.routing),
     /Unknown alert route class/,
   );
+});
+
+test("Center pulse rules use the indexed alert routes and metric sources", () => {
+  const path = join(MONITORING_ROOT, "center-pulse.rules.json");
+  const { groups } = JSON.parse(readFileSync(path, "utf8"));
+  assert.deepEqual(groups.map((group) => group.name), ["arcforges-center-pulse"]);
+  const metrics = new Map([
+    ["center-capacity-exhausted", ["resource_in_use", "resource_limit"]],
+    ["center-watch-admission-refused", ["watch_refusals_total"]],
+    ["remote-outcome-uncertain", ["pending_items"]],
+    ["database-unavailable", ["store_ready"]],
+    ["storage-admission-unavailable", ["store_ready"]],
+    ["payment-provider-webhook-backlog", ["pending_oldest_seconds"]],
+    ["billing-reconciliation-review", ["pending_items"]],
+    ["center-pending-source-unavailable", ["pending_available", "store_ready"]],
+  ]);
+  const rules = groups[0].rules;
+  assert.equal(rules.length, metrics.size);
+  assert.deepEqual(new Set(rules.map((rule) => rule.labels.alert_id)), new Set(metrics.keys()));
+  assert.equal(new Set(rules.map((rule) => rule.alert)).size, rules.length);
+  for (const rule of rules) {
+    const catalogue = policy.alerts.find((alert) => alert.id === rule.labels.alert_id);
+    assert.deepEqual(rule.labels, {
+      alert_id: catalogue.id,
+      severity: catalogue.severity,
+      route_class: catalogue.routeClass,
+    });
+    assert.equal(rule.annotations.runbook, catalogue.runbook);
+    const selected = rule.expr.match(/arcforges_center_[a-z_]+/g);
+    assert.deepEqual(new Set(selected), new Set(metrics.get(catalogue.id).map(
+      (metric) => "arcforges_center_" + metric,
+    )));
+  }
 });
 
 test("invalid alert routes and missing runbooks fail closed", () => {

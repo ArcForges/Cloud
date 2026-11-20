@@ -24,9 +24,10 @@ remain explicitly pending where their prerequisites are absent. These implementa
 public sales. Schema-13 backup/restore and receipt evidence must be retained; an older schema-12 executable is not its runtime
 rollback path.
 
-The C# Native AOT host stays in the same image as its default entrypoint: setting `ARCFORGES_HELLO_RUNTIME=csharp` through a
-reviewed main push is the Hello rollback (AD-0021 §15, until AF-CTR-09). The `proof` environment (proof.arcforges.com) runs the
-Go center as the acceptance environment since part B.
+The C# Native AOT host stays in the image as its default entrypoint for historical Hello proof. The guarded deployment path
+requires the Go Center for new official-hosted releases. See the [recovery procedure](deployment.md#recovery) for H-03
+approval and compatibility checks when selecting a previously admitted release. The `proof` environment
+(proof.arcforges.com) runs the Go center as the acceptance environment since part B.
 
 ## Layout
 

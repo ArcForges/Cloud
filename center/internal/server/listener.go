@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,8 +29,10 @@ const (
 
 // slots are the two bounds of one listener.
 type slots struct {
-	requests chan struct{}
-	nodes    chan struct{}
+	requests    chan struct{}
+	nodes       chan struct{}
+	requestOpen atomic.Int64
+	nodeOpen    atomic.Int64
 }
 
 func newSlots(requests, nodes int) *slots {
@@ -55,6 +58,7 @@ func (l *slotListener) Accept() (net.Conn, error) {
 		<-l.slots.requests
 		return nil, err
 	}
+	l.slots.requestOpen.Add(1)
 	return &slotConn{Conn: connection, slots: l.slots, holds: l.slots.requests}, nil
 }
 
@@ -75,6 +79,11 @@ type slotConn struct {
 func (c *slotConn) Close() error {
 	c.mu.Lock()
 	if c.holds != nil {
+		if c.holds == c.slots.nodes {
+			c.slots.nodeOpen.Add(-1)
+		} else {
+			c.slots.requestOpen.Add(-1)
+		}
 		<-c.holds
 		c.holds = nil
 	}
@@ -87,6 +96,9 @@ func (c *slotConn) Close() error {
 func (c *slotConn) toNode() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.holds == nil {
+		return false
+	}
 	if c.holds == c.slots.nodes {
 		return true
 	}
@@ -95,9 +107,9 @@ func (c *slotConn) toNode() bool {
 	default:
 		return false
 	}
-	if c.holds != nil {
-		<-c.holds
-	}
+	c.slots.nodeOpen.Add(1)
+	c.slots.requestOpen.Add(-1)
+	<-c.holds
 	c.holds = c.slots.nodes
 	return true
 }
@@ -116,6 +128,8 @@ func (c *slotConn) toRequest() {
 	default:
 		return
 	}
+	c.slots.requestOpen.Add(1)
+	c.slots.nodeOpen.Add(-1)
 	<-c.holds
 	c.holds = c.slots.requests
 }
@@ -151,6 +165,6 @@ func newPublicServer(handler http.Handler, http1 bool, errorLog *slog.Logger) *h
 }
 
 // listen bounds a listener by the request and node slots.
-func listen(listener net.Listener, requests, nodes int) net.Listener {
+func listen(listener net.Listener, requests, nodes int) *slotListener {
 	return &slotListener{Listener: listener, slots: newSlots(requests, nodes), done: make(chan struct{})}
 }

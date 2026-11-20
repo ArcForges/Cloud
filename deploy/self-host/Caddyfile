@@ -1,0 +1,39 @@
+{
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://{$ARCFORGES_CENTER_HOST} {
+	tls {$ARCFORGES_TLS_CERT} {$ARCFORGES_TLS_KEY}
+
+	route {
+		@canonical_api expression `{http.request.orig_uri}.matches("^/api(/[A-Za-z0-9._-]+)+([?].*)?$") && !{http.request.orig_uri}.matches("^/api(/[^/?]+)*/[.]{1,2}(/|[?]|$)")`
+		handle @canonical_api {
+			route {
+				uri strip_prefix /api
+				@native_grpc header_regexp Content-Type "(?i)^application/grpc([+]proto)?([[:space:]]*;|$)"
+				reverse_proxy @native_grpc h2c://127.0.0.1:8081 {
+					header_up ArcForges-Client-IP {remote_host}
+					flush_interval 100ms
+				}
+				reverse_proxy 127.0.0.1:8080 {
+					header_up ArcForges-Client-IP {remote_host}
+					flush_interval 100ms
+				}
+			}
+		}
+		@reserved path /api /api/* /readyz /readyz/* /metrics /metrics/*
+		handle @reserved {
+			header Cache-Control no-store
+			respond 404
+		}
+		import {$ARCFORGES_STATIC_ORIGIN_IMPORT:/etc/arcforges/static-origin.d/*.caddy}
+		handle {
+			header Cache-Control no-store
+			respond 404
+		}
+	}
+}

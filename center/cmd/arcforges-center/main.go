@@ -51,9 +51,9 @@ commands:
                                    expand checked schema12 to13 with a verified backup, seven-schema fence and new runtime roles
   admin ensure-database            create the center's database if it does not exist
   admin backup-logical --archive <new path> --metadata <new path>
-                                   capture a checked full 0010/0011/0012/0013 backup and its trusted snapshot metadata
+                                   capture a checked logical backup and its trusted snapshot metadata
   admin restore-logical-backup --archive <path> --sha256 <digest> --metadata <path> --metadata-sha256 <digest>
-                                   restore a supported trusted backup to an explicitly named new, isolated database
+                                   verify both digests and restore a trusted backup to an explicitly named new, isolated database
   admin restore-legacy-logical-backup --archive <path> --sha256 <digest> --provenance <path> --provenance-sha256 <digest>
                                    unavailable until a qualified security successor is admitted; the historical bridge is refused
   admin rotate-runtime-credential [--live-slot a|b]

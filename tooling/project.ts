@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -35,8 +35,8 @@ import {
 import {
   expectedIdentity,
   imageBuildVariables,
-  verifyIdentity,
   verifyHealthIdentity,
+  verifyIdentity,
   type Identity,
 } from "./build-identity.ts";
 
@@ -101,6 +101,7 @@ export type WorkerConfig = {
     BUILD_IDENTITY?: string;
     ARCFORGES_NEON_HELLO?: string;
     ARCFORGES_HELLO_RUNTIME?: string;
+    ARCFORGES_CENTER_MODE?: string;
     FLAGSHIP_SURFACES?: string;
   };
   containers: [
@@ -125,39 +126,60 @@ async function inspectImage(image: string): Promise<ImageInfo> {
   return info[0];
 }
 
-export async function verifyCandidate(): Promise<Candidate> {
-  const candidate = await readJson<Candidate>(path.join(candidateDir, "manifest.json"));
+export async function verifyCandidate(
+  directory = candidateDir,
+  environment = process.env,
+): Promise<Candidate> {
+  const entries = [...payloadFiles, "manifest.json"].sort();
+  assert.deepEqual((await readdir(directory)).sort(), entries);
+  for (const name of entries) {
+    assert(
+      (await lstat(path.join(directory, name))).isFile(),
+      `Candidate member ${name} is not a regular file.`,
+    );
+  }
+  const candidate = await readJson<Candidate>(path.join(directory, "manifest.json"));
   assert.equal(candidate.schema, 1);
   assert.match(candidate.revision, /^[0-9a-f]{40}(-dirty)?$/);
   assert.match(candidate.imageId, /^sha256:[0-9a-f]{64}$/);
   assert.match(candidate.image, /^arcforges-cloud:[a-z0-9.-]+$/);
   assert.match(candidate.version, /^0\.1\.0-(ci\.[0-9]+\.[0-9]+|local\.[0-9]+)$/);
-  if (process.env.GITHUB_SHA) {
-    assert.equal(candidate.revision, process.env.GITHUB_SHA);
+  if (environment.GITHUB_SHA) {
+    assert.equal(candidate.revision, environment.GITHUB_SHA);
     assert.equal(candidate.dirty, false);
   }
-  assert.deepEqual((await readdir(candidateDir)).sort(), [...payloadFiles, "manifest.json"].sort());
   assert.deepEqual(Object.keys(candidate.files).sort(), [...payloadFiles].sort());
   for (const file of payloadFiles) {
     assert.equal(
-      await sha256(path.join(candidateDir, file)),
+      await sha256(path.join(directory, file)),
       candidate.files[file],
       `Candidate changed: ${file}`,
     );
   }
-  const config = await readJson<WorkerConfig>(path.join(candidateDir, "wrangler.json"));
+  const config = await readJson<WorkerConfig>(path.join(directory, "wrangler.json"));
   assert.equal(config.name, "arcforges-cloud");
   assert.equal(config.main, "./worker.js");
   assert.equal(config.vars.SOURCE_REVISION, candidate.revision);
   assert.equal(config.containers[0]?.image, candidate.image);
   assert.equal(config.containers[0]?.max_instances, 1);
   assert.equal(config.no_bundle, true);
-  verifyReleaseFiles(root, candidateDir, candidate.revision, candidate.imageId);
-  verifyIdentity(await readJson(path.join(candidateDir, "build-identity.json")), candidate.version);
-  assert.equal(
-    config.vars.BUILD_IDENTITY,
-    JSON.stringify(expectedIdentity(candidate.version).build),
+  verifyReleaseFiles(root, directory, candidate.revision, candidate.imageId);
+  const identity = verifyIdentity(
+    await readJson(path.join(directory, "build-identity.json")),
+    candidate.version,
+    environment,
   );
+  assert.equal(
+    candidate.dirty,
+    identity.build.dirty,
+    "Candidate and build identity disagree on source cleanliness.",
+  );
+  assert.equal(
+    candidate.revision,
+    identity.build.sourceCommit + (identity.build.dirty ? "-dirty" : ""),
+    "Candidate and build identity name different source revisions.",
+  );
+  assert.equal(config.vars.BUILD_IDENTITY, JSON.stringify(identity.build));
   return candidate;
 }
 

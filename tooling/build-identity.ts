@@ -207,7 +207,7 @@ export function candidateEnvironment(version: string, environment: NodeJS.Proces
   return producer;
 }
 
-export function expectedIdentity(version: string) {
+export function expectedIdentity(version: string, environment = process.env) {
   const git = (...args: string[]) =>
     execFileSync("git", args, {
       cwd: root,
@@ -217,7 +217,7 @@ export function expectedIdentity(version: string) {
       env: gitEnvironment(),
     }).trim();
   const commit = git("rev-parse", "HEAD");
-  const producer = candidateEnvironment(version, process.env);
+  const producer = candidateEnvironment(version, environment);
   const build = sourceBuild(
     commit,
     Number(git("show", "-s", "--format=%ct", commit)),
@@ -251,12 +251,14 @@ function helloSchemaOf(sources: Record<string, unknown>) {
   return "arcforges.hello.v1";
 }
 export type Identity = ReturnType<typeof expectedIdentity>;
-export function verifyIdentity(actual: unknown, version: string) {
+export function verifyIdentity(actual: unknown, version: string, environment = process.env) {
+  const identity = expectedIdentity(version, environment);
   assert.deepEqual(
     actual,
-    expectedIdentity(version),
+    identity,
     "Built identity differs from independent source/run/version inputs",
   );
+  return identity;
 }
 export function imageBuildVariables(identity: Identity) {
   const build = identity.build;

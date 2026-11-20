@@ -1,0 +1,32 @@
+[Unit]
+Description=ArcForges self-hosted Center
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=exec
+User=arcforges-center
+Group=arcforges-center
+UMask=0077
+EnvironmentFile=/etc/arcforges-center/center.env
+EnvironmentFile=/etc/arcforges-center/runtime.env
+EnvironmentFile=/etc/arcforges-center/signing.env
+EnvironmentFile=-/etc/arcforges-center/bootstrap.env
+UnsetEnvironment=ARCFORGES_CENTER_MIGRATION_DATABASE_URL ARCFORGES_CENTER_DATABASE_NAME ARCFORGES_CENTER_RUNTIME_ROLE ARCFORGES_CENTER_RUNTIME_SECRET_FILE ARCFORGES_CENTER_RUNTIME_POOLED_HOST ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT ARCFORGES_CENTER_CTR06_PROOF_FILE ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE NEON_DATABASE_URL_DIRECT
+ExecStart=/opt/arcforges-center/arcforges-center serve
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target

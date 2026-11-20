@@ -1,0 +1,4 @@
+# Complete pg_hba.conf for a dedicated, IPv4 loopback-only cluster.
+# Configure the Unix PostgreSQL administrator separately from the Center.
+local   all   postgres      peer
+host    all   all           127.0.0.1/32   scram-sha-256

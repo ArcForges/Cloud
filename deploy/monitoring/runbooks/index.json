@@ -10,7 +10,12 @@
     "runbooks/remote-connection-collapse.md",
     "runbooks/backup-lag-beyond-objective.md",
     "runbooks/payment-provider-webhook-backlog.md",
-    "runbooks/managed-ai-routes-unavailable.md",
-    "runbooks/data-integrity-alarm.md"
+    "runbooks/data-integrity-alarm.md",
+    "runbooks/center-capacity-exhausted.md",
+    "runbooks/center-watch-admission-refused.md",
+    "runbooks/remote-outcome-uncertain.md",
+    "runbooks/storage-admission-unavailable.md",
+    "runbooks/billing-reconciliation-review.md",
+    "runbooks/center-pending-source-unavailable.md"
   ]
 }
