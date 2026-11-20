@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
@@ -282,13 +284,27 @@ export async function preflight(directory: string, fixture: DeploymentFixture) {
   const candidate = await readJson<Candidate>(manifestPath);
   assert.deepEqual(candidate, manifest, "The candidate changed during preflight.");
   assert.equal(candidate.dirty, false, "A clean sealed candidate is required.");
-  const head = await run("git", ["rev-parse", "HEAD"], true);
+  const [head, tree] = execFileSync("git", ["rev-parse", "HEAD", "HEAD^{tree}"], {
+    cwd: root,
+    env: environment,
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 30_000,
+    maxBuffer: 4096,
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+    .trim()
+    .split(/\r?\n/u);
+  assert(head && tree, "The candidate checkout identity is unavailable.");
   assert.equal(candidate.revision, head, "The candidate belongs to another source revision.");
-  if (!local) {
-    const tree = await run("git", ["rev-parse", "HEAD^{tree}"], true);
-    checkCheckout(head, tree, producer);
-  }
-  const config = await readJson<WorkerConfig>(path.join(directory, "wrangler.json"));
+  if (!local) checkCheckout(head, tree, producer);
+  const configBytes = await readFile(path.join(directory, "wrangler.json"));
+  assert.equal(
+    createHash("sha256").update(configBytes).digest("hex"),
+    candidate.files["wrangler.json"],
+    "The Worker configuration changed during preflight.",
+  );
+  const config = JSON.parse(configBytes.toString("utf8")) as WorkerConfig;
   const target = await evaluateFixtureTarget(
     fixture,
     config,
