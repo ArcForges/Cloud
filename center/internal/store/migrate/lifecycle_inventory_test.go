@@ -17,8 +17,6 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 )
 
-// This captures candidate schema facts, not an archive-admission oracle. Review
-// and pin the generated closed inventory before the V2 restore accepts it.
 func TestLifecycleInventoryForBackup(t *testing.T) {
 	captureBackupInventory(t, 13, "ARCFORGES_ID01_INVENTORY_DIR")
 }
@@ -101,11 +99,18 @@ func captureBackupInventory(t *testing.T, version int, evidenceRoot string) {
 	}
 	sort.Strings(inventory)
 	canonical := strings.Join(inventory, "\n") + "\n"
-	if err := ctr06ArchiveInventoryFor(raw, canonical, nil); err != nil {
+	qualifiedInventory, qualifiedCatalogue, err := backupDefinition(version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctr06ArchiveInventoryFor(raw, qualifiedInventory, nil); err != nil {
 		t.Fatal(err)
 	}
 	if os.WriteFile(filepath.Join(dir, schemaName+"-inventory.txt"), []byte(canonical), 0o600) != nil || os.WriteFile(filepath.Join(dir, schemaName+"-catalogue-sha256.txt"), []byte(catalogue+"\n"), 0o600) != nil {
 		t.Fatal("inventory evidence write failed")
 	}
-	t.Logf("Schema%d candidate facts: catalogue=%s inventorySHA256=%s objects=%d output=%s; not yet archive admission", version, catalogue, ctr06SHA([]byte(canonical)), len(inventory), dir)
+	t.Logf("Schema%d native facts: catalogue=%s inventorySHA256=%s objects=%d output=%s", version, catalogue, ctr06SHA([]byte(canonical)), len(inventory), dir)
+	if catalogue != qualifiedCatalogue || canonical != qualifiedInventory {
+		t.Fatalf("schema%d native catalogue or inventory changed from its archive qualification", version)
+	}
 }

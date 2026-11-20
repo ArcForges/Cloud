@@ -374,9 +374,9 @@ func TestTypedManagementRowsAuthorizeOnlyTheOwningAccountAndRequiredFeature(t *t
 	want := map[string]feature.Group{
 		"NodeService.GetOperation": feature.GroupStatusAndOutput, "NodeService.ListRemoteGrants": feature.GroupStatusAndOutput,
 		"NodeService.RevokeRemoteGrant": feature.GroupControl,
-		"SandboxService.Create":         feature.GroupSubmission, "SandboxService.Configure": feature.GroupControl,
+		"SandboxService.Create":         feature.GroupControl, "SandboxService.Configure": feature.GroupControl,
 		"SandboxService.List": feature.GroupStatusAndOutput, "SandboxService.Inspect": feature.GroupStatusAndOutput,
-		"RunService.Start": feature.GroupSubmission, "RunService.Stop": feature.GroupControl,
+		"RunService.Start": feature.GroupControl, "RunService.Stop": feature.GroupControl,
 		"RunService.List": feature.GroupStatusAndOutput, "RunService.Inspect": feature.GroupStatusAndOutput,
 		"ResourceService.GetBudget": feature.GroupStatusAndOutput, "ResourceService.SetPolicy": feature.GroupControl,
 	}

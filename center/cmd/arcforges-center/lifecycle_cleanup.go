@@ -54,7 +54,7 @@ func finishAccountDeletion(args []string, lookup func(string) (string, bool), st
 		return exitFailure
 	}
 	status, err := migrate.Inspect(ctx, conn, build)
-	if err != nil || status.State != migrate.StateCurrent || status.Version != 13 {
+	if err != nil || status.State != migrate.StateCurrent || status.Version < 13 {
 		_, _ = fmt.Fprintln(stderr, "account deletion cleanup requires the ready current lifecycle schema")
 		return exitRefused
 	}

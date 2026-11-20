@@ -63,6 +63,7 @@ type Receipt struct {
 	ResultID                           *platform.ID
 	CreatedAt, UpdatedAt               time.Time
 	FinalAt                            *time.Time
+	reservation                        reservationObservation
 }
 
 // Reserve joins an existing exact identity, or durably reserves one new operation.
@@ -152,7 +153,8 @@ func (s *Store) Reserve(ctx context.Context, identity Identity, lease Lease) (re
 const receiptColumns = `i.account_id,i.command_id,i.namespace,coalesce(o.state,a.legacy_state,7)::smallint,
  coalesce(o.may_have_delivered,a.may_have_delivered,true),coalesce(o.delivery_count,a.delivery_count,0),o.effect,coalesce(o.result_sha256,a.response_sha256),
  i.created_at,coalesce(o.updated_at,a.updated_at,i.created_at),coalesce(o.final_at,a.final_at),
- i.enrollment_id,i.node_id,i.node_owner_epoch,i.method,coalesce(o.result_kind,''),o.result_id,coalesce(o.reason,'')`
+ i.enrollment_id,i.node_id,i.node_owner_epoch,i.method,coalesce(o.result_kind,''),o.result_id,coalesce(o.reason,''),
+ o.hub_fence,o.channel_epoch`
 
 func readReceipt(ctx context.Context, tx pgx.Tx, account, command platform.ID) (r Receipt, err error) {
 	err = scanReceipt(tx.QueryRow(ctx, `SELECT `+receiptColumns+` FROM management.command_identity i
@@ -162,12 +164,21 @@ func readReceipt(ctx context.Context, tx pgx.Tx, account, command platform.ID) (
 
 func scanReceipt(row interface{ Scan(...any) error }, r *Receipt) error {
 	var epoch []byte
+	var fence *int64
+	var channel *platform.ID
 	err := row.Scan(&r.Account, &r.Command, &r.Namespace, &r.State, &r.MayHaveDelivered, &r.DeliveryCount, &r.Effect, &r.ResultSHA256,
-		&r.CreatedAt, &r.UpdatedAt, &r.FinalAt, &r.Enrollment, &r.Node, &epoch, &r.Method, &r.ResultKind, &r.ResultID, &r.Reason)
+		&r.CreatedAt, &r.UpdatedAt, &r.FinalAt, &r.Enrollment, &r.Node, &epoch, &r.Method, &r.ResultKind, &r.ResultID, &r.Reason,
+		&fence, &channel)
 	if err == nil && r.Namespace == 3 && len(epoch) != len(r.OwnerEpoch) {
 		return ErrTransition
 	}
 	copy(r.OwnerEpoch[:], epoch)
+	r.reservation = reservationObservation{}
+	if err == nil && r.Namespace == 3 && fence != nil && channel != nil {
+		r.reservation = reservationObservation{account: r.Account, command: r.Command, channel: *channel,
+			fence: *fence, updatedAt: r.UpdatedAt, state: r.State, deliveryCount: r.DeliveryCount,
+			mayHaveDelivered: r.MayHaveDelivered, final: r.FinalAt != nil}
+	}
 	return err
 }
 

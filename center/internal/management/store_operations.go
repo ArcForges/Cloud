@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/store"
@@ -157,18 +158,36 @@ type retainedOperation struct {
 	final, replayable bool
 	fence             int64
 	channel           platform.ID
+	updatedAt         time.Time
+}
+
+// reservationObservation seals the database snapshot that a transport caller
+// observed before attempting to claim or disprove delivery.
+type reservationObservation struct {
+	account, command, channel platform.ID
+	fence                     int64
+	updatedAt                 time.Time
+	state                     int16
+	deliveryCount             int
+	mayHaveDelivered, final   bool
+}
+
+func (o retainedOperation) matches(i Identity, observed reservationObservation) bool {
+	return observed.account == i.Account && observed.command == i.Command && observed.channel == o.channel &&
+		observed.fence == o.fence && observed.updatedAt.Equal(o.updatedAt) && observed.state == o.state &&
+		observed.deliveryCount == o.deliveryCount && observed.mayHaveDelivered == o.mayHaveDelivered && observed.final == o.final
 }
 
 func lockOperation(ctx context.Context, tx pgx.Tx, i Identity) (o retainedOperation, err error) {
 	err = tx.QueryRow(ctx, `SELECT o.state,o.may_have_delivered,o.delivery_count,o.final_at IS NOT NULL,
-       i.replay_until>clock_timestamp(),o.hub_fence,o.channel_epoch
+       i.replay_until>clock_timestamp(),o.hub_fence,o.channel_epoch,o.updated_at
 FROM management.command_identity i JOIN management.remote_operation o USING(account_id,command_id)
 WHERE i.account_id=$1 AND i.command_id=$2 AND i.namespace=3 AND i.enrollment_id=$3 AND i.node_id=$4
 AND i.node_owner_epoch=$5 AND i.method=$6 AND i.intent_sha256=$7
 AND i.actor_id=$8 AND i.grant_id=$9 AND i.grant_revision=$10
 FOR UPDATE OF o`, i.Account, i.Command, i.Enrollment, i.Node, i.OwnerEpoch[:], i.Method, i.IntentSHA256[:],
 		i.Actor, i.Grant, i.GrantRevision).Scan(&o.state, &o.mayHaveDelivered, &o.deliveryCount,
-		&o.final, &o.replayable, &o.fence, &o.channel)
+		&o.final, &o.replayable, &o.fence, &o.channel, &o.updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, ErrIdentityConflict
 	}
@@ -204,11 +223,12 @@ func (s *Store) transition(ctx context.Context, label string, i Identity, lease 
 
 // MarkPossiblyDelivered commits the first and only send claim. A true result
 // after a successful COMMIT authorizes one write to the exact current channel.
-// A caller may explicitly retry a retained not-delivered identity only after
-// fresh authorization and proof that the connected Node owns the same epoch.
-func (s *Store) MarkPossiblyDelivered(ctx context.Context, i Identity, lease Lease) (Receipt, bool, error) {
+// The expected receipt must be the exact observation from admission or from a
+// freshly authorized, explicit retry of a retained not-delivered identity.
+func (s *Store) MarkPossiblyDelivered(ctx context.Context, i Identity, lease Lease, expected Receipt) (Receipt, bool, error) {
 	return s.transition(ctx, "claim first V2 management delivery", i, lease, func(ctx context.Context, tx pgx.Tx, o retainedOperation) (bool, error) {
-		if o.final || o.mayHaveDelivered || o.deliveryCount != 0 || o.state != StateAccepted && o.state != StateNotDelivered {
+		if !o.matches(i, expected.reservation) || o.final || o.mayHaveDelivered || o.deliveryCount != 0 ||
+			o.state != StateAccepted && o.state != StateNotDelivered {
 			return false, nil
 		}
 		if !o.replayable {
@@ -229,9 +249,12 @@ WHERE account_id=$1 AND command_id=$2`, i.Account, i.Command, lease.Fence, lease
 }
 
 // MarkNotDelivered records a definite no-effect observation only when the
-// original row proves the pre-send claim was never committed.
-func (s *Store) MarkNotDelivered(ctx context.Context, i Identity, lease Lease) (Receipt, error) {
+// same observed row proves the pre-send claim was never committed.
+func (s *Store) MarkNotDelivered(ctx context.Context, i Identity, lease Lease, expected Receipt) (Receipt, error) {
 	r, _, err := s.transition(ctx, "record no V2 management delivery", i, lease, func(ctx context.Context, tx pgx.Tx, o retainedOperation) (bool, error) {
+		if !o.matches(i, expected.reservation) {
+			return false, ErrTransition
+		}
 		if o.state == StateNotDelivered {
 			return false, nil
 		}

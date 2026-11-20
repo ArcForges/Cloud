@@ -14,8 +14,14 @@ import (
 	"testing"
 	"time"
 
+	fleetv1 "github.com/ArcForges/Contracts/go/arcforges/fleet/v1"
+	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/hub"
 	"github.com/ArcForges/Cloud/center/internal/management"
+	"github.com/ArcForges/Cloud/center/internal/nodetest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
@@ -89,7 +95,8 @@ func TestV2ControlChannelBindsClaimAndSignedResult(t *testing.T) {
 	identity := management.Identity{Account: node.user, Actor: call.ActorID, Command: call.CommandID, Enrollment: authority.EnrollmentID,
 		Node: authority.NodeID, Grant: call.GrantID, GrantRevision: call.GrantRevision, OwnerEpoch: [16]byte(ownerEpoch),
 		IntentSHA256: sha256.Sum256(call.Body), Method: "RunService.Stop", CreatedAt: time.Now(), ReplayUntil: time.Now().Add(time.Minute)}
-	if _, inserted, err := receipts.Reserve(ctx, identity, lease); err != nil || !inserted {
+	reserved, inserted, err := receipts.Reserve(ctx, identity, lease)
+	if err != nil || !inserted {
 		t.Fatalf("fixture did not reserve the actual durable operation: %v", err)
 	}
 	returned := make(chan v2ControlCallResult, 1)
@@ -99,7 +106,7 @@ func TestV2ControlChannelBindsClaimAndSignedResult(t *testing.T) {
 			if exact != authority {
 				return false, errors.New("unexpected fixture authority")
 			}
-			_, claimed, err := receipts.MarkPossiblyDelivered(claimCtx, identity, lease)
+			_, claimed, err := receipts.MarkPossiblyDelivered(claimCtx, identity, lease, reserved)
 			return claimed, err
 		})
 		returned <- v2ControlCallResult{body: body, err: err}
@@ -122,6 +129,26 @@ func TestV2ControlChannelBindsClaimAndSignedResult(t *testing.T) {
 		t.Fatal("no result for the exact control request")
 	}
 
+	client := nodetest.Client{URL: h.url, ClientIPHeader: config.ClientIPHeader}
+	reply, err := client.Post("/arcforges.fleet.v1.NodeEnrollmentService/RefreshNodeSession", &fleetv1.NodeEnrollmentServiceRefreshNodeSessionRequest{
+		Meta: &foundationv1.RequestMeta{}, RefreshToken: proto.String(node.result.Session.RefreshToken)}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshed, err := nodetest.Decode(reply, &fleetv1.NodeEnrollmentServiceRefreshNodeSessionResponse{})
+	if err != nil || refreshed.GetValue().GetAccessToken() == "" {
+		t.Fatalf("the enrolled node could not rotate its access credential: %v", err)
+	}
+	rotated := refreshed.GetValue()
+	h.secrets = append(h.secrets, rotated.GetAccessToken(), rotated.GetRefreshToken())
+	if _, err = h.center.Hub.V2ControlAuthority(ctx, node.user, node.node.ID, peer.enrollment, peer.epoch); !errors.Is(err, management.ErrV2ControlUnavailable) {
+		t.Fatalf("the connection's replaced credential still admitted control: %v", err)
+	}
+	writeV2TestFrame(t, ctx, peer.socket, 5, 3, []byte(rotated.GetAccessToken()))
+	if after, err := awaitAuthority(peer); err != nil || after != authority {
+		t.Fatalf("refresh did not restore the same proved V2 control connection: %v", err)
+	}
+
 	call.Selector, call.CommandID, call.Deadline = 6, platform.ID{}, time.Now().Add(8*time.Second)
 	go func() {
 		body, err := h.center.Hub.CallV2(ctx, authority, call, nil)
@@ -129,9 +156,26 @@ func TestV2ControlChannelBindsClaimAndSignedResult(t *testing.T) {
 	}()
 	request = readV2TestFrame(t, ctx, peer.socket, 7, 4)
 	callID, binding = proveV2ControlRequest(t, h, request, call)
+	writeV2ControlResult(t, ctx, peer, node, 4, callID, binding, response)
+	select {
+	case observed := <-returned:
+		if observed.err != nil || !bytes.Equal(observed.body, response) {
+			t.Fatalf("post-refresh control response was unavailable: %v", observed.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("no authenticated control result after refresh")
+	}
+
+	call.Deadline = time.Now().Add(8 * time.Second)
+	go func() {
+		body, err := h.center.Hub.CallV2(ctx, authority, call, nil)
+		returned <- v2ControlCallResult{body: body, err: err}
+	}()
+	request = readV2TestFrame(t, ctx, peer.socket, 7, 5)
+	callID, binding = proveV2ControlRequest(t, h, request, call)
 	binding[0] ^= 1
 	// Even this enrolled peer's correctly signed response is invalid for a different request binding.
-	writeV2ControlResult(t, ctx, peer, node, 3, callID, binding, response)
+	writeV2ControlResult(t, ctx, peer, node, 5, callID, binding, response)
 	select {
 	case observed := <-returned:
 		if !errors.Is(observed.err, management.ErrV2ControlUncertain) || observed.body != nil {
@@ -140,7 +184,7 @@ func TestV2ControlChannelBindsClaimAndSignedResult(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("unbound response did not settle the channel wait")
 	}
-	readV2TestClose(t, ctx, peer.socket, 5, hub.CloseRefused, "result_mismatch")
+	readV2TestClose(t, ctx, peer.socket, 6, hub.CloseRefused, "result_mismatch")
 }
 
 func proveV2ControlRequest(t *testing.T, h *harness, request []byte, call management.V2ControlCall) (platform.ID, [32]byte) {

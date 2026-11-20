@@ -4,6 +4,7 @@ package hub
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -15,10 +16,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ArcForges/Cloud/center/internal/management"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/session"
 )
 
 const v2ControlVectorDeadline = 1780000000000
+
+func TestV2ControlStoreSnapshotUsesDecodedCredential(t *testing.T) {
+	secret := session.Secret{1, 2, 3}
+	textHash := sha256.Sum256([]byte(secret.Token(session.AccessPrefix)))
+	storedHash := secret.Digest()
+	if textHash == storedHash {
+		t.Fatal("the fixture did not distinguish the wire and stored representations")
+	}
+	c := conn{hub: &Hub{}, tokenDigest: textHash, v2AccessHash: storedHash}
+	snapshot, err := c.checkV2ControlStore(context.Background(), management.V2ControlAuthority{})
+	if snapshot != storedHash || err != management.ErrV2ControlUnavailable {
+		t.Fatal("control did not sample the stored form of the bound access credential")
+	}
+}
 
 func v2ControlVectorID(value byte) platform.ID {
 	var id platform.ID

@@ -306,9 +306,6 @@ func Operations() []Operation {
 		if method.Mutation {
 			row.Risk, row.MobileLimited = "R3", Upgrade
 			row.Feature, row.Group = feature.RemoteControl, feature.GroupControl
-			if method.ReceiptMethod() == "SandboxService.Create" || method.ReceiptMethod() == "RunService.Start" {
-				row.Feature, row.Group = feature.CenterExecute, feature.GroupSubmission
-			}
 		}
 		rows = append(rows, row)
 	}
@@ -728,6 +725,16 @@ func (a *Authorizer) Authorize(ctx context.Context, call *ingress.Call) (Operati
 func (a *Authorizer) AuthorizeSubject(ctx context.Context, call *ingress.Call, subject *Subject) (Operation, error) {
 	operation, _, err := a.AuthorizeRelayed(ctx, call, subject, nil)
 	return operation, err
+}
+
+// RecheckFeature checks the gate for a previously authorized call or its
+// related typed readback. It does not grant call or object authority.
+func (a *Authorizer) RecheckFeature(ctx context.Context, call *ingress.Call, path string) error {
+	operation, known := a.lookup(path)
+	if !known || !operation.Session || operation.Feature == "" || !call.Caller.IsAuthenticated() {
+		return arc.PermissionDenied("unknown")
+	}
+	return a.gated(ctx, call, operation)
 }
 
 // RelayClaim is what a routed request states about its node relay, for the relay assertion's verification (AF-CTR-05; Plan addendum

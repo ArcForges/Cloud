@@ -68,19 +68,48 @@ func TestRemoteOperationRetainsOriginalAuthorityAndSendClaim(t *testing.T) {
 			IntentSHA256: sha256.Sum256([]byte("fixture canonical intent " + method)), Method: method,
 			CreatedAt: now, ReplayUntil: now.Add(time.Hour)}
 	}
-	reserve := func(i management.Identity) {
+	reserve := func(i management.Identity) management.Receipt {
 		t.Helper()
 		r, fresh, e := runtime.Reserve(ctx, i, lease)
 		if e != nil || !fresh || r.State != management.StateAccepted || r.DeliveryCount != 0 || r.MayHaveDelivered {
 			t.Fatalf("reserve: receipt=%+v fresh=%t error=%v", r, fresh, e)
 		}
+		return r
 	}
 	start := makeIdentity("RunService.Start")
 	stop := makeIdentity("RunService.Stop")
 	unattempted := makeIdentity("RunService.Start")
-	reserve(start)
-	reserve(stop)
-	reserve(unattempted)
+	startReservation := reserve(start)
+	stopReservation := reserve(stop)
+	unattemptedReservation := reserve(unattempted)
+
+	// Two request paths observe the same admission on the same live channel.
+	// The delayed path must not borrow the later explicit retry state.
+	delayed := makeIdentity("RunService.Start")
+	first := reserve(delayed)
+	stale, fresh, err := runtime.Reserve(ctx, delayed, lease)
+	if err != nil || fresh || stale.State != management.StateAccepted {
+		t.Fatalf("observe original reservation twice: %t %v", fresh, err)
+	}
+	if r, err := runtime.MarkNotDelivered(ctx, delayed, lease, first); err != nil || r.State != management.StateNotDelivered {
+		t.Fatalf("classify no pre-send claim: receipt=%+v error=%v", r, err)
+	}
+	// Changing an outward projection cannot change the retained observation.
+	stale.State = management.StateNotDelivered
+	if r, claimed, err := runtime.MarkPossiblyDelivered(ctx, delayed, lease, stale); err != nil || claimed ||
+		r.State != management.StateNotDelivered || r.MayHaveDelivered || r.DeliveryCount != 0 {
+		t.Fatalf("stale admission consumed the later retry: receipt=%+v claimed=%t error=%v", r, claimed, err)
+	}
+	retry, fresh, err := runtime.Reserve(ctx, delayed, lease)
+	if err != nil || fresh || retry.State != management.StateNotDelivered {
+		t.Fatalf("observe explicit retry state: %t %v", fresh, err)
+	}
+	if _, claimed, err := runtime.MarkPossiblyDelivered(ctx, delayed, lease, retry); err != nil || !claimed {
+		t.Fatalf("newly observed retry claim: %t %v", claimed, err)
+	}
+	if _, err := runtime.MarkNotDelivered(ctx, delayed, lease, first); !errors.Is(err, management.ErrTransition) {
+		t.Fatalf("stale no-effect decision replaced a current claim: %v", err)
+	}
 
 	wrongScope := scope
 	wrongScope.Actor = platform.NewID()
@@ -94,17 +123,17 @@ func TestRemoteOperationRetainsOriginalAuthorityAndSendClaim(t *testing.T) {
 	}
 	legacyShape := makeIdentity("RunService.Start")
 	legacyShape.Actor, legacyShape.Grant, legacyShape.GrantRevision = platform.ID{}, platform.ID{}, 0
-	reserve(legacyShape)
+	legacyReservation := reserve(legacyShape)
 	if _, _, err := runtime.InspectOriginal(ctx, scope, legacyShape.Command); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("unassociated record supplied authority: %v", err)
 	}
-	if _, claimed, err := runtime.MarkPossiblyDelivered(ctx, legacyShape, lease); claimed || !errors.Is(err, management.ErrIdentityConflict) {
+	if _, claimed, err := runtime.MarkPossiblyDelivered(ctx, legacyShape, lease, legacyReservation); claimed || !errors.Is(err, management.ErrIdentityConflict) {
 		t.Fatalf("unassociated operation claimed delivery: %t %v", claimed, err)
 	}
 
 	wrongProtocol := lease
 	wrongProtocol.ProtocolEpoch = platform.NewID()
-	if _, claimed, err := runtime.MarkPossiblyDelivered(ctx, start, wrongProtocol); claimed || !errors.Is(err, management.ErrLease) {
+	if _, claimed, err := runtime.MarkPossiblyDelivered(ctx, start, wrongProtocol, startReservation); claimed || !errors.Is(err, management.ErrLease) {
 		t.Fatalf("foreign protocol claimed delivery: %t %v", claimed, err)
 	}
 	type claim struct {
@@ -114,7 +143,7 @@ func TestRemoteOperationRetainsOriginalAuthorityAndSendClaim(t *testing.T) {
 	claims := make(chan claim, 4)
 	for range cap(claims) {
 		go func() {
-			_, ok, err := runtime.MarkPossiblyDelivered(ctx, start, lease)
+			_, ok, err := runtime.MarkPossiblyDelivered(ctx, start, lease, startReservation)
 			claims <- claim{ok: ok, err: err}
 		}()
 	}
@@ -131,14 +160,14 @@ func TestRemoteOperationRetainsOriginalAuthorityAndSendClaim(t *testing.T) {
 	if claimed != 1 {
 		t.Fatalf("send claim winners: %d", claimed)
 	}
-	if _, err := runtime.MarkNotDelivered(ctx, start, lease); !errors.Is(err, management.ErrTransition) {
+	if _, err := runtime.MarkNotDelivered(ctx, start, lease, startReservation); !errors.Is(err, management.ErrTransition) {
 		t.Fatalf("possible delivery regressed to no effect: %v", err)
 	}
 	if _, fresh, err := runtime.Reserve(ctx, start, lease); fresh || err != nil {
 		t.Fatalf("exact replay became a new admission: %t %v", fresh, err)
 	}
 
-	if _, ok, err := runtime.MarkPossiblyDelivered(ctx, stop, lease); !ok || err != nil {
+	if _, ok, err := runtime.MarkPossiblyDelivered(ctx, stop, lease, stopReservation); !ok || err != nil {
 		t.Fatalf("Stop send claim: %t %v", ok, err)
 	}
 	run := platform.NewID()
@@ -154,10 +183,11 @@ func TestRemoteOperationRetainsOriginalAuthorityAndSendClaim(t *testing.T) {
 	}
 
 	exec("clear fixture channel", `UPDATE fleet.node SET connection_id=NULL,online_since=NULL WHERE enrollment_id=$1`, enrollment)
-	r, err = runtime.MarkNotDelivered(ctx, unattempted, lease)
+	r, err = runtime.MarkNotDelivered(ctx, unattempted, lease, unattemptedReservation)
 	if err != nil || r.State != management.StateNotDelivered || r.MayHaveDelivered || r.DeliveryCount != 0 {
 		t.Fatalf("prove absent send claim after disconnect: receipt=%+v error=%v", r, err)
 	}
+	notDelivered := r
 	r, err = runtime.MarkUnknown(ctx, start, lease)
 	if err != nil || r.State != management.StateUnknown || !r.MayHaveDelivered || r.DeliveryCount != 1 || r.FinalAt != nil {
 		t.Fatalf("retain disconnect uncertainty: receipt=%+v error=%v", r, err)
@@ -190,7 +220,7 @@ func TestRemoteOperationRetainsOriginalAuthorityAndSendClaim(t *testing.T) {
 	if err != nil || r.State != management.StateSucceeded || r.DeliveryCount != 1 || r.FinalAt == nil {
 		t.Fatalf("reconcile exact original operation: receipt=%+v error=%v", r, err)
 	}
-	if _, ok, err := runtime.MarkPossiblyDelivered(ctx, got, next); ok || err != nil {
+	if _, ok, err := runtime.MarkPossiblyDelivered(ctx, got, next, r); ok || err != nil {
 		t.Fatalf("reconciled command claimed a second send: %t %v", ok, err)
 	}
 	changedResult := observation
@@ -199,7 +229,7 @@ func TestRemoteOperationRetainsOriginalAuthorityAndSendClaim(t *testing.T) {
 		t.Fatalf("terminal result changed: %v", err)
 	}
 	// Only this exact identity has durable proof of no previous claim.
-	if _, ok, err := runtime.MarkPossiblyDelivered(ctx, unattempted, next); !ok || err != nil {
+	if _, ok, err := runtime.MarkPossiblyDelivered(ctx, unattempted, next, notDelivered); !ok || err != nil {
 		t.Fatalf("explicit proved no-effect retry: %t %v", ok, err)
 	}
 }

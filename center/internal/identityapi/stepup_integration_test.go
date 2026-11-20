@@ -15,10 +15,13 @@ import (
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
+	sandboxv2 "github.com/ArcForges/Contracts/go/arcforges/sandbox/v2"
+	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/identity"
+	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/session"
 )
@@ -34,6 +37,40 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 	limited := h.issue(who.id, session.ScopeMobileLimited, false)
 	other := h.issue(who.id, session.ScopeAccount, false)
 	node := h.enrollManagedDevice(who, bearer(other.access))
+	var nodeID, enrollmentID platform.ID
+	err := h.migration.QueryRow(context.Background(), `SELECT node_id,enrollment_id FROM fleet.node
+WHERE device_id=$1 AND user_id=$2 AND revoked_at IS NULL`, node.id, who.id).Scan(&nodeID, &enrollmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantID, ownerEpoch, sandboxID := platform.NewID(), idOf(platform.NewID()), idOf(platform.NewID())
+	typedCaller := bearer(limited.access)
+	typedCaller.headers = map[string]string{ingress.RemoteNodeHeader: nodeID.String(), ingress.RemoteEnrollmentHeader: enrollmentID.String(),
+		ingress.RemoteGrantHeader: grantID.String(), ingress.RemoteGrantRevisionHeader: "1"}
+	typedMeta := func(expectedRevision bool) *foundationv1.RequestMeta {
+		m := command()
+		m.CorrelationId = idOf(platform.NewID())
+		if expectedRevision {
+			m.ExpectedRev = &foundationv1.Revision{Value: proto.Int64(1)}
+		}
+		return m
+	}
+	policy := &sandboxv2.ResourcePolicy{PressureAction: sandboxv2.PressureAction_PRESSURE_ACTION_THROTTLE.Enum()}
+	config := &sandboxv2.SandboxConfig{ProfileId: proto.String("linux-bubblewrap-sdk-v1"), ProfileVersion: proto.String("1"), Resources: policy,
+		Network: &sandboxv2.NetworkPolicy{Egress: sandboxv2.NetworkMode_NETWORK_MODE_DENY.Enum(), Ingress: sandboxv2.NetworkMode_NETWORK_MODE_DENY.Enum()}}
+	typedRequests := map[string]proto.Message{
+		sandboxv2connect.NodeServiceRevokeRemoteGrantProcedure: &sandboxv2.NodeServiceRevokeRemoteGrantRequest{Meta: typedMeta(true),
+			GrantId: idOf(grantID), OwnerEpoch: ownerEpoch},
+		sandboxv2connect.SandboxServiceCreateProcedure: &sandboxv2.SandboxServiceCreateRequest{Meta: typedMeta(false), Config: config,
+			DisplayName: proto.String("Owned sandbox"), ProvisionGrantId: idOf(grantID), TemplateRevision: &foundationv1.Revision{Value: proto.Int64(1)}, OwnerEpoch: ownerEpoch},
+		sandboxv2connect.SandboxServiceConfigureProcedure: &sandboxv2.SandboxServiceConfigureRequest{Meta: typedMeta(true),
+			SandboxId: sandboxID, Config: config, OwnerEpoch: ownerEpoch},
+		sandboxv2connect.RunServiceStartProcedure: &sandboxv2.RunServiceStartRequest{Meta: typedMeta(true),
+			SandboxId: sandboxID, Argv: []string{"fixture"}, OwnerEpoch: ownerEpoch},
+		sandboxv2connect.RunServiceStopProcedure: &sandboxv2.RunServiceStopRequest{Meta: typedMeta(false), RunId: idOf(platform.NewID()), OwnerEpoch: ownerEpoch},
+		sandboxv2connect.ResourceServiceSetPolicyProcedure: &sandboxv2.ResourceServiceSetPolicyRequest{Meta: typedMeta(true),
+			ScopeKind: proto.String("sandbox"), ScopeId: sandboxID, Policy: policy, OwnerEpoch: ownerEpoch},
+	}
 	credential := h.credentialIDs(who.id)[0]
 	requests := map[string]proto.Message{
 		"/arcforges.publicapi.v1.IdentityService/GetAccountDeletion": &publicapiv1.IdentityServiceGetAccountDeletionRequest{Meta: meta()},
@@ -59,19 +96,25 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 		if !operation.Session || operation.MobileLimited == access.Allowed || strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.") {
 			continue
 		}
+		from := bearer(limited.access)
 		request, ok := requests[operation.Path]
+		if routed, found := typedRequests[operation.Path]; found {
+			request, ok, from = routed, true, typedCaller
+		}
 		if !ok {
 			t.Errorf("%s needs a step-up of a mobile.limited session, but this test has no request for it", operation.ID)
 			continue
 		}
 		delete(requests, operation.Path)
+		delete(typedRequests, operation.Path)
 		before, receipts := h.writes(), h.receipts()
-		refusal := domainError(t, h.post(operation.Path, request, bearer(limited.access)))
+		routedBefore := h.count("SELECT count(*) FROM management.remote_operation WHERE account_id=$1", who.id)
+		refusal := domainError(t, h.post(operation.Path, request, from))
 		if failure(refusal) != "AUTHENTICATION/step_up_required" || refusal.GetRetry().GetMode() != foundationv1.RetryMode_RETRY_MODE_SAME_COMMAND ||
 			refusal.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
 			t.Errorf("%s from a mobile.limited session: %v", operation.ID, refusal)
 		}
-		if h.writes() != before || h.receipts() != receipts {
+		if h.writes() != before || h.receipts() != receipts || h.count("SELECT count(*) FROM management.remote_operation WHERE account_id=$1", who.id) != routedBefore {
 			t.Errorf("%s from a mobile.limited session wrote or kept a receipt", operation.ID)
 		}
 		checked++
@@ -79,8 +122,11 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 	for path := range requests {
 		t.Errorf("%s has a request, but the operation table opens it to mobile.limited", path)
 	}
-	if checked != 11 {
-		t.Fatalf("%d methods need the upgrade, want 11", checked)
+	for path := range typedRequests {
+		t.Errorf("%s has a routed request, but the operation table opens it to mobile.limited", path)
+	}
+	if checked != 17 {
+		t.Fatalf("%d methods need the upgrade, want 17", checked)
 	}
 
 	// Its own session and device need neither the upgrade nor evidence.

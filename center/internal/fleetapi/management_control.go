@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connectproto"
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	v2 "github.com/ArcForges/Contracts/go/arcforges/sandbox/v2"
+	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
@@ -26,6 +28,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/management"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
+	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
@@ -51,6 +54,7 @@ type controlRequest interface {
 
 type controlResponse interface {
 	proto.Message
+	GetMeta() *foundationv1.ResponseMeta
 	GetError() *foundationv1.ArcError
 }
 
@@ -99,17 +103,17 @@ func controlMethod[Q, R any, Request interface {
 				failure = arc.InvalidArgument("request", "typed_message_invalid")
 			default:
 				value, failure = r.route(ctx, call, selected, request, func(body []byte) (controlResponse, error) {
-					reply := Response(new(R))
-					if err := proto.Unmarshal(body, reply); err != nil || !validResponse(reply) || len(reply.ProtoReflect().GetUnknown()) != 0 {
-						return nil, errControlResult
-					}
-					return reply, nil
+					return decodeControlResponse(body, Response(new(R)), request.GetMeta().GetCorrelationId(), validResponse)
 				})
 			}
 			if failure == nil {
 				return value.(Response), nil
 			}
 			reply := Response(new(R))
+			var readback *connect.Error
+			if errors.As(failure, &readback) {
+				return reply, readback
+			}
 			body, err := arc.ReplyMessage(r.failure(ctx, call, failure))
 			if err != nil {
 				return reply, err
@@ -124,6 +128,53 @@ func controlMethod[Q, R any, Request interface {
 	served.Spec.Schema = v2.File_arcforges_sandbox_v2_platform_proto.Services().ByName(protoreflect.Name(service)).
 		Methods().ByName(protoreflect.Name(name))
 	return served
+}
+
+func decodeControlResponse[Response controlResponse](body []byte, reply Response, correlation *foundationv1.Id,
+	valid func(Response) bool) (Response, error) {
+	if err := proto.Unmarshal(body, reply); err != nil || len(reply.ProtoReflect().GetUnknown()) != 0 ||
+		!proto.Equal(reply.GetMeta().GetCorrelationId(), correlation) ||
+		reply.GetError() != nil && !proto.Equal(reply.GetError().GetCorrelationId(), correlation) ||
+		!valid(reply) && !validTerminalStopNoEffect(reply, valid) {
+		return reply, errControlResult
+	}
+	return reply, nil
+}
+
+// Core's Stop on an already terminal Run succeeds without another effect.
+// Check all other fields with the pinned shape validator and return the
+// authenticated DID_NOT_HAPPEN unchanged. Only Stop uses this state pair.
+func validTerminalStopNoEffect[Response controlResponse](reply Response, valid func(Response) bool) bool {
+	var operation *v2.Operation
+	switch typed := any(reply).(type) {
+	case *v2.RunServiceStopResponse:
+		operation = typed.GetValue().GetOperation()
+		run := typed.GetValue().GetRun()
+		if (run.GetState() != v2.RunState_RUN_STATE_EXITED && run.GetState() != v2.RunState_RUN_STATE_FAILED) ||
+			!proto.Equal(run.GetRunId(), operation.GetAggregateId()) {
+			return false
+		}
+	case *v2.NodeServiceGetOperationResponse:
+		operation = typed.GetValue().GetOperation()
+	default:
+		return false
+	}
+	if operation.GetMethod() != "RunService.Stop" || operation.GetState() != v2.OperationState_OPERATION_STATE_SUCCEEDED ||
+		operation.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN || operation.GetError() != nil {
+		return false
+	}
+	if _, known := parseID(operation.GetAggregateId()); !known {
+		return false
+	}
+	copy := proto.Clone(reply).(Response)
+	switch typed := any(copy).(type) {
+	case *v2.RunServiceStopResponse:
+		operation = typed.GetValue().GetOperation()
+	case *v2.NodeServiceGetOperationResponse:
+		operation = typed.GetValue().GetOperation()
+	}
+	operation.Effect = foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED.Enum()
+	return valid(copy)
 }
 
 func (r *managementRouter) route(ctx context.Context, call *ingress.Call, selected routes.ManagementMethod, request controlRequest,
@@ -212,7 +263,8 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 	if err != nil {
 		return nil, r.transportFailure(err, node)
 	}
-	return decodeResponse(body)
+	reply, err := decodeResponse(body)
+	return reply, r.transportFailure(err, node)
 }
 
 func controlLease(channel management.V2ControlAuthority) management.Lease {
@@ -302,7 +354,7 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 		return nil, r.transportFailure(err, scope.Node)
 	}
 	if receipt.FinalAt != nil || receipt.MayHaveDelivered {
-		return nil, r.observeReplay(ctx, scope, channel, lease, routed, request.GetMeta(), receipt)
+		return nil, r.observeReplay(ctx, scope, channel, lease, routed, request.GetMeta())
 	}
 
 	var claimed atomic.Bool
@@ -310,7 +362,7 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 		if current != channel {
 			return false, management.ErrLease
 		}
-		_, accepted, err := r.receipts.MarkPossiblyDelivered(ctx, identity, lease)
+		_, accepted, err := r.receipts.MarkPossiblyDelivered(ctx, identity, lease, receipt)
 		claimed.Store(accepted && err == nil)
 		return accepted, err
 	})
@@ -318,11 +370,7 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 		// A concurrent exact request may own the first claim already. Do
 		// not classify that other caller's delivery as not delivered.
 		if errors.Is(err, management.ErrV2ControlNotClaimed) {
-			_, latest, readErr := r.receipts.InspectOriginal(ctx, scope, command)
-			if readErr != nil {
-				return nil, controlUnknown("delivery_claim_unconfirmed")
-			}
-			return nil, r.observeReplay(ctx, scope, channel, lease, routed, request.GetMeta(), latest)
+			return nil, r.observeReplay(ctx, scope, channel, lease, routed, request.GetMeta())
 		}
 		if claimed.Load() || errors.Is(err, management.ErrV2ControlUncertain) || errors.Is(err, store.ErrCommitUnknown) {
 			r.retainUncertain(ctx, identity, lease)
@@ -330,8 +378,10 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 		}
 		settlement, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
-		if _, settleErr := r.receipts.MarkNotDelivered(settlement, identity, lease); settleErr != nil {
+		confirmed, settleErr := r.receipts.MarkNotDelivered(settlement, identity, lease, receipt)
+		if settleErr != nil || confirmed.State != management.StateNotDelivered || confirmed.MayHaveDelivered {
 			r.logger.WarnContext(settlement, "V2 no-delivery settlement unavailable", "method", identity.Method, "operation", identity.Command.String())
+			return nil, controlUnknown("no_delivery_not_confirmed")
 		}
 		return nil, r.transportFailure(err, scope.Node)
 	}
@@ -355,8 +405,9 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 		settlement, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 		if _, err = r.receipts.RecordResult(settlement, identity, lease, observation); err != nil {
-			r.retainUncertain(settlement, identity, lease)
-			return nil, controlUnknown("result_settlement_unconfirmed")
+			if failure := r.confirmControlDisclosure(ctx, identity, channel, routed, request.GetMeta(), observation, err); failure != nil {
+				return nil, failure
+			}
 		}
 	}
 	return reply, nil
@@ -415,44 +466,52 @@ func (r *managementRouter) reconcile(ctx context.Context, scope management.Autho
 		settlement, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
 		if _, err = r.receipts.ReconcileResult(settlement, identity, lease, observation); err != nil {
-			return nil, controlUnknown("reconciliation_settlement_unconfirmed")
+			if failure := r.confirmControlDisclosure(ctx, identity, channel, routed, request.GetMeta(), observation, err); failure != nil {
+				return nil, failure
+			}
 		}
 	}
 	return reply, nil
 }
 
 func (r *managementRouter) observeReplay(ctx context.Context, scope management.Authority, channel management.V2ControlAuthority,
-	lease management.Lease, routed management.V2ControlCall, meta *foundationv1.RequestMeta, receipt management.Receipt) error {
-	query := &v2.NodeServiceGetOperationRequest{Meta: &foundationv1.RequestMeta{CorrelationId: meta.GetCorrelationId()},
-		OwnerEpoch: id(routed.OriginalOwnerEpoch), CommandId: id(routed.CommandID)}
-	body, err := proto.MarshalOptions{Deterministic: true}.Marshal(query)
+	lease management.Lease, routed management.V2ControlCall, meta *foundationv1.RequestMeta) error {
+	call, ok := ingress.CallFrom(ctx)
+	if !ok {
+		return arc.Unauthenticated()
+	}
+	if err := r.access.RecheckFeature(ctx, call, sandboxv2connect.NodeServiceGetOperationProcedure); err != nil {
+		return err
+	}
+	query, read, err := controlReadbackRequest(routed, meta)
 	if err != nil {
 		return controlUnknown("reconciliation_request_unavailable")
 	}
-	read := routed
-	read.Selector, read.Body = 1, body
 	response, err := r.reconcile(ctx, scope, channel, lease, query, read, func(payload []byte) (controlResponse, error) {
-		reply := &v2.NodeServiceGetOperationResponse{}
-		if err := proto.Unmarshal(payload, reply); err != nil || !v2.ValidateNodeServiceGetOperationResponse(reply) {
-			return nil, errControlResult
-		}
-		return reply, nil
+		return decodeControlResponse(payload, &v2.NodeServiceGetOperationResponse{}, meta.GetCorrelationId(), v2.ValidateNodeServiceGetOperationResponse)
 	})
+	var unavailable *connect.Error
+	if errors.As(err, &unavailable) {
+		return unavailable
+	}
 	if err == nil {
 		observed := response.(*v2.NodeServiceGetOperationResponse)
 		if refusal := observed.GetError(); refusal != nil {
+			if refusal.GetCode() == "not_found" {
+				return controlUnknown("original_operation_not_observed")
+			}
 			return &storedRefusal{refusal}
 		}
 		operation := observed.GetValue().GetOperation()
 		if operation.GetResponseCompacted() {
-			return controlReplayReference(receipt, operation, true)
+			return controlCompacted(operation)
 		}
 		if operation.GetError() != nil && operation.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN {
 			return &storedRefusal{operation.GetError()}
 		}
 		if operation.GetState() == v2.OperationState_OPERATION_STATE_SUCCEEDED ||
 			operation.GetState() == v2.OperationState_OPERATION_STATE_FAILED {
-			return controlReplayReference(receipt, operation, false)
+			return controlReconciled(observed)
 		}
 	}
 	// The database is not a substitute for the current Node grant check. An
@@ -460,18 +519,111 @@ func (r *managementRouter) observeReplay(ctx context.Context, scope management.A
 	return controlUnknown("original_operation_reconciliation_required")
 }
 
-func controlReplayReference(receipt management.Receipt, operation *v2.Operation, compacted bool) *arc.Refusal {
-	refusal := &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "busy",
-		State:  strings.TrimPrefix(operation.GetState().String(), "OPERATION_STATE_"),
-		Reason: "original_operation_result_requires_reconciliation", Effect: operation.GetEffect(),
-		Retry: foundationv1.RetryMode_RETRY_MODE_RECONCILE, Reconcile: "NodeService.GetOperation"}
-	if compacted {
-		refusal.Code, refusal.Reason = "receipt_compacted", "original_response_compacted"
+func controlReadbackRequest(routed management.V2ControlCall, meta *foundationv1.RequestMeta) (*v2.NodeServiceGetOperationRequest, management.V2ControlCall, error) {
+	query := &v2.NodeServiceGetOperationRequest{Meta: &foundationv1.RequestMeta{CorrelationId: meta.GetCorrelationId()},
+		OwnerEpoch: id(routed.OriginalOwnerEpoch), CommandId: id(routed.CommandID)}
+	body, err := proto.MarshalOptions{Deterministic: true}.Marshal(query)
+	routed.Selector, routed.Body = 1, body
+	return query, routed, err
+}
+
+// The durable send claim already prevents execution again. An interrupted
+// metadata settlement can still disclose the verified result if both Center
+// authority and the Node's read authorization are freshly confirmed.
+func (r *managementRouter) confirmControlDisclosure(ctx context.Context, identity management.Identity,
+	channel management.V2ControlAuthority, routed management.V2ControlCall, meta *foundationv1.RequestMeta,
+	want management.Observation, settleErr error) error {
+	r.logger.WarnContext(ctx, "V2 result metadata settlement unavailable", "method", identity.Method, "operation", identity.Command.String())
+	unavailable := connect.NewError(connect.CodeUnavailable, "original_operation_readback_unavailable")
+	call, ok := ingress.CallFrom(ctx)
+	if !ok || !retryableControlSettlement(settleErr) || ctx.Err() != nil {
+		return unavailable
 	}
-	if receipt.ResultID != nil {
-		refusal.Resource = &arc.Resource{Kind: receipt.ResultKind, ID: receipt.ResultID[:]}
+	if err := r.recheckControlCaller(ctx, call); err != nil {
+		return unavailable
+	}
+	if err := r.access.RecheckFeature(ctx, call, call.Policy.FullName); err != nil {
+		return unavailable
+	}
+	if call.Policy.FullName != sandboxv2connect.NodeServiceGetOperationProcedure {
+		if err := r.access.RecheckFeature(ctx, call, sandboxv2connect.NodeServiceGetOperationProcedure); err != nil {
+			return unavailable
+		}
+	}
+	_, read, err := controlReadbackRequest(routed, meta)
+	if err != nil {
+		return unavailable
+	}
+	body, err := r.transport.CallV2(ctx, channel, read, nil)
+	if err != nil {
+		return unavailable
+	}
+	observed, err := decodeControlResponse(body, &v2.NodeServiceGetOperationResponse{}, meta.GetCorrelationId(), v2.ValidateNodeServiceGetOperationResponse)
+	if err != nil || observed.GetError() != nil {
+		return unavailable
+	}
+	if actual, err := operationControlObservation(identity, observed, observed.GetValue().GetOperation()); err != nil ||
+		!sameVerifiedEffect(want, actual) {
+		return unavailable
+	}
+	return nil
+}
+
+func sameVerifiedEffect(want, actual management.Observation) bool {
+	return want.Effect == actual.Effect && (want.State == actual.State ||
+		want.State == management.StateRejected && actual.State == management.StateFailed) &&
+		(want.ResultID == nil || actual.ResultID != nil && *want.ResultID == *actual.ResultID)
+}
+
+func retryableControlSettlement(err error) bool {
+	return errors.Is(err, store.ErrUnavailable) || errors.Is(err, store.ErrTimeout) ||
+		errors.Is(err, store.ErrContention) || errors.Is(err, store.ErrCommitUnknown)
+}
+
+func (r *managementRouter) recheckControlCaller(ctx context.Context, call *ingress.Call) error {
+	account, err := accountOf(call)
+	if err != nil {
+		return err
+	}
+	credential := int16(1)
+	if account.Caller.Browser {
+		credential = 2
+	}
+	scope := session.ScopeAccount
+	if account.Caller.Scope == session.ScopeMobileLimited.String() {
+		scope = session.ScopeMobileLimited
+	}
+	return r.db.InTx(ctx, "recheck the typed control result recipient", store.TxOptions{ReadOnly: true}, func(ctx context.Context, tx pgx.Tx) error {
+		var live bool
+		return tx.QueryRow(ctx, `SELECT true FROM identity.session s
+JOIN identity.user u USING(user_id) JOIN identity.account_security_state a USING(user_id)
+JOIN device.device d ON d.device_id=s.device_id JOIN device.installation i ON i.installation_id=s.installation_id
+WHERE s.session_id=$1 AND s.user_id=$2 AND s.device_id=$3 AND s.credential_kind=$4 AND s.scope=$5
+AND u.state=$6 AND s.auth_epoch=$7 AND s.recovery_generation=$8
+AND s.auth_epoch=a.auth_epoch AND s.recovery_generation=a.recovery_generation
+AND s.revoked_at IS NULL AND d.revoked_at IS NULL AND i.revoked_at IS NULL
+AND s.expires_at>clock_timestamp() AND ((s.credential_kind=1 AND s.access_expires_at>clock_timestamp())
+OR (s.credential_kind=2 AND s.idle_expires_at>clock_timestamp()))`, account.Caller.SessionID, account.Caller.UserID,
+			account.Caller.DeviceID, credential, scope, call.Caller.AccountState, account.Caller.AuthEpoch, account.Caller.RecoveryGeneration).Scan(&live)
+	})
+}
+
+func controlCompacted(operation *v2.Operation) *arc.Refusal {
+	refusal := &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "receipt_compacted",
+		State:  strings.TrimPrefix(operation.GetState().String(), "OPERATION_STATE_"),
+		Reason: "original_response_compacted", Effect: operation.GetEffect(), Retry: foundationv1.RetryMode_RETRY_MODE_NEVER}
+	if aggregate, valid := parseID(operation.GetAggregateId()); valid {
+		refusal.Resource = &arc.Resource{Kind: controlAggregateKind(operation.GetMethod()), ID: aggregate[:]}
 	}
 	return refusal
+}
+
+func controlReconciled(observed *v2.NodeServiceGetOperationResponse) error {
+	detail, err := connectproto.NewErrorDetail(observed)
+	if err != nil {
+		return err
+	}
+	return connect.NewError(connect.CodeFailedPrecondition, "original_operation_reconciled").WithDetail(detail)
 }
 
 func directControlObservation(identity management.Identity, reply controlResponse) (management.Observation, error) {
@@ -542,20 +694,24 @@ func operationControlObservation(identity management.Identity, reply controlResp
 		var aggregateID *platform.ID
 		if aggregate, valid := parseID(operation.GetAggregateId()); valid {
 			aggregateID = &aggregate
-			switch identity.Method {
-			case "SandboxService.Create", "SandboxService.Configure":
-				kind = "sandbox"
-			case "RunService.Start", "RunService.Stop":
-				kind = "run"
-			case "ResourceService.SetPolicy":
-				kind = "policy"
-			default:
-				kind = "operation"
-			}
+			kind = controlAggregateKind(identity.Method)
 		}
 		return controlObservation(reply, state, int16(operation.GetEffect()), kind, aggregateID, operation.GetError().GetCode())
 	default:
 		return management.Observation{}, errControlResult
+	}
+}
+
+func controlAggregateKind(method string) string {
+	switch method {
+	case "SandboxService.Create", "SandboxService.Configure":
+		return "sandbox"
+	case "RunService.Start", "RunService.Stop":
+		return "run"
+	case "ResourceService.SetPolicy":
+		return "policy"
+	default:
+		return "operation"
 	}
 }
 

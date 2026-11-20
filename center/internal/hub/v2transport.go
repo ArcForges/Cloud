@@ -46,11 +46,15 @@ func (h *Hub) V2ControlAuthority(ctx context.Context, accountID, nodeID, enrollm
 	if err != nil {
 		return management.V2ControlAuthority{}, err
 	}
-	if _, err = cp.checkV2ControlStore(ctx, authority); err != nil {
+	accessHash, err := cp.checkV2ControlStore(ctx, authority)
+	if err != nil {
 		return management.V2ControlAuthority{}, management.ErrV2ControlUnavailable
 	}
 	current, observed, err := h.currentV2ControlPeer(accountID, nodeID, enrollmentID, protocolEpoch)
-	if err != nil || current != cp || observed != authority {
+	cp.mu.Lock()
+	sameCredential := cp.v2AccessHash == accessHash
+	cp.mu.Unlock()
+	if err != nil || current != cp || observed != authority || !sameCredential {
 		return management.V2ControlAuthority{}, management.ErrV2ControlUnavailable
 	}
 	return authority, nil
@@ -94,13 +98,13 @@ func (c *conn) v2ControlReadyLocked(now time.Time) bool {
 // live in-process authority after this observation, immediately before a send or a reported result.
 func (c *conn) checkV2ControlStore(ctx context.Context, a management.V2ControlAuthority) ([32]byte, error) {
 	c.mu.Lock()
-	digest := c.tokenDigest
+	accessHash := c.v2AccessHash
 	c.mu.Unlock()
 	if c.hub.db == nil {
-		return digest, management.ErrV2ControlUnavailable
+		return accessHash, management.ErrV2ControlUnavailable
 	}
 	err := c.hub.db.InTx(ctx, "verify current V2 control channel", store.TxOptions{Timeout: presenceTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
-		expires, err := c.lockV2Credential(ctx, tx, digest)
+		expires, err := c.lockV2Credential(ctx, tx, accessHash)
 		if err != nil || !c.hub.clock().Before(expires) {
 			if err != nil {
 				return err
@@ -120,7 +124,7 @@ AND n.revoked_at IS NULL AND p.revoked_at IS NULL FOR SHARE OF n,p`, a.Enrollmen
 		return tx.QueryRow(ctx, `SELECT true FROM fleet.hub_lease
 WHERE singleton AND holder=$1 AND fence=$2 AND expires_at>clock_timestamp() FOR SHARE`, a.HubHolder, a.HubFence).Scan(&current)
 	})
-	return digest, err
+	return accessHash, err
 }
 
 // CallV2 sends one bounded typed call to the exact current control connection. Mutations must
@@ -306,7 +310,7 @@ func (c *conn) beginV2ControlWrite(p *pendingV2Control, writerDeadline time.Time
 	start := time.Now()
 	now := h.clock()
 	if err != nil || !keyCurrent || ctx.Err() != nil || !now.Before(p.deadline) || !held || h.stopping || h.nodes[c.nodeID] != c ||
-		fence != p.authority.HubFence || !c.v2ControlReadyLocked(now) || c.v2Calls[p.id] != p || c.tokenDigest != digest {
+		fence != p.authority.HubFence || !c.v2ControlReadyLocked(now) || c.v2Calls[p.id] != p || c.v2AccessHash != digest {
 		c.finishV2ControlLocked(p, v2ControlOutcome{err: management.ErrV2ControlUnavailable})
 		if releaseNode != nil {
 			releaseNode()
@@ -384,7 +388,7 @@ func (c *conn) v2ControlResult(result v2SignedControlResult) bool {
 		return true
 	}
 	if err != nil || !held || h.stopping || h.nodes[c.nodeID] != c || fence != p.authority.HubFence ||
-		!c.v2ControlReadyLocked(now) || c.tokenDigest != digest || p.ctx.Err() != nil || !now.Before(p.deadline) {
+		!c.v2ControlReadyLocked(now) || c.v2AccessHash != digest || p.ctx.Err() != nil || !now.Before(p.deadline) {
 		c.finishV2ControlLocked(p, v2ControlOutcome{err: management.ErrV2ControlUnavailable})
 		return true
 	}

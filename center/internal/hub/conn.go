@@ -39,12 +39,11 @@ type conn struct {
 	sessionID, userID, deviceID, installationID platform.ID
 	nodeID, enrollmentID                        platform.ID
 	// nodeName is the node's registry name as the upgrade read it: ChannelAccepted.node_name (AF-CTR-05 E2a; Plan Q25).
-	nodeName          string
-	publicKey         []byte
-	connectionID      platform.ID
-	correlationID     *platform.ID
-	fence             int64
-	upgradeAccessHash [32]byte
+	nodeName      string
+	publicKey     []byte
+	connectionID  platform.ID
+	correlationID *platform.ID
+	fence         int64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -71,7 +70,8 @@ type conn struct {
 	v2Capabilities []string
 	v2Ready        bool
 	recorded       bool     // the accept's presence write succeeded: the close records the node offline
-	tokenDigest    [32]byte // the SHA-256 of the access token the connection is bound to
+	tokenDigest    [32]byte // SHA-256 of the wire token text, used to recognize an unchanged refresh
+	v2AccessHash   [32]byte // SHA-256 of the decoded credential, matched against the store for V2
 	refreshes      int      // the TokenRefresh frames the connection sent
 	lastRefresh    time.Time
 	accessExpires  time.Time
@@ -531,8 +531,17 @@ func (c *conn) tokenRefresh(token string, now time.Time) bool {
 		c.closeWith(CloseRefused, "upgrade_required")
 		return false
 	}
+	var v2AccessHash [32]byte
+	if c.v2 != nil {
+		secret, ok := session.ParseToken(session.AccessPrefix, token)
+		if !ok {
+			c.closeWith(CloseCredential, "token_refused")
+			return false
+		}
+		v2AccessHash = secret.Digest()
+	}
 	c.mu.Lock()
-	c.accessExpires, c.tokenDigest = expires, digest
+	c.accessExpires, c.tokenDigest, c.v2AccessHash = expires, digest, v2AccessHash
 	c.mu.Unlock()
 	c.hub.metrics.ObserveChannel("token", "rebound")
 	c.recheckSession(ctx)

@@ -496,7 +496,8 @@ func checkIdentityComposition(modules []routes.Module) error {
 		served[method.Spec.Procedure] = true
 	}
 	fleetServer := fleetapi.New(nil, nil, nil, nil, nil)
-	for _, method := range slices.Concat(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods(), fleetServer.DeviceMethods(nil, nil)) {
+	for _, method := range slices.Concat(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods(),
+		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0)) {
 		served[method.Spec.Procedure] = true
 	}
 	if len(served) != len(policies) {

@@ -56,8 +56,11 @@ func (h *Hub) V2Presence(accountID, enrollmentID, nodeID, protocolEpoch platform
 // existing live node row and its channel replacement. A stale hub or protocol
 // generation cannot record an online channel.
 func (c *conn) markV2Online(ctx context.Context, now time.Time) error {
+	c.mu.Lock()
+	accessHash := c.v2AccessHash
+	c.mu.Unlock()
 	return c.hub.db.InTx(ctx, "record a V2 node's channel", store.TxOptions{Timeout: presenceTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
-		expires, err := c.lockV2Credential(ctx, tx, c.upgradeAccessHash)
+		expires, err := c.lockV2Credential(ctx, tx, accessHash)
 		if err != nil {
 			return err
 		}
