@@ -117,7 +117,7 @@ func TestTwoOperatorsGrantingToEachOtherAreBothServed(t *testing.T) {
 		first.SourceRef = fmt.Sprintf("round-%d-a", round)
 		second := f.request(one, "remote.view")
 		if round%2 == 1 {
-			second = f.request(two, "push")
+			second = f.request(two, "remote.control")
 			second.SelfApproval = "covering the on-call shift"
 		}
 		second.SourceRef = fmt.Sprintf("round-%d-b", round)

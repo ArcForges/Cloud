@@ -1,0 +1,18 @@
+{
+  "version": "dev-host-v2",
+  "fixture": true,
+  "notice": "V2 development fixture for hosted service decisions. Sales and prices are not configured.",
+  "capabilities": ["center.nodes", "remote.view", "remote.control"],
+  "plans": [
+    {
+      "id": "fixture-all",
+      "name": "Fixture all hosted services",
+      "features": ["center.nodes", "remote.view", "remote.control"]
+    },
+    {
+      "id": "fixture-view",
+      "name": "Fixture remote view",
+      "features": ["remote.view"]
+    }
+  ]
+}

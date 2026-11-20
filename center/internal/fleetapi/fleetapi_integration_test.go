@@ -91,7 +91,7 @@ func TestFleetRowsAreTheServedMethods(t *testing.T) {
 // with the node scope); an account token is permission_denied; a revoked device, an expired family and a suspended account refuse;
 // a restricted account's node keeps refreshing. Never gated: the gated feature keys are all disabled here.
 func TestRefreshNodeSession(t *testing.T) {
-	h := newHarness(t, settings{disabled: "center.nodes,center.execute,remote.view,remote.control,center.mcp,push"})
+	h := newHarness(t, settings{disabled: "center.nodes,remote.view,remote.control"})
 	ctx := context.Background()
 	now := time.Now().UTC()
 	register := func(kid string, notBefore time.Time) {

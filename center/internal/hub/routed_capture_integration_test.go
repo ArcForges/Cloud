@@ -163,7 +163,7 @@ func normalizeRouted(p *channelPlaceholders, nodeID platform.ID, fixed map[strin
 // TestRoutedExchangeCapture captures the routed methods' cases (E2-26). ARCFORGES_UPDATE_EXCHANGES=1 rewrites the directory.
 func TestRoutedExchangeCapture(t *testing.T) {
 	main := routedHarness(t)
-	gated := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", disabled: "center.execute,remote.view,remote.control",
+	gated := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", mode: config.OfficialHosted,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
 	quota := newHarness(t, settings{legacyRouting: true, surfaces: "identity,pages,fleet,relay,nodes", policy: `{"routedCallsAccountLimit": 1}`,
 		tune: func(s *hub.Settings) { s.Heartbeat, s.HeartbeatDeadline = time.Second, 30*time.Second }})
@@ -244,7 +244,7 @@ func TestRoutedExchangeCapture(t *testing.T) {
 		}
 		capture(main, m, unknown, other, issued, fixedID(0x93))
 		<-dropped
-		// gated: the features are disabled.
+		// gated: the official Center has no configured offer. Keep the original V1 reply bytes.
 		gatedUser := gated.db.Account(1)
 		gatedNode := gated.enrollIn(gatedUser)
 		capture(gated, m, "gated", gatedNode, gated.accountSession(gatedUser, session.ScopeAccount), fixedID(0x94))

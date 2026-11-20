@@ -280,43 +280,38 @@ cannot reach a real account.
 
 ## Center mode and feature availability
 
-The mode is explicit configuration (AD-0021 §13a); there is no default. `internal/feature` answers feature availability behind the
-`feature.Gate` interface, for the six gated keys (`center.nodes`, `center.execute`, `remote.view`, `remote.control`, `center.mcp`,
-`push`). The reason of every answer is a closed vocabulary, never request text:
+Set `ARCFORGES_CENTER_MODE` to `official-hosted` or `self-hosted` at service startup. Configuration validation rejects a missing
+or unknown mode. `internal/feature` evaluates the three V2 service keys `center.nodes`, `remote.view` and `remote.control`.
 
-| Mode and state                                         | Gated features                                                                                            | Reason                                                                                          |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `official-hosted`, no plan configuration (production)  | unavailable                                                                                               | `plan_configuration_missing`                                                                    |
-| `official-hosted`, a catalogue that does not validate  | unavailable                                                                                               | `plan_configuration_invalid` (the start logs which rule failed)                                 |
-| `official-hosted`, a valid catalogue                   | decided by the account's entitlement snapshot (the resolver, [center entitlement](center-entitlement.md)) | `entitled`, `no_entitlement`, `payment_grace`, `subscription_expired`, `account_suspended`, ... |
-| `official-hosted`, the entitlement store cannot answer | unavailable, as an unavailable store and not as a missing entitlement                                     | `entitlement_unavailable`                                                                       |
-| `self-hosted`                                          | available: the built-in default, minus the operator's limits                                              | `self_hosted_default`; `operator_limit` for a key in `ARCFORGES_CENTER_DISABLED_FEATURES`       |
-| `self-hosted`, `push`                                  | unavailable until a push sender is configured (DC-22; none exists before AF-CLD-06)                       | `push_sender_not_configured`                                                                    |
-| anything else                                          | the center does not start                                                                                 | —                                                                                               |
+| Mode and state                                         | Gated features                                                | Reason                                                                                      |
+| ------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `official-hosted`, no plan configuration               | unavailable                                                   | `plan_configuration_missing`                                                                |
+| `official-hosted`, invalid catalogue                   | unavailable                                                   | `plan_configuration_invalid`                                                                |
+| `official-hosted`, valid catalogue                     | decided by the account's current entitlement snapshot         | `entitled`, `no_entitlement`, `payment_grace`, `subscription_expired`, `account_suspended`     |
+| `official-hosted`, entitlement store cannot answer    | status and new admission report a temporary service failure   | `entitlement_unavailable`                                                                   |
+| `self-hosted`                                          | available by default, subject to the operator's service limits | `self_hosted_default` or `operator_limit` for a service in `ARCFORGES_CENTER_DISABLED_FEATURES` |
 
-An unknown key is never available (`unknown_feature`). Hello, health, readiness and metrics are not gated features, and neither
-is any essential operation (sign-in, account, billing, security and recovery): a row of the operation table without a `Feature` is
-never gated. Availability is one more check after authentication, ownership, authorization, AGENT/HUMAN separation, resource
-controls and audit, in that order and last ([the gate](center-entitlement.md#the-gate)); it never replaces them.
+The published `EntitlementService.GetSnapshot` uses the current authenticated account. Official mode reads one entitlement
+snapshot for the service decisions. Self-hosted mode derives the decisions from local configuration, independent of the official
+catalogue, issuer, commerce credentials and endpoints. Essential sign-in, account, billing, security and recovery methods are
+available to authenticated callers according to their individual policies.
 
 ### Routed task control
 
-The node channel and routed task operations delivered by AF-CTR-05, and later MCP and push operations when implemented, carry
-these keys. AF-CTR-04's node enrollment is essential and carries none. The table is `feature.OperationKeys`, and the operation table of `internal/access` is linked to it in code (AF-CTR-05 part E0): a row
-that carries a `Feature` names its `Group`, and `access.CheckRow` refuses the row, and with it the composition, unless its key is the
-key this table names for that group; a row without a `Feature` names no group (`TestEveryFeatureRowCarriesTheKeyOfItsGroup`, with a
-table-driven negative over every group and key; the first served row was the node channel's, `fleet.nodeChannel`, AF-CTR-05 E1a;
-E2b added the routed task rows). `TestTheCenterDocumentPrintsTheRoutedTaskControlTable`
-fails when this table and the code differ:
+`feature.OperationKeys` lists the V2 service groups. The access table checks each gated operation's group and key after
+authentication, target ownership, authorization, applicable resource controls and audit. A V2 hosted entitlement refusal is
+`ENTITLEMENT/hosted_access_required`. A self-hosted operator service limit uses `RESOURCE/operator_limit`. The finite V1
+compatibility routes retain their published gate and error semantics. Historical entitlement records keep their original keys and
+validity intervals.
 
-| Key              | Group               | Gates                                               |
-| ---------------- | ------------------- | --------------------------------------------------- |
-| `remote.control` | `control`           | control of existing tasks (cancel, retry, priority) |
-| `center.execute` | `submission`        | submission, and file and workspace operations       |
-| `remote.view`    | `status_and_output` | status and output                                   |
-| `center.nodes`   | `node_connection`   | node connection                                     |
-| `center.mcp`     | `mcp`               | MCP                                                 |
-| `push`           | `push`              | push                                                |
+| Key              | Group               | Gates                                     |
+| ---------------- | ------------------- | ----------------------------------------- |
+| `remote.control` | `control`           | Sandbox, Run, resource and data mutations |
+| `remote.view`    | `status_and_output` | Sandbox, Run, resource and data reads and watches |
+| `center.nodes`   | `node_connection`   | node connection                           |
+
+Hosted channels and streams periodically recheck service availability. An expired or revoked hosted entitlement closes the
+affected remote channel or stream and refuses new hosted access. Local Runs, data and the CLI continue independently.
 
 Resource limits are enforced through the resource-control stage of `Authorize` by the per-account controls of `internal/quota`
 (AF-CTR-05 part E0), which the composition registers with `access.WithControls`; a gated row that no control covers stops the

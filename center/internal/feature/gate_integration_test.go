@@ -4,6 +4,7 @@ package feature
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -102,9 +103,9 @@ func TestTheFixtureCatalogueWithoutAGrantEnablesNothing(t *testing.T) {
 func TestAnOperatorGrantEnablesTheNamedKeysOfThatAccountOnly(t *testing.T) {
 	f := newFixture(t, Settings{Mode: config.OfficialHosted, Plan: config.PlanDevelopmentFixtures})
 	granted, other := f.db.Account(1), f.db.Account(1)
-	f.operatorGrant(granted, 30, RemoteView, Push)
+	f.operatorGrant(granted, 30, RemoteView, RemoteControl)
 	for _, key := range Gated() {
-		want := key == RemoteView || key == Push
+		want := key == RemoteView || key == RemoteControl
 		decision := f.decision(granted, key)
 		if decision.Available != want || want && decision.Reason != ReasonEntitled || !want && decision.Reason != ReasonNoEntitlement {
 			t.Errorf("granted account, %s: %+v", key, decision)
@@ -144,7 +145,7 @@ func TestALapsedPaidGrantPlusAnOperatorGrant(t *testing.T) {
 	if decision := f.decision(account, RemoteView); !decision.Available || decision.Reason != ReasonEntitled {
 		t.Fatalf("with the operator grant: %+v", decision)
 	}
-	if decision := f.decision(account, Push); decision.Available {
+	if decision := f.decision(account, RemoteControl); decision.Available {
 		t.Fatalf("a key the operator did not name: %+v", decision)
 	}
 	f.clock.Set(start.Add(60 * 24 * time.Hour))
@@ -204,6 +205,65 @@ func TestADefinitionsChangeIsOneVersionStepForTheAccount(t *testing.T) {
 	}
 }
 
+type historicalDefinitions entitlement.Definitions
+
+func (d historicalDefinitions) Current() entitlement.Definitions {
+	return entitlement.Definitions(d)
+}
+
+func TestTheV2CataloguePreservesHistoricalEntitlementVersionAndFencesOldKeys(t *testing.T) {
+	settings := Settings{Mode: config.OfficialHosted, Plan: config.PlanDevelopmentFixtures}
+	f := newFixture(t, settings)
+	v2Service := f.service
+	previous := historicalDefinitions{Version: "dev-2026-10-30"}
+	for _, key := range []string{"center.nodes", "center.execute", "remote.view", "remote.control", "center.mcp", "push"} {
+		previous.Capabilities = append(previous.Capabilities, entitlement.CapabilityDefinition{Key: key, RequiresPaidTerm: true})
+	}
+	f.service = entitlement.NewService(f.db.Runtime, previous, nil, f.clock.Now)
+	account := f.db.Account(1)
+	ctx := WithAccount(t.Context(), account.String())
+	start := f.clock.Now()
+	f.operatorGrant(account, 1, CenterExecute, Push)
+	f.clock.Set(start.Add(2 * 24 * time.Hour))
+	f.operatorGrant(account, 1, CenterMCP)
+	f.clock.Set(start.Add(4 * 24 * time.Hour))
+	f.operatorGrant(account, 30, CenterExecute, RemoteView)
+	before, err := f.service.Read(ctx, account.String())
+	if err != nil || before.Version < 4 {
+		t.Fatalf("expected historical decisions at multiple boundaries: %+v, %v", before, err)
+	}
+
+	gate := NewGate(Configure(settings), v2Service)
+	after, err := Status(ctx, gate)
+	if err != nil || after.Version == nil || *after.Version != before.Version+1 {
+		t.Fatalf("the V2 catalogue must advance the existing version exactly once: %+v, %v", after, err)
+	}
+	want := []FeatureStatus{
+		{CenterNodes, Decision{Reason: ReasonNoEntitlement}},
+		{RemoteView, Decision{Available: true, Reason: ReasonEntitled}},
+		{RemoteControl, Decision{Reason: ReasonNoEntitlement}},
+	}
+	if !slices.Equal(after.Features, want) {
+		t.Fatalf("the published V2 status: %+v", after.Features)
+	}
+	if decision := gate.Availability(ctx, CenterExecute); decision.Available || decision.Reason != ReasonUnknownFeature {
+		t.Fatalf("historical execute authority on a V2 route: %+v", decision)
+	}
+	if decision := LegacyAvailability(gate, ctx, CenterExecute); !decision.Available || decision.Reason != ReasonEntitled {
+		t.Fatalf("the finite V1 route lost its original authority: %+v", decision)
+	}
+	for _, key := range []Key{CenterMCP, Push} {
+		if decision := LegacyAvailability(gate, ctx, key); decision.Available || decision.Reason != ReasonUnknownFeature {
+			t.Fatalf("a retired key reached the gate: %s: %+v", key, decision)
+		}
+	}
+	if f.db.Count("SELECT count(*) FROM entitlement.grant WHERE account_id = $1", account) != 5 ||
+		f.db.Count("SELECT count(*) FROM entitlement.service_term WHERE account_id = $1", account) != 3 ||
+		f.db.Count("SELECT count(*) FROM entitlement.definitions_activation WHERE account_id = $1 AND definitions_version = 'dev-host-v2'", account) != 1 {
+		t.Fatal("the catalogue change should append only its definitions activation")
+	}
+}
+
 func newGate(t *testing.T, f *fixture, settings Settings) *entitlement.Service {
 	t.Helper()
 	return entitlement.NewService(f.db.Runtime, Configure(settings), nil, f.clock.Now)
@@ -226,13 +286,13 @@ func TestTheGateFailsClosedWhenTheStoreCannotAnswer(t *testing.T) {
 }
 
 func TestASelfHostedCenterNeverReadsAnEntitlement(t *testing.T) {
-	f := newFixture(t, Settings{Mode: config.SelfHosted, Disabled: []Key{CenterMCP}})
+	f := newFixture(t, Settings{Mode: config.SelfHosted, Disabled: []Key{RemoteControl}})
 	account := f.db.Account(1)
 	f.db.Exec("ALTER TABLE entitlement.snapshot RENAME TO snapshot_away")
 	if decision := f.decision(account, RemoteView); !decision.Available || decision.Reason != ReasonSelfHostedDefault {
 		t.Fatalf("%+v", decision)
 	}
-	if decision := f.decision(account, CenterMCP); decision.Available || decision.Reason != ReasonOperatorLimit {
+	if decision := f.decision(account, RemoteControl); decision.Available || decision.Reason != ReasonOperatorLimit {
 		t.Fatalf("%+v", decision)
 	}
 }

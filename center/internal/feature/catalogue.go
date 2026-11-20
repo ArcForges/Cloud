@@ -48,13 +48,9 @@ type Plan struct {
 	ID       string
 	Name     string
 	Features []Key
-	// IllustrativePriceUSD is a price of a development fixture, 5 or 15, never an approved price. A catalogue that is not a fixture
-	// states none: this code invents no price.
-	IllustrativePriceUSD int
 }
 
-// Catalogue is the plan catalogue of an official-hosted center: the version of the definitions, the capabilities it defines (the six
-// gated keys, each requiring a paid term) and its plans.
+// Catalogue is the versioned V2 feature catalogue of an official-hosted center. Its three service keys require a paid term.
 type Catalogue struct {
 	Version string
 	// Fixture marks an illustrative development fixture.
@@ -73,11 +69,10 @@ func invalidCatalogue(format string, arguments ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalidCatalogue}, arguments...)...)
 }
 
-//go:embed fixtures/development.json
+//go:embed fixtures/host-v2.json
 var developmentFixtures []byte
 
-// DevelopmentFixtures is the embedded development catalogue (version dev-..., marker "fixture": true, illustrative plans and prices
-// of USD 5 and USD 15): it serves the tests and the acceptance environment and never production.
+// DevelopmentFixtures is the price-free embedded V2 catalogue for tests and isolated acceptance.
 func DevelopmentFixtures() (Catalogue, error) {
 	return ParseCatalogue(developmentFixtures, ClassDevelopment)
 }
@@ -88,10 +83,9 @@ type catalogueDocument struct {
 	Notice       string   `json:"notice"`
 	Capabilities []string `json:"capabilities"`
 	Plans        []struct {
-		ID                   string   `json:"id"`
-		Name                 string   `json:"name"`
-		IllustrativePriceUSD int      `json:"illustrativePriceUsd"`
-		Features             []string `json:"features"`
+		ID       string   `json:"id"`
+		Name     string   `json:"name"`
+		Features []string `json:"features"`
 	} `json:"plans"`
 }
 
@@ -99,7 +93,7 @@ type catalogueDocument struct {
 // the last of two, so the pre-pass below refuses every name that is not exactly one of these.
 var (
 	documentFields = []string{"version", "fixture", "notice", "capabilities", "plans"}
-	planFields     = []string{"id", "name", "illustrativePriceUsd", "features"}
+	planFields     = []string{"id", "name", "features"}
 )
 
 var (
@@ -162,16 +156,12 @@ func ParseCatalogue(data []byte, class Classification) (Catalogue, error) {
 	}
 	ids := map[string]bool{}
 	for _, item := range document.Plans {
-		plan := Plan{ID: item.ID, Name: item.Name, IllustrativePriceUSD: item.IllustrativePriceUSD}
+		plan := Plan{ID: item.ID, Name: item.Name}
 		switch {
 		case !planIDPattern.MatchString(item.ID) || len(item.ID) > 64 || ids[item.ID]:
 			return Catalogue{}, invalidCatalogue("a plan ID is malformed or repeated")
 		case !validText(item.Name, 1, 64):
 			return Catalogue{}, invalidCatalogue("a plan name is blank, long or holds a control character")
-		case document.Fixture && (item.IllustrativePriceUSD != 5 && item.IllustrativePriceUSD != 15):
-			return Catalogue{}, invalidCatalogue("a fixture plan's illustrative price is USD 5 or USD 15")
-		case !document.Fixture && item.IllustrativePriceUSD != 0:
-			return Catalogue{}, invalidCatalogue("only a fixture may state a price")
 		case document.Fixture && !bytes.HasPrefix([]byte(item.Name), []byte("Fixture ")):
 			return Catalogue{}, invalidCatalogue("a fixture plan's name starts with Fixture")
 		case len(item.Features) < 1 || len(item.Features) > len(Gated()):

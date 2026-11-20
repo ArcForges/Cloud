@@ -34,8 +34,8 @@ import (
 // gate; MOCKED: the production-classified catalogue is injected by the test, the step-up evidence is stubbed).
 
 // productionCatalogue is a catalogue of the production classification: no fixture marker, no notice, no price (a test document).
-const productionCatalogue = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","center.execute","remote.view","remote.control","center.mcp","push"],
-"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","push"]}]}`
+const productionCatalogue = `{"version":"2026-q4","fixture":false,"capabilities":["center.nodes","remote.view","remote.control"],
+"plans":[{"id":"plan-test","name":"Plan under test","features":["remote.view","remote.control"]}]}`
 
 // hostedCenter composes the official hosted center over a real database. The official hosted configuration requires a verified TLS
 // connection to its database, which the test server does not offer: the configuration is loaded as a self-hosted one and then made
@@ -64,7 +64,7 @@ var withOperations = []config.Surface{config.SurfaceIdentity, config.SurfacePage
 
 func TestSelfHostedDisabledFeaturesReachTheGate(t *testing.T) {
 	cfg := testConfig(config.SelfHosted)
-	cfg.DisabledFeatures = []string{"center.mcp", "remote.control"}
+	cfg.DisabledFeatures = []string{"center.nodes", "remote.control"}
 	center, err := New(cfg, observe.NewLogger(io.Discard, slog.LevelInfo), Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -72,11 +72,8 @@ func TestSelfHostedDisabledFeaturesReachTheGate(t *testing.T) {
 	defer center.Close()
 	for _, key := range feature.Gated() {
 		want := feature.ReasonSelfHostedDefault
-		if key == feature.CenterMCP || key == feature.RemoteControl {
+		if key == feature.CenterNodes || key == feature.RemoteControl {
 			want = feature.ReasonOperatorLimit
-		}
-		if key == feature.Push {
-			want = feature.ReasonPushSenderNotConfigured
 		}
 		if decision := center.Features.Availability(t.Context(), key); decision.Reason != want || decision.Available != (want == feature.ReasonSelfHostedDefault) {
 			t.Errorf("%s: %+v, want %s", key, decision, want)

@@ -25,8 +25,8 @@
 //     front of the rows it covers, every gated row has at least one (CheckControls; the composition refuses to start otherwise), and
 //     a control runs before the audit and the gate, so a call an exhausted control refuses writes no access.authorized row;
 //  6. audit: an operation whose Audit is AuditBeforeCall appends access.authorized, and a failed append refuses the call;
-//  7. the gate: an operation with a Feature key is refused with ENTITLEMENT/feature_not_entitled unless the feature is available to
-//     the caller's account, and the refusal is audited as access.gated.
+//  7. the gate: a feature unavailable to the caller's account is refused and audited as access.gated. V2 distinguishes hosted
+//     access from an operator's self-hosted limit. The retained V1 cohort keeps its published refusal.
 //
 // Essential operations (sign-in, account, billing, security and recovery) carry no Feature and are never gated. The node enrollment
 // rows of the fleet surface (AF-CTR-04) are essential too (AD-0021 section 13a): node sign-in, refresh, report and sign-out.
@@ -53,6 +53,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
+	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	nodev1 "github.com/ArcForges/Contracts/go/arcforges/node/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
@@ -157,6 +158,8 @@ type Operation struct {
 	// Feature is the gated feature key of the operation (AD-0021 section 13a), or empty for an essential operation, which is never
 	// gated. A gated operation is a session operation audited before the call (AuditBeforeCall).
 	Feature feature.Key
+	// V2Hosted selects the V2 service keys and typed feature refusal for this gated operation.
+	V2Hosted bool
 	// Group is the group of the routed task control table (feature.OperationKeys) a gated row belongs to: its Feature must be the key
 	// the table names for the group (CheckRow), and only a gated row names one.
 	Group feature.Group
@@ -191,6 +194,7 @@ func Operations() []Operation {
 		{Path: publicapiv1connect.IdentityServiceListAuthProvidersProcedure, ID: "identity.listAuthProviders", Risk: "R1"},
 		{Path: publicapiv1connect.IdentityServiceRefreshSessionProcedure, ID: "identity.refreshSession", Risk: "R1"},
 		{Path: publicapiv1connect.IdentityServiceGetProfileProcedure, ID: "identity.getProfile", Risk: "R1", Session: true},
+		{Path: publicapiv1connect.EntitlementServiceGetSnapshotProcedure, ID: "entitlement.getSnapshot", Risk: "R1", Session: true, Restricted: true},
 		{Path: publicapiv1connect.IdentityServiceGetAccountDeletionProcedure, ID: "identity.getAccountDeletion", Risk: "R1", Session: true, MobileLimited: Upgrade, Restricted: true},
 		{Path: publicapiv1connect.IdentityServiceListAuthIdentitiesProcedure, ID: "identity.listAuthIdentities", Risk: "R1", Session: true, Restricted: true},
 		{Path: publicapiv1connect.IdentityServiceListSessionsProcedure, ID: "identity.listSessions", Risk: "R1", Session: true, Restricted: true},
@@ -252,7 +256,7 @@ func Operations() []Operation {
 		{Path: routes.NodeChannelPath, ID: routes.NodeChannelID, Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes,
 			Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
 		{Path: routes.NodeChannelV2Path, ID: routes.NodeChannelV2ID, Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes,
-			Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
+			V2Hosted: true, Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
 		// The node registry of FleetService (AF-CTR-05 E2a; Plan CTR5-API-02..04, Q20: never gated, so a lapsed account still lists, renames
 		// and revokes its nodes). ListNodes and GetNode admit an account session, and a node credential only as the verified relay of its
 		// own node (C-N6: a bearer token alone reads nothing). RenameNode and RevokeNode are a person's device management (as
@@ -302,7 +306,7 @@ func Operations() []Operation {
 	for _, method := range slices.Concat(routes.ManagementMethods(), routes.ManagementDataMethods(), routes.ManagementWatchMethods()) {
 		row := Operation{Path: method.Path, ID: "fleet.v2." + method.ReceiptMethod(),
 			Risk: "R1", Session: true, Object: ObjectNode, Audit: AuditBeforeCall,
-			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput}
+			Feature: feature.RemoteView, V2Hosted: true, Group: feature.GroupStatusAndOutput}
 		if method.Mutation {
 			row.Risk, row.MobileLimited = "R3", Upgrade
 			row.Feature, row.Group = feature.RemoteControl, feature.GroupControl
@@ -509,11 +513,9 @@ func CheckRow(operation Operation) error {
 		len(operation.Scopes) > 0 || operation.Object != "" || (operation.Receipt || operation.Audit != NoAudit) && !recovery):
 		// A gated row is audited before the call, so it is caught here as well.
 		return inconsistent("an anonymous row needs no caller")
-	case operation.Feature != "" && !feature.IsGated(operation.Feature):
-		return inconsistent("the feature is not a gated key")
-	case operation.Feature == "" && operation.Group != "":
+	case operation.Feature == "" && (operation.Group != "" || operation.V2Hosted):
 		return inconsistent("only a gated row names a group of the routed task control table")
-	case operation.Feature != "" && !keyOfGroup(operation.Group, operation.Feature):
+	case operation.Feature != "" && !keyOfGroup(operation):
 		return inconsistent("a gated row carries the key of its group in the routed task control table (feature.OperationKeys)")
 	case operation.Feature != "" && operation.Restricted:
 		return inconsistent("a gated operation is no security operation a restricted account may reach")
@@ -566,9 +568,13 @@ func checkRelayed(operation Operation, inconsistent func(string) error) error {
 
 // keyOfGroup reports whether a key is the key the routed task control table names for a group (AF-CTR-05 E0, CTR5-GATE-06): the
 // link between the operation table and feature.OperationKeys.
-func keyOfGroup(group feature.Group, key feature.Key) bool {
-	want, named := feature.KeyOfGroup(group)
-	return named && want == key
+func keyOfGroup(operation Operation) bool {
+	if operation.V2Hosted {
+		want, named := feature.KeyOfGroup(operation.Group)
+		return named && want == operation.Feature
+	}
+	want, named := feature.LegacyKeyOfGroup(operation.Group)
+	return named && want == operation.Feature
 }
 
 // A Principal is who a credential acts for: an account session acts for a person (HUMAN), a node or automation credential for a
@@ -949,12 +955,16 @@ func (a *Authorizer) owned(ctx context.Context, call *ingress.Call, operation Op
 	return nil
 }
 
-// gated is stage 7: ENTITLEMENT/feature_not_entitled unless the gate says the feature is available to the caller's account. A gate
-// that could not read the entitlement is a failure of the store and is returned as one, not as a missing entitlement.
+// gated is stage 7. A gate that could not read the entitlement is a store failure, separate from a confirmed entitlement denial.
 func (a *Authorizer) gated(ctx context.Context, call *ingress.Call, operation Operation) error {
 	decision := feature.Decision{Reason: feature.ReasonModeInvalid}
 	if a.gate != nil {
-		decision = a.gate.Availability(feature.WithAccount(ctx, call.Caller.UserID), operation.Feature)
+		account := feature.WithAccount(ctx, call.Caller.UserID)
+		if operation.V2Hosted {
+			decision = a.gate.Availability(account, operation.Feature)
+		} else {
+			decision = feature.LegacyAvailability(a.gate, account, operation.Feature)
+		}
 	}
 	switch {
 	case decision.Available:
@@ -977,7 +987,24 @@ func (a *Authorizer) gated(ctx context.Context, call *ingress.Call, operation Op
 		"reason": string(decision.Reason)}); err != nil {
 		return err
 	}
-	return arc.FeatureNotEntitled(string(operation.Feature))
+	if !operation.V2Hosted {
+		return arc.FeatureNotEntitled(string(operation.Feature))
+	}
+	return V2FeatureRefusal(decision.Reason)
+}
+
+// V2FeatureRefusal maps a decided denial to the published refusal used by V2.
+func V2FeatureRefusal(reason feature.Reason) *arc.Refusal {
+	switch reason {
+	case feature.ReasonOperatorLimit:
+		return &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE, Code: "operator_limit",
+			State: "feature", Reason: string(reason)}
+	case feature.ReasonModeInvalid, feature.ReasonUnknownFeature, feature.ReasonNoAccount:
+		return arc.Unavailable()
+	default:
+		return &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_ENTITLEMENT, Code: "hosted_access_required",
+			State: "feature", Reason: string(reason)}
+	}
 }
 
 func (a *Authorizer) refuse(ctx context.Context, call *ingress.Call, operation Operation, reason string) error {

@@ -648,12 +648,27 @@ func (c *conn) recheckLapse(ctx context.Context) {
 	if c.closing.Load() || gate == nil {
 		return
 	}
-	decision := gate.Availability(feature.WithAccount(ctx, c.userID.String()), feature.CenterNodes)
+	check, cancelCheck := context.WithTimeout(ctx, presenceTimeout)
+	account := feature.WithAccount(check, c.userID.String())
+	var decision feature.Decision
+	if c.v2 == nil {
+		decision = feature.LegacyAvailability(gate, account, feature.CenterNodes)
+	} else {
+		decision = gate.Availability(account, feature.CenterNodes)
+	}
+	cancelCheck()
 	switch {
 	case decision.Available:
 		return
 	case decision.Err != nil:
 		c.hub.metrics.ObserveChannel("lapse", "undecided")
+		var database *store.Error
+		sqlState := ""
+		if errors.As(decision.Err, &database) {
+			sqlState = database.SQLState
+		}
+		c.hub.logger.WarnContext(ctx, "a channel's hosted access could not be re-checked",
+			"reason", decision.Reason, "sqlState", sqlState)
 		return
 	case !c.lapsing.CompareAndSwap(false, true):
 		// The supervisor and a refresh can both find the lapse: the first claims the close, so it is audited once (review A N-7).
@@ -663,12 +678,14 @@ func (c *conn) recheckLapse(ctx context.Context) {
 	audit, cancel := context.WithTimeout(context.WithoutCancel(ctx), presenceTimeout)
 	defer cancel()
 	operation := routes.NodeChannelID
+	reason := "feature_not_entitled"
 	if c.v2 != nil {
 		operation = routes.NodeChannelV2ID
+		reason = access.V2FeatureRefusal(decision.Reason).Code
 	}
 	c.auditAs(audit, access.AuditGated, string(decision.Reason), "operation", operation, map[string]any{"operation": operation,
 		"feature": string(feature.CenterNodes), "reason": string(decision.Reason)})
-	c.closeWith(CloseRefused, "feature_not_entitled")
+	c.closeWith(CloseRefused, reason)
 }
 
 // violation closes the connection 4403 for a frame or proof the hub does not accept, audited fleet.channel.violation.

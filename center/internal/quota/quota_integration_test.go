@@ -22,9 +22,9 @@ import (
 // The per-account resource controls (AF-CTR-05 part E0, CTR5-GATE-05; EVIDENCE: REAL controls, REAL rate-limit buckets over REAL
 // PostgreSQL; MOCKED: the rows are fabricated gated rows, one per group, because no gated row is served before AF-CTR-05 E1 and E2).
 
-// gatedRow is a fabricated gated row of a group, with the key the routed task control table names for it.
+// gatedRow is a fabricated gated row of a group, including the retained V1 submission group.
 func gatedRow(group feature.Group) access.Operation {
-	key, _ := feature.KeyOfGroup(group)
+	key, _ := feature.LegacyKeyOfGroup(group)
 	return access.Operation{Path: "/arcforges.test.v1.QuotaProbe/" + string(group), ID: "probe." + string(group), Risk: "R2", Session: true, Feature: key, Group: group,
 		Audit: access.AuditBeforeCall}
 }
@@ -60,10 +60,12 @@ func TestTheCompositionsControlsCoverTheRoutedAndChannelGroupsOnly(t *testing.T)
 	if err := access.CheckControls(covered, controls); err != nil {
 		t.Fatalf("the routed groups and the channel: %v", err)
 	}
-	// MCP (AF-CTR-07) and push (AF-CLD-06) bring their own controls: a row of theirs fails the composition until they do.
-	for _, group := range []feature.Group{feature.GroupMCP, feature.GroupPush} {
-		if access.CheckControls(append(covered, gatedRow(group)), controls) == nil {
-			t.Errorf("a %s row was admitted without its own control", group)
+	// A synthetic row carrying a retired entitlement cannot acquire quota coverage from an active control.
+	for group, key := range map[feature.Group]feature.Key{feature.GroupMCP: feature.CenterMCP, feature.GroupPush: feature.Push} {
+		row := gatedRow(group)
+		row.Feature = key
+		if access.CheckControls(append(covered, row), controls) == nil {
+			t.Errorf("the retired %s row was admitted without a control", group)
 		}
 	}
 	// The legacy and V2 node channels share the existing upgrade buckets. Essential rows have no control here.

@@ -121,7 +121,7 @@ func TestTheAuditRowsOfTheStagesAreClosed(t *testing.T) {
 	if got, _ := r.call("RemoteView", token, nil); !got.reached {
 		t.Fatalf("%+v", got)
 	}
-	if got, _ := r.call("Push", token, nil); got.failure != "ENTITLEMENT/feature_not_entitled" {
+	if got, _ := r.call("RemoteControl", token, nil); got.failure != "ENTITLEMENT/feature_not_entitled" {
 		t.Fatalf("%+v", got)
 	}
 	if got, _ := r.call("RemoteView", push, nil); got.failure != "AUTHORIZATION/permission_denied" {
@@ -138,8 +138,8 @@ func TestTheAuditRowsOfTheStagesAreClosed(t *testing.T) {
 	rows := []struct{ eventType, operation, reason, payload string }{
 		{AuditAuthorized, "probe.remote.view", "", `{"feature":"remote.view","operation":"probe.remote.view","risk":"R2","scope":"account"}`},
 		{AuditAuthorized, "probe.device", "", `{"feature":"remote.view","operation":"probe.device","risk":"R2","scope":"account"}`},
-		{AuditAuthorized, "probe.push", "", `{"feature":"push","operation":"probe.push","risk":"R2","scope":"account"}`},
-		{AuditGated, "probe.push", "no_entitlement", `{"feature":"push","operation":"probe.push","reason":"no_entitlement"}`},
+		{AuditAuthorized, "probe.remote.control", "", `{"feature":"remote.control","operation":"probe.remote.control","risk":"R2","scope":"account"}`},
+		{AuditGated, "probe.remote.control", "no_entitlement", `{"feature":"remote.control","operation":"probe.remote.control","reason":"no_entitlement"}`},
 		{AuditRefused, "probe.remote.view", "scope", `{"operation":"probe.remote.view","reason":"scope","scope":"push"}`},
 	}
 	total := 0
@@ -190,7 +190,7 @@ func TestTheGateFailsClosedWithoutAReader(t *testing.T) {
 // TestAnOwnerThatCannotBeReadIsAStoreFailureNotAMissingObject is gate-4: a database that fails while the object's owner is read must
 // not tell the client that its own device does not exist.
 func TestAnOwnerThatCannotBeReadIsAStoreFailureNotAMissingObject(t *testing.T) {
-	r := newRig(t, feature.Settings{Mode: config.SelfHosted, PushSender: true})
+	r := newRig(t, feature.Settings{Mode: config.SelfHosted})
 	account := r.db.Account(1)
 	token, device := r.credential(account, session.ScopeAccount)
 	got, _ := r.call("Device", token, map[string]string{"X-Probe-Device": device.String(), "X-Probe-Owner-Error": "1"})
@@ -205,7 +205,7 @@ func TestAnOwnerThatCannotBeReadIsAStoreFailureNotAMissingObject(t *testing.T) {
 // TestASubjectThatIsNotTheRowsObjectIsRefused is gate-4 and gate-8: a subject of another kind than the row's Object, and a subject
 // for a row that names no Object, are handler defects and are refused as such (permission_denied, audited with the reason subject).
 func TestASubjectThatIsNotTheRowsObjectIsRefused(t *testing.T) {
-	r := newRig(t, feature.Settings{Mode: config.SelfHosted, PushSender: true})
+	r := newRig(t, feature.Settings{Mode: config.SelfHosted})
 	account := r.db.Account(1)
 	token, device := r.credential(account, session.ScopeAccount)
 	own := map[string]string{"X-Probe-Device": device.String()}
@@ -286,7 +286,7 @@ func TestGateFailuresAreAnsweredAsTheDesignCatalogueSays(t *testing.T) {
 // TestAFailedRefusalAuditIsNotSwallowed is gate-8: the append of access.refused fails inside PostgreSQL itself, and the caller gets
 // the store failure, not a refusal that left no trace.
 func TestAFailedRefusalAuditIsNotSwallowed(t *testing.T) {
-	r := newRig(t, feature.Settings{Mode: config.SelfHosted, PushSender: true})
+	r := newRig(t, feature.Settings{Mode: config.SelfHosted})
 	account := r.db.Account(1)
 	push, _ := r.credential(account, session.ScopePush)
 	r.db.Exec("CREATE SCHEMA testfault",
