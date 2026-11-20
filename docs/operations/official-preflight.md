@@ -1,6 +1,6 @@
 # Official deployment preflight
 
-Run the preflight from the clean checkout that built the sealed Cloud candidate. Its candidate verifier checks every member digest, the Worker source closure, the image provenance and legal files, and the source and build identity. The production configuration must select the Go Center in `official-hosted` mode and disable both Worker preview surfaces.
+Run the preflight from the clean checkout that built the sealed Cloud candidate, using its stock `artifacts/candidate` directory. The existing candidate verifier checks every member digest, the Worker source closure, the image provenance and legal files, and the source and build identity. The production configuration must select the Go Center in `official-hosted` mode and disable both Worker preview surfaces.
 
 ```sh
 node tooling/cloudflare.ts preflight artifacts/candidate /absolute/path/to/external-fixture.json

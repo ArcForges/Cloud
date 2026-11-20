@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, wrangler, writeJson } from "./process.ts";
-import { verifyCandidate, type WorkerConfig } from "./project.ts";
+import { verifyCandidate, type Candidate, type WorkerConfig } from "./project.ts";
+import { proofProcessEnvironment, runSensitive } from "./sensitive-process.ts";
 import { runProbe, waitForHealth } from "./protocol.ts";
 import { neonRuntimeSecret, withNeonRuntimeSecret } from "./neon-runtime.ts";
 import {
@@ -36,6 +37,7 @@ const productionBase = "https://arcforges.com/api";
 const deploymentFile = path.join(root, "artifacts", "deployment.json");
 
 type D1Gate = { target?: string; revision?: string; status?: string };
+type DeploymentWorkerConfig = WorkerConfig & { vars: { ARCFORGES_CENTER_MODE?: string } };
 
 // CLOUD.84 U10: the sealed C# migrator makes the decision. Promotion checks its exact target and commit.
 function requireGatePassed(
@@ -60,7 +62,7 @@ function readD1Gate(target: "production" | "proof"): D1Gate | undefined {
   }
 }
 
-function requireFlagshipConfig(config: WorkerConfig): void {
+function requireFlagshipConfig(config: DeploymentWorkerConfig): void {
   assert.equal(
     config.vars.ARCFORGES_HELLO_RUNTIME,
     "go",
@@ -238,7 +240,7 @@ export async function preflight(directory: string, fixture: DeploymentFixture) {
     manifestInfo.isFile() && manifestInfo.size <= 16_384,
     "The candidate manifest is unavailable.",
   );
-  const manifest = await readJson<{ version: string }>(manifestPath);
+  const manifest = await readJson<Candidate>(manifestPath);
   assert.equal(typeof manifest.version, "string", "The candidate version is unavailable.");
   const local = /^0\.1\.0-local\.[0-9]+$/u.test(manifest.version);
   const version = local
@@ -249,22 +251,42 @@ export async function preflight(directory: string, fixture: DeploymentFixture) {
     version,
     "The candidate does not match the exact fixture producer attempt.",
   );
-  const environment: NodeJS.ProcessEnv = local
-    ? {}
-    : {
-        GITHUB_ACTIONS: "true",
-        GITHUB_SHA: producer.sha,
-        GITHUB_REPOSITORY: "ArcForges/Cloud",
-        GITHUB_RUN_ID: String(producer.runId),
-        GITHUB_RUN_NUMBER: String(producer.runNumber),
-        GITHUB_RUN_ATTEMPT: String(producer.candidateAttempt),
-      };
-  const candidate = await verifyCandidate(directory, environment);
+  const environment = proofProcessEnvironment(process.env);
+  if (!local)
+    Object.assign(environment, {
+      GITHUB_ACTIONS: "true",
+      GITHUB_SHA: producer.sha,
+      GITHUB_REPOSITORY: "ArcForges/Cloud",
+      GITHUB_RUN_ID: String(producer.runId),
+      GITHUB_RUN_NUMBER: String(producer.runNumber),
+      GITHUB_RUN_ATTEMPT: String(producer.candidateAttempt),
+    });
+  assert.equal(
+    await realpath(directory),
+    await realpath(candidateDir),
+    "Use the candidate in this checkout's stock artifacts/candidate directory.",
+  );
+  for (const name of await readdir(directory))
+    assert(
+      (await lstat(path.join(directory, name))).isFile(),
+      "Candidate members must be regular files.",
+    );
+  // Use the unchanged sealed verifier with only the declared producer context in a separate process.
+  await runSensitive(
+    "candidate",
+    process.execPath,
+    [path.join(root, "tooling", "project.ts"), "verify"],
+    environment,
+    "discard",
+  );
+  const candidate = await readJson<Candidate>(manifestPath);
+  assert.deepEqual(candidate, manifest, "The candidate changed during preflight.");
   assert.equal(candidate.dirty, false, "A clean sealed candidate is required.");
-  assert.equal(candidate.version, version, "The candidate version changed during preflight.");
+  const head = await run("git", ["rev-parse", "HEAD"], true);
+  assert.equal(candidate.revision, head, "The candidate belongs to another source revision.");
   if (!local) {
     const tree = await run("git", ["rev-parse", "HEAD^{tree}"], true);
-    checkCheckout(candidate.revision, tree, producer);
+    checkCheckout(head, tree, producer);
   }
   const config = await readJson<WorkerConfig>(path.join(directory, "wrangler.json"));
   const target = await evaluateFixtureTarget(
