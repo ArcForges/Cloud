@@ -283,13 +283,13 @@ cannot reach a real account.
 Set `ARCFORGES_CENTER_MODE` to `official-hosted` or `self-hosted` at service startup. Configuration validation rejects a missing
 or unknown mode. `internal/feature` evaluates the three V2 service keys `center.nodes`, `remote.view` and `remote.control`.
 
-| Mode and state                                         | Gated features                                                | Reason                                                                                      |
-| ------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `official-hosted`, no plan configuration               | unavailable                                                   | `plan_configuration_missing`                                                                |
-| `official-hosted`, invalid catalogue                   | unavailable                                                   | `plan_configuration_invalid`                                                                |
-| `official-hosted`, valid catalogue                     | decided by the account's current entitlement snapshot         | `entitled`, `no_entitlement`, `payment_grace`, `subscription_expired`, `account_suspended`     |
-| `official-hosted`, entitlement store cannot answer    | status and new admission report a temporary service failure   | `entitlement_unavailable`                                                                   |
-| `self-hosted`                                          | available by default, subject to the operator's service limits | `self_hosted_default` or `operator_limit` for a service in `ARCFORGES_CENTER_DISABLED_FEATURES` |
+| Mode and state                                     | Gated features                                                 | Reason                                                                                          |
+| -------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `official-hosted`, no plan configuration           | unavailable                                                    | `plan_configuration_missing`                                                                    |
+| `official-hosted`, invalid catalogue               | unavailable                                                    | `plan_configuration_invalid`                                                                    |
+| `official-hosted`, valid catalogue                 | decided by the account's current entitlement snapshot          | `entitled`, `no_entitlement`, `payment_grace`, `subscription_expired`, `account_suspended`      |
+| `official-hosted`, entitlement store cannot answer | status and new admission report a temporary service failure    | `entitlement_unavailable`                                                                       |
+| `self-hosted`                                      | available by default, subject to the operator's service limits | `self_hosted_default` or `operator_limit` for a service in `ARCFORGES_CENTER_DISABLED_FEATURES` |
 
 The published `EntitlementService.GetSnapshot` uses the current authenticated account. Official mode reads one entitlement
 snapshot for the service decisions. Self-hosted mode derives the decisions from local configuration, independent of the official
@@ -304,11 +304,11 @@ authentication, target ownership, authorization, applicable resource controls an
 with state reason `operator_limit`. The finite V1 compatibility routes retain their published gate and error semantics. Historical entitlement records keep their original keys and
 validity intervals.
 
-| Key              | Group               | Gates                                     |
-| ---------------- | ------------------- | ----------------------------------------- |
-| `remote.control` | `control`           | Sandbox, Run, resource and data mutations |
+| Key              | Group               | Gates                                             |
+| ---------------- | ------------------- | ------------------------------------------------- |
+| `remote.control` | `control`           | Sandbox, Run, resource and data mutations         |
 | `remote.view`    | `status_and_output` | Sandbox, Run, resource and data reads and watches |
-| `center.nodes`   | `node_connection`   | node connection                           |
+| `center.nodes`   | `node_connection`   | node connection                                   |
 
 Hosted channels and streams periodically recheck service availability. An expired or revoked hosted entitlement closes the
 affected remote channel or stream and refuses new hosted access. Local Runs, data and the CLI continue independently.
