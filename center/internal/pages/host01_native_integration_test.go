@@ -140,6 +140,9 @@ func requireHost01IngressBoundary(t *testing.T, h *harness) {
 		t.Fatal(err)
 	}
 	raw := httptest.NewRequest(http.MethodPost, h.origin+procedure, bytes.NewReader(ingress.Frame(payload)))
+	// httptest preserves its absolute input as RequestURI. Match the
+	// origin-form request target that the native HTTPS client sends.
+	raw.RequestURI = raw.URL.RequestURI()
 	raw.RemoteAddr = "127.0.0.1:1"
 	raw.Header.Set("Content-Type", "application/grpc-web+proto")
 	refusal := httptest.NewRecorder()
