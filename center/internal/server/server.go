@@ -349,6 +349,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 			registry := fleetServer.Registry(c.Hub, service.RevokeDevice).WithRouter(hubRouter{hub: c.Hub}, fleetapi.RoutedLimits{
 				ReplayWindow: c.Config.Identity.Policy.RoutedReplayWindow, LongPolls: config.RoutedLongPolls(c.Config.MaxConnections), Events: c.Metrics})
 			dispatcher.Register(registry.Methods()...)
+			dispatcher.Register(fleetServer.DeviceMethods(c.Hub, service.RevokeDevice)...)
 		}
 	}
 	var mobile *mobileauth.Service
@@ -494,7 +495,7 @@ func checkIdentityComposition(modules []routes.Module) error {
 		served[method.Spec.Procedure] = true
 	}
 	fleetServer := fleetapi.New(nil, nil, nil, nil, nil)
-	for _, method := range append(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods()...) {
+	for _, method := range slices.Concat(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods(), fleetServer.DeviceMethods(nil, nil)) {
 		served[method.Spec.Procedure] = true
 	}
 	if len(served) != len(policies) {

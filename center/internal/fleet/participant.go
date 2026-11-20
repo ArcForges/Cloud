@@ -26,10 +26,15 @@ func (NodeParticipant) Name() string { return "fleet.node" }
 
 // RevokeDevice revokes the live node rows of a device and returns how many it revoked.
 func (NodeParticipant) RevokeDevice(ctx context.Context, tx pgx.Tx, userID, deviceID platform.ID, now time.Time) (int64, error) {
-	tag, err := tx.Exec(ctx, `UPDATE fleet.node SET revoked_at = $3, revoke_reason = $4, rev = rev + 1
-WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL`, deviceID, userID, now, NodeRevokeDevice)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
+	var count int64
+	err := tx.QueryRow(ctx, `WITH nodes AS (
+    UPDATE fleet.node SET revoked_at=$3,revoke_reason=$4,rev=rev+1
+    WHERE device_id=$1 AND user_id=$2 AND revoked_at IS NULL RETURNING enrollment_id,node_id,user_id
+), protocols AS (
+    UPDATE management.node_protocol p SET revoked_at=greatest($3,p.initialized_at),rev=p.rev+1
+    FROM nodes n
+    WHERE p.enrollment_id=n.enrollment_id AND p.node_id=n.node_id AND p.account_id=n.user_id AND p.revoked_at IS NULL
+)
+SELECT count(*) FROM nodes`, deviceID, userID, now, NodeRevokeDevice).Scan(&count)
+	return count, err
 }

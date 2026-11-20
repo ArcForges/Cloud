@@ -31,6 +31,7 @@ import (
 type conn struct {
 	hub *Hub
 	ws  *websocket.Conn
+	v2  *v2Codec
 
 	// The credential and the node row the upgrade admitted; the hello must name them.
 	sessionID, userID, deviceID, installationID platform.ID
@@ -55,20 +56,25 @@ type conn struct {
 	writerDone chan struct{}
 	closeDone  chan struct{}
 
-	mu            sync.Mutex
-	nonce         []byte    // the one-use hello nonce; nil once spent or void
-	helloDeadline time.Time // the nonce is void from this instant on
-	proved        bool      // the hello's proof held in time: the hello deadline no longer applies
-	accepted      bool
-	capabilities  map[string]bool // only claims from this connection's proved NodeHello
-	recorded      bool            // the accept's presence write succeeded: the close records the node offline
-	tokenDigest   [32]byte        // the SHA-256 of the access token the connection is bound to
-	refreshes     int             // the TokenRefresh frames the connection sent
-	lastRefresh   time.Time
-	accessExpires time.Time
-	lastInbound   time.Time
-	lastPresence  time.Time
-	sentSeq       uint64
+	mu             sync.Mutex
+	nonce          []byte    // the one-use hello nonce; nil once spent or void
+	helloDeadline  time.Time // the nonce is void from this instant on
+	proved         bool      // the hello's proof held in time: the hello deadline no longer applies
+	accepted       bool
+	capabilities   map[string]bool // only claims from this connection's proved NodeHello
+	nodeOwnerEpoch platform.ID
+	nodeEpoch      string
+	platform       string
+	v2Capabilities []string
+	v2Ready        bool
+	recorded       bool     // the accept's presence write succeeded: the close records the node offline
+	tokenDigest    [32]byte // the SHA-256 of the access token the connection is bound to
+	refreshes      int      // the TokenRefresh frames the connection sent
+	lastRefresh    time.Time
+	accessExpires  time.Time
+	lastInbound    time.Time
+	lastPresence   time.Time
+	sentSeq        uint64
 
 	// calls are the calls waiting for their result (at most MaxInFlightCalls); callsClosed is set once the connection closes, after
 	// which it takes no call. late are the delivered calls whose deadline passed, forgotten the call IDs of late calls that can no longer
@@ -100,6 +106,13 @@ type conn struct {
 // errQueueFull is a frame the send queue could not take.
 var errQueueFull = errors.New("the connection's send queue is full")
 
+func (c *conn) wire() Codec {
+	if c.v2 != nil {
+		return c.v2
+	}
+	return c.hub.codec
+}
+
 // outbound is one queued frame; call is the call it carries, marked delivered when the writer starts writing it.
 type outbound struct {
 	data []byte
@@ -123,7 +136,7 @@ func (c *conn) run() {
 	c.mu.Lock()
 	c.nonce, c.helloDeadline, c.lastInbound = nonce, deadline, now
 	c.mu.Unlock()
-	if err := c.send(func(seq uint64) ([]byte, error) { return c.hub.codec.Challenge(seq, nonce, c.connectionID, deadline) }); err != nil {
+	if err := c.send(func(seq uint64) ([]byte, error) { return c.wire().Challenge(seq, nonce, c.connectionID, deadline) }); err != nil {
 		c.closeWith(CloseShuttingDown, "internal")
 	}
 	go c.supervise(deadline)
@@ -161,14 +174,14 @@ func (c *conn) read() {
 			c.closeWith(CloseRateLimited, "frame_rate")
 			return
 		}
-		c.mu.Lock()
-		c.lastInbound = now
-		c.mu.Unlock()
-		frame, err := c.hub.codec.Decode(data)
+		frame, err := c.wire().Decode(data)
 		if err != nil {
 			c.violation("unreadable_frame")
 			return
 		}
+		c.mu.Lock()
+		c.lastInbound = now
+		c.mu.Unlock()
 		if !c.handle(frame, now) {
 			return
 		}
@@ -265,6 +278,9 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 		return false
 	}
 	message := HelloMessage(nonce, c.connectionID, c.hub.centerURL, claimed.NodeID, claimed.InstallationID)
+	if c.v2 != nil {
+		message = c.v2.helloMessage(c.hub.centerURL, claimed.v2Intent)
+	}
 	if !fleet.VerifyNodeKeyProof(c.publicKey, message, claimed.Signature) {
 		c.hub.metrics.ObserveChannel("hello", "signature")
 		c.violation("hello_signature")
@@ -275,8 +291,19 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 		c.violation("hello_mismatch")
 		return false
 	}
+	var qualified []string
+	if c.v2 != nil {
+		var compatible bool
+		qualified, compatible = v2QualifiedClaims(claimed)
+		if !compatible {
+			c.hub.metrics.ObserveChannel("hello", "mismatch")
+			c.closeWith(CloseRefused, "upgrade_required")
+			return false
+		}
+	}
 	c.mu.Lock()
 	c.proved = true
+	c.nodeOwnerEpoch, c.nodeEpoch, c.platform, c.v2Capabilities = claimed.ownerEpoch, claimed.nodeEpoch, claimed.os, qualified
 	c.capabilities = make(map[string]bool, len(claimed.Capabilities))
 	for _, capability := range claimed.Capabilities {
 		c.capabilities[capability] = true
@@ -285,15 +312,21 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 	ctx, cancel := context.WithTimeout(c.ctx, presenceTimeout)
 	defer cancel()
 	// The connection is tracked (the revocation hooks see it) since before this read, so no revocation falls between them.
-	c.recheckSession(ctx)
+	known := c.recheckSession(ctx)
 	if c.closing.Load() {
 		return false
 	}
-	kids := c.hub.signingKids(ctx, now)
-	if len(kids) == 0 {
-		c.hub.metrics.ObserveChannel("hello", "no_signing_key")
-		c.hub.logger.Warn("a node's channel was closed: no command key the center holds is valid")
-		c.closeWith(CloseShuttingDown, "no_signing_key")
+	var kids []string
+	if c.v2 == nil {
+		kids = c.hub.signingKids(ctx, now)
+		if len(kids) == 0 {
+			c.hub.metrics.ObserveChannel("hello", "no_signing_key")
+			c.hub.logger.Warn("a node's channel was closed: no command key the center holds is valid")
+			c.closeWith(CloseShuttingDown, "no_signing_key")
+			return false
+		}
+	} else if !known {
+		c.closeWith(CloseShuttingDown, "unavailable")
 		return false
 	}
 	older, err := c.register(ctx, now)
@@ -306,6 +339,13 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 		c.hub.metrics.ObserveChannel("hello", "node_gone")
 		c.closeWith(CloseCredential, "revoked")
 		return false
+	case errors.Is(err, errProtocolChanged):
+		if c.v2 == nil {
+			c.closeWith(CloseRefused, "upgrade_required")
+		} else {
+			c.closeWith(CloseReplaced, "protocol_epoch_changed")
+		}
+		return false
 	case errors.Is(err, errNotAccepted):
 		c.closeWith(CloseShuttingDown, "shutting_down")
 		return false
@@ -316,6 +356,11 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 		return false
 	}
 	payload := map[string]any{"nodeId": c.nodeID.String(), "connectionId": c.connectionID.String(), "replaced": older != nil}
+	if c.v2 != nil {
+		payload["protocolMajor"] = 2
+		payload["protocolEpoch"] = c.v2.epoch.String()
+		payload["hubFence"] = c.fence
+	}
 	if older != nil {
 		payload["replacedConnectionId"] = older.connectionID.String()
 	}
@@ -324,10 +369,15 @@ func (c *conn) hello(claimed hello, now time.Time) bool {
 	limits := Limits{MaxFrameBytes: c.hub.settings.MaxFrameBytes, MaxInFlightCalls: c.hub.settings.MaxInFlightCalls, Heartbeat: c.hub.settings.Heartbeat,
 		HeartbeatDeadline: c.hub.settings.HeartbeatDeadline, MaxRelayNonces: c.hub.settings.MaxRelayNonces}
 	if err := c.send(func(seq uint64) ([]byte, error) {
-		return c.hub.codec.Accepted(seq, c.connectionID, c.nodeName, limits, kids)
+		return c.wire().Accepted(seq, c.connectionID, c.nodeName, limits, kids)
 	}); err != nil {
 		c.closeWith(CloseShuttingDown, "internal")
 		return false
+	}
+	if c.v2 != nil {
+		c.mu.Lock()
+		c.v2Ready = true
+		c.mu.Unlock()
 	}
 	return true
 }
@@ -343,7 +393,12 @@ func (c *conn) register(ctx context.Context, now time.Time) (*conn, error) {
 		return nil, err
 	}
 	defer unlock()
-	if err := c.hub.markOnline(ctx, c.enrollmentID, c.connectionID, c.fence, now); err != nil {
+	if c.v2 != nil {
+		err = c.markV2Online(ctx, now)
+	} else {
+		err = c.hub.markOnline(ctx, c.enrollmentID, c.connectionID, c.fence, now)
+	}
+	if err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
@@ -369,6 +424,14 @@ func (c *conn) heartbeat(now time.Time) {
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, presenceTimeout)
 	defer cancel()
+	if c.v2 != nil {
+		if err := c.markV2Heartbeat(ctx, now); errors.Is(err, ErrFenced) {
+			c.closeWith(CloseReplaced, "binding_lost")
+		} else if err != nil {
+			c.hub.logger.Warn("a V2 node's heartbeat could not be recorded", "error", err.Error())
+		}
+		return
+	}
 	if err := c.hub.markHeartbeat(ctx, c.enrollmentID, c.connectionID, c.fence, now); err != nil && !errors.Is(err, ErrFenced) {
 		c.hub.logger.Warn("a node's heartbeat could not be recorded", "error", err.Error())
 	}
@@ -429,6 +492,9 @@ func (c *conn) tokenRefresh(token string, now time.Time) bool {
 	case caller.SessionID != c.sessionID.String():
 		c.closeWith(CloseCredential, "token_mismatch")
 		return false
+	case c.v2 != nil && (caller.UserID != c.userID.String() || caller.DeviceID != c.deviceID.String()):
+		c.closeWith(CloseCredential, "token_mismatch")
+		return false
 	}
 	// The new credential names the connection's node too: its installation's live node row is this connection's (C2 review).
 	node, err := c.hub.liveNode(ctx, *caller)
@@ -438,6 +504,15 @@ func (c *conn) tokenRefresh(token string, now time.Time) bool {
 		return true
 	case node == nil || node.nodeID != c.nodeID || node.enrollmentID != c.enrollmentID:
 		c.closeWith(CloseRefused, "node_mismatch")
+		return false
+	case node.protocolRevoked:
+		c.closeWith(CloseCredential, "revoked")
+		return false
+	case c.v2 != nil && node.protocolEpoch != c.v2.epoch:
+		c.closeWith(CloseReplaced, "protocol_epoch_changed")
+		return false
+	case c.v2 == nil && node.protocolEpoch != (platform.ID{}):
+		c.closeWith(CloseRefused, "upgrade_required")
 		return false
 	}
 	c.mu.Lock()
@@ -473,7 +548,7 @@ func (c *conn) supervise(helloDeadline time.Time) {
 		}
 		now := c.hub.clock()
 		c.mu.Lock()
-		accepted, proved, lastInbound, expires := c.accepted, c.proved, c.lastInbound, c.accessExpires
+		accepted, proved, lastInbound, expires := c.accepted && (c.v2 == nil || c.v2Ready), c.proved, c.lastInbound, c.accessExpires
 		c.mu.Unlock()
 		if !accepted {
 			if !proved && !now.Before(helloDeadline) {
@@ -503,7 +578,7 @@ func (c *conn) supervise(helloDeadline time.Time) {
 			lastHeartbeat = now
 			// A full queue skips a heartbeat; the node's own frames keep the deadline, and a node that reads nothing is closed by the
 			// write timeout.
-			_ = c.send(func(seq uint64) ([]byte, error) { return c.hub.codec.Heartbeat(seq, now) })
+			_ = c.send(func(seq uint64) ([]byte, error) { return c.wire().Heartbeat(seq, now) })
 		}
 		if now.Sub(lastRecheck) >= settings.SessionRecheck {
 			lastRecheck = now
@@ -518,9 +593,9 @@ func (c *conn) supervise(helloDeadline time.Time) {
 
 // recheckSession re-reads the connection's credential (CTR5-HUB-07, -08): revoked closes 4401, an account that may no longer sign in
 // 4403; a store that does not answer keeps the connection until the next check.
-func (c *conn) recheckSession(ctx context.Context) {
+func (c *conn) recheckSession(ctx context.Context) bool {
 	if c.closing.Load() {
-		return
+		return false
 	}
 	check, cancel := context.WithTimeout(ctx, presenceTimeout)
 	defer cancel()
@@ -528,11 +603,15 @@ func (c *conn) recheckSession(ctx context.Context) {
 	switch {
 	case err != nil:
 		c.hub.logger.Warn("a channel's credential could not be re-checked", "error", err.Error())
+		return false
 	case standing == session.Revoked:
 		c.closeWith(CloseCredential, "revoked")
+		return false
 	case standing == session.Barred:
 		c.closeWith(CloseRefused, "account_state")
+		return false
 	}
+	return true
 }
 
 // recheckLapse asks the gate for center.nodes (CTR5-HUB-09, Q23): unavailable closes 4403 with access.gated audited once for the close;
@@ -556,7 +635,11 @@ func (c *conn) recheckLapse(ctx context.Context) {
 	c.hub.metrics.ObserveChannel("lapse", "closed")
 	audit, cancel := context.WithTimeout(context.WithoutCancel(ctx), presenceTimeout)
 	defer cancel()
-	c.auditAs(audit, access.AuditGated, string(decision.Reason), "operation", routes.NodeChannelID, map[string]any{"operation": routes.NodeChannelID,
+	operation := routes.NodeChannelID
+	if c.v2 != nil {
+		operation = routes.NodeChannelV2ID
+	}
+	c.auditAs(audit, access.AuditGated, string(decision.Reason), "operation", operation, map[string]any{"operation": operation,
 		"feature": string(feature.CenterNodes), "reason": string(decision.Reason)})
 	c.closeWith(CloseRefused, "feature_not_entitled")
 }
@@ -575,17 +658,20 @@ func (c *conn) violation(reason string) {
 
 // send encodes a frame with the next sequence number and queues it; it never blocks.
 func (c *conn) send(encode func(seq uint64) ([]byte, error)) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closing.Load() {
 		return errQueueFull
 	}
-	c.mu.Lock()
-	c.sentSeq++
-	data, err := encode(c.sentSeq)
-	c.mu.Unlock()
+	next := c.sentSeq + 1
+	data, err := encode(next)
 	if err != nil {
 		return err
 	}
-	return c.enqueue(outbound{data: data})
+	if err = c.enqueue(outbound{data: data}); err == nil {
+		c.sentSeq = next
+	}
+	return err
 }
 
 // sendCall queues a call's frame; the call is marked delivered when the writer starts writing it.
@@ -789,7 +875,7 @@ func (c *conn) closeWith(code uint32, reason string) {
 			}
 			c.mu.Lock()
 			c.sentSeq++
-			frame, err := c.hub.codec.Close(c.sentSeq, code, reason, hint)
+			frame, err := c.wire().Close(c.sentSeq, code, reason, hint)
 			c.mu.Unlock()
 			if err == nil {
 				_ = c.ws.Write(c.writes, websocket.MessageBinary, frame)

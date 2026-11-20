@@ -42,28 +42,53 @@ func (h *Hub) fencedExec(ctx context.Context, operation, statement string, argum
 	return nil
 }
 
-// markOnline records an accepted connection: the node is online since now, with its connection and a heartbeat now. It tells the two
-// refusals apart in one statement: ErrFenced when the fence is not the live one, ErrNodeGone when the fence is live but the node row is
-// not (revoked since the admission).
-func (h *Hub) markOnline(ctx context.Context, enrollmentID, connectionID platform.ID, fence int64, now time.Time) error {
-	live, updated := false, int64(0)
-	err := h.db.InTx(ctx, "record a node's channel", store.TxOptions{Timeout: presenceTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `WITH lease AS (SELECT `+fencedCondition+` AS live),
-updated AS (UPDATE fleet.node SET online_since = @now, last_heartbeat_at = @now, connection_id = @connection,
-    last_seen_at = greatest(last_seen_at, @now)
-WHERE enrollment_id = @enrollment AND revoked_at IS NULL AND (SELECT live FROM lease) RETURNING 1)
-SELECT (SELECT live FROM lease), (SELECT count(*) FROM updated)`,
-			pgx.NamedArgs{"now": now, "connection": connectionID, "enrollment": enrollmentID, "fence": fence}).Scan(&live, &updated)
-	})
-	switch {
-	case err != nil:
-		return err
-	case !live:
+func lockPresenceLease(ctx context.Context, tx pgx.Tx, fence int64) error {
+	var current int64
+	err := tx.QueryRow(ctx, `SELECT fence FROM fleet.hub_lease
+WHERE singleton AND fence=$1 AND expires_at > clock_timestamp() FOR SHARE`, fence).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrFenced
-	case updated == 0:
-		return ErrNodeGone
 	}
-	return nil
+	return err
+}
+
+// markOnline records a legacy connection under the same enrollment row lock
+// used by V2. A delayed legacy hello cannot displace a committed V2 binding.
+func (h *Hub) markOnline(ctx context.Context, enrollmentID, connectionID platform.ID, fence int64, now time.Time) error {
+	return h.db.InTx(ctx, "record a node's channel", store.TxOptions{Timeout: presenceTimeout, Auxiliary: true}, func(ctx context.Context, tx pgx.Tx) error {
+		if err := lockPresenceLease(ctx, tx, fence); err != nil {
+			return err
+		}
+		var current platform.ID
+		err := tx.QueryRow(ctx, `SELECT enrollment_id FROM fleet.node
+WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&current)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNodeGone
+		}
+		if err != nil {
+			return err
+		}
+		var v2Bound bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM management.node_protocol WHERE enrollment_id=$1)`,
+			current).Scan(&v2Bound); err != nil {
+			return err
+		}
+		if v2Bound {
+			return errProtocolChanged
+		}
+		return writeOnline(ctx, tx, current, connectionID, fence, now)
+	})
+}
+
+func writeOnline(ctx context.Context, tx pgx.Tx, enrollment, connection platform.ID, fence int64, now time.Time) error {
+	tag, err := tx.Exec(ctx, `UPDATE fleet.node SET online_since=@now,last_heartbeat_at=@now,
+    connection_id=@connection,last_seen_at=greatest(last_seen_at,@now)
+WHERE enrollment_id=@enrollment AND `+fencedCondition, pgx.NamedArgs{"now": now, "connection": connection,
+		"enrollment": enrollment, "fence": fence})
+	if err == nil && tag.RowsAffected() != 1 {
+		return ErrFenced
+	}
+	return err
 }
 
 // markHeartbeat records a heartbeat of the connection that holds the node.

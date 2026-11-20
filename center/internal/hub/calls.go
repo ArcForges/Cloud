@@ -195,6 +195,8 @@ func (h *Hub) Call(ctx context.Context, call Call) (Result, error) {
 		return Result{}, arc.NodeOffline(call.TargetNodeID[:], now)
 	case c.userID != call.AccountID:
 		return Result{}, arc.NotFound("node", call.TargetNodeID[:])
+	case c.v2 != nil:
+		return Result{}, arc.InvalidState("node", "capability_unavailable")
 	}
 	if call.Method >= relayv1.RoutedMethod_ROUTED_METHOD_READ_NODE_FILE {
 		c.mu.Lock()

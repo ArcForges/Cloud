@@ -53,6 +53,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
+	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	nodev1 "github.com/ArcForges/Contracts/go/arcforges/node/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
 	relayv1 "github.com/ArcForges/Contracts/go/arcforges/relay/v1"
@@ -214,6 +215,10 @@ func Operations() []Operation {
 			Receipt: true},
 		{Path: publicapiv1connect.DeviceServiceRevokeProcedure, ID: "device.revoke", Risk: "R3", Audit: AuditInTransaction, Session: true, Restricted: true,
 			MobileLimited: UpgradeUnlessOwn, StepUp: EvidenceUnlessOwn, Target: TargetDevice, Receipt: true},
+		{Path: managementv2connect.DeviceServiceListProcedure, ID: "management.deviceList", Risk: "R1", Session: true, Restricted: true},
+		{Path: managementv2connect.DeviceServiceInspectProcedure, ID: "management.deviceInspect", Risk: "R1", Session: true, Restricted: true},
+		{Path: managementv2connect.DeviceServiceRevokeProcedure, ID: "management.deviceRevoke", Risk: "R3", Audit: AuditInTransaction, Session: true, Restricted: true,
+			MobileLimited: UpgradeUnlessOwn, StepUp: EvidenceUnlessOwn, Target: TargetDevice, Receipt: true},
 		// The fleet surface (AF-CTR-04 E1a): the node refreshes anonymously with its refresh token (never under a receipt: it presents
 		// a one-use secret); it reports its info and signs itself out with its node credential under a receipt of principal
 		// node:<installation>. A restricted account's node may sign out (it only removes access) but not report. Never gated.
@@ -245,6 +250,8 @@ func Operations() []Operation {
 		// connected-node cap), access.authorized is appended before the gate, and the gate asks center.nodes (the node connection group).
 		// It is not served as a Connect method: the relay surface's upgrade handler authorizes it with this row before it upgrades.
 		{Path: routes.NodeChannelPath, ID: routes.NodeChannelID, Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes,
+			Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
+		{Path: routes.NodeChannelV2Path, ID: routes.NodeChannelV2ID, Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes,
 			Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
 		// The node registry of FleetService (AF-CTR-05 E2a; Plan CTR5-API-02..04, Q20: never gated, so a lapsed account still lists, renames
 		// and revokes its nodes). ListNodes and GetNode admit an account session, and a node credential only as the verified relay of its

@@ -16,6 +16,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/ratelimit"
+	"github.com/ArcForges/Cloud/center/internal/routes"
 )
 
 // The per-account resource controls (AF-CTR-05 part E0, CTR5-GATE-05; EVIDENCE: REAL controls, REAL rate-limit buckets over REAL
@@ -65,8 +66,7 @@ func TestTheCompositionsControlsCoverTheRoutedAndChannelGroupsOnly(t *testing.T)
 			t.Errorf("a %s row was admitted without its own control", group)
 		}
 	}
-	// No control stands in front of an essential row; the channel's upgrade buckets stand in front of the node channel's row (AF-CTR-05
-	// E1a), and of nothing else.
+	// The legacy and V2 node channels share the existing upgrade buckets. Essential rows have no control here.
 	for _, control := range controls {
 		for _, operation := range access.Operations() {
 			if Routed(operation) {
@@ -76,7 +76,7 @@ func TestTheCompositionsControlsCoverTheRoutedAndChannelGroupsOnly(t *testing.T)
 				}
 				continue
 			}
-			if operation.ID == "fleet.nodeChannel" {
+			if operation.ID == routes.NodeChannelID || operation.ID == routes.NodeChannelV2ID {
 				if control.Covers(operation) != (control.Name() == ChannelUpgradeName) {
 					t.Errorf("%s and the node channel's row: covers %v", control.Name(), control.Covers(operation))
 				}

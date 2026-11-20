@@ -17,7 +17,7 @@ import (
 type hubRouter struct{ hub *hub.Hub }
 
 func (r hubRouter) Routable() (int64, bool)           { return r.hub.Routable() }
-func (r hubRouter) Connected(nodeID platform.ID) bool { return r.hub.Connected(nodeID) }
+func (r hubRouter) Connected(nodeID platform.ID) bool { return r.hub.LegacyConnected(nodeID) }
 
 func (r hubRouter) Route(ctx context.Context, call fleetapi.RoutedCall) (fleetapi.RoutedResult, error) {
 	routed := hub.Call{AccountID: call.AccountID, TargetNodeID: call.TargetNodeID, CommandID: call.CommandID, Method: call.Method, Payload: call.Payload,

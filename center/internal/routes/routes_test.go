@@ -100,6 +100,9 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.fleet.v1.FleetService/UnregisterNodeWorkspace session 262144",
 		"/arcforges.fleet.v1.FleetService/ListNodeWorkspaces session 262144",
 		"/arcforges.fleet.v1.FleetService/GetNodeWorkspace session 262144",
+		"/arcforges.management.v2.DeviceService/List session 4096",
+		"/arcforges.management.v2.DeviceService/Inspect session 4096",
+		"/arcforges.management.v2.DeviceService/Revoke session 4096",
 	}
 	if len(table.Surfaces) != 7 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
 		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || table.Surfaces[6] != SurfaceNodes ||
@@ -111,6 +114,11 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		// CompleteNodeSignIn, 10 s for the others); the identity rows the identity surface's 15 s.
 		surface, deadline, reply := SurfaceIdentity, 15_000, 65_536
 		switch {
+		case strings.HasPrefix(row.Path, "/arcforges.management.v2.DeviceService/"):
+			surface, deadline = SurfaceNodes, 10_000
+			if row.Path == "/arcforges.management.v2.DeviceService/List" {
+				reply = ListDevicesReplyBytes
+			}
 		case strings.HasPrefix(row.Path, "/arcforges.fleet.v1.FleetService/"):
 			// The node registry (AF-CTR-05 E2a): 5 s, RevokeNode 10 s; ListNodes replies up to 640 KiB.
 			surface, deadline = SurfaceNodes, 5_000
