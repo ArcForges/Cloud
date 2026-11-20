@@ -16,11 +16,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/platform"
@@ -36,7 +39,9 @@ const (
 )
 
 type center02Approval struct {
-	VerificationURI string `json:"verificationUri"`
+	VerificationURI    string `json:"verificationUri"`
+	UserCode           string `json:"userCode"`
+	NodeKeyFingerprint string `json:"nodeKeyFingerprint"`
 }
 
 type center02Owner struct {
@@ -44,9 +49,69 @@ type center02Owner struct {
 	NodeEpoch  string `json:"nodeEpoch"`
 }
 
+type center02NativeRun struct {
+	harness      *harness
+	owner        account
+	ownerBrowser *browser
+	ctx          context.Context
+	coordination string
+	done         chan struct{}
+	exit         error
+	output       lockedBuffer
+}
+
 // TestCenter02InstalledNode uses a real composed Go Center, an isolated PostgreSQL store, ordinary HTTPS certificate
 // validation and the installed product. The browser's input uses the existing virtual passkey helper.
 func TestCenter02InstalledNode(t *testing.T) {
+	run := startCenter02InstalledNode(t, "ArcForges.ClosedLoop.Tests.CloudLinkCenterControlTests")
+	approval := center02Observation[center02Approval](t, run, "approval.json")
+	h, owner, ctx, coordination, done := run.harness, run.owner, run.ctx, run.coordination, run.done
+	center02ApproveBrowserFlow(t, ctx, h, run.ownerBrowser, owner, approval.VerificationURI)
+	reported := center02Observation[center02Owner](t, run, "connected.json")
+	first := center02QualifiedConnection(t, ctx, h, owner, reported)
+	center02ConfirmConnection(t, coordination)
+	center02WaitFile(t, ctx, coordination, "outage-request", done)
+	reconnected := center02QualifiedConnection(t, ctx, h, owner, reported)
+	if reconnected == first {
+		t.Fatal("explicit reconnect did not establish a new V2 channel generation")
+	}
+	rotationDeadline := time.NewTimer(40 * time.Second)
+	defer rotationDeadline.Stop()
+	rotationPoll := time.NewTicker(250 * time.Millisecond)
+	defer rotationPoll.Stop()
+	for h.count(`SELECT count(*) FROM identity.spent_refresh AS spent
+		JOIN identity.session AS s ON s.session_id = spent.session_id
+		JOIN fleet.node AS node ON node.installation_id = s.installation_id WHERE node.user_id = $1`, owner.id) == 0 {
+		select {
+		case <-rotationPoll.C:
+		case <-done:
+			t.Fatal("the Node test exited before credential rotation")
+		case <-rotationDeadline.C:
+			t.Fatal("the real Node credential family did not rotate")
+		}
+	}
+	h.stopHub()
+	h.native.Close()
+	if err := os.WriteFile(filepath.Join(coordination, "outage-ready"), nil, 0600); err != nil {
+		t.Fatal("the native outage marker could not be written")
+	}
+	center02WaitExit(t, run)
+}
+
+// TestCenter02InstalledNodeDeviceApproval approves a device-code flow using only the code and public fingerprint
+// displayed by the installed owner's V2 CLI. The real approval requires the withheld tail and virtual passkey step-up.
+func TestCenter02InstalledNodeDeviceApproval(t *testing.T) {
+	run := startCenter02InstalledNode(t, "ArcForges.ClosedLoop.Tests.CloudLinkCenterControlDeviceTests")
+	approval := center02Observation[center02Approval](t, run, "approval.json")
+	center02ApproveDeviceFlow(t, run, approval)
+	reported := center02Observation[center02Owner](t, run, "connected.json")
+	center02QualifiedConnection(t, run.ctx, run.harness, run.owner, reported)
+	center02ConfirmConnection(t, run.coordination)
+	center02WaitExit(t, run)
+}
+
+func startCenter02InstalledNode(t *testing.T, testClass string) *center02NativeRun {
+	t.Helper()
 	if os.Getenv(center02Required) != "1" {
 		t.Skip("the installed Node supplement requires a scoped native fixture")
 	}
@@ -75,76 +140,56 @@ func TestCenter02InstalledNode(t *testing.T) {
 	processContext, cancelProcess := context.WithTimeout(context.Background(), 6*time.Minute)
 	t.Cleanup(cancelProcess)
 	command := exec.CommandContext(processContext, "dotnet", "test", "--project", project, "-c", "Release", "--no-build",
-		"--filter-class", "ArcForges.ClosedLoop.Tests.CloudLinkCenterControlTests", "--minimum-expected-tests", "1", "--fail-skips", "on")
+		"--filter-class", testClass, "--minimum-expected-tests", "1", "--fail-skips", "on")
 	command.Dir = filepath.Dir(project)
 	command.WaitDelay = 5 * time.Second
 	command.Env = center02NodeEnvironment(command.Environ())
 	command.Env = append(command.Env, center02URL+"="+h.origin, center02Evidence+"="+coordination)
-	var output lockedBuffer
-	command.Stdout, command.Stderr = &output, &output
+	run := &center02NativeRun{harness: h, owner: owner, ownerBrowser: ownerBrowser, ctx: ctx, coordination: coordination, done: make(chan struct{})}
+	command.Stdout, command.Stderr = &run.output, &run.output
 	if err := command.Start(); err != nil {
 		t.Fatalf("launch the installed Node test: %v", err)
 	}
-	done := make(chan struct{})
-	var exit error
 	go func() {
-		exit = command.Wait()
-		close(done)
+		run.exit = command.Wait()
+		close(run.done)
 	}()
 	t.Cleanup(func() {
-		center02DrainChild(t, coordination, done, cancelProcess)
+		center02DrainChild(t, coordination, run.done, cancelProcess)
 		if t.Failed() {
-			t.Log(output.String())
+			t.Log(run.output.String())
 		}
 	})
+	return run
+}
 
-	var approval center02Approval
-	if err := json.Unmarshal(center02WaitFile(t, ctx, coordination, "approval.json", done), &approval); err != nil {
-		t.Fatal("the installed Node sign-in fixture did not publish a valid approval input")
+func center02Observation[T any](t *testing.T, run *center02NativeRun, name string) T {
+	t.Helper()
+	var observation T
+	if err := json.Unmarshal(center02WaitFile(t, run.ctx, run.coordination, name, run.done), &observation); err != nil {
+		t.Fatalf("the installed Node did not publish a valid fixture observation for %s", name)
 	}
-	center02ApproveBrowserFlow(t, ctx, h, ownerBrowser, owner, approval.VerificationURI)
-	var reported center02Owner
-	if err := json.Unmarshal(center02WaitFile(t, ctx, coordination, "connected.json", done), &reported); err != nil {
-		t.Fatal("the installed Node did not publish its observed owner and Node epochs")
-	}
-	first := center02QualifiedConnection(t, ctx, h, owner, reported)
+	return observation
+}
+
+func center02ConfirmConnection(t *testing.T, coordination string) {
+	t.Helper()
 	if err := os.WriteFile(filepath.Join(coordination, "connected-confirmed"), nil, 0600); err != nil {
 		t.Fatal("the exact V2 connection observation could not be recorded")
 	}
-	center02WaitFile(t, ctx, coordination, "outage-request", done)
-	reconnected := center02QualifiedConnection(t, ctx, h, owner, reported)
-	if reconnected == first {
-		t.Fatal("explicit reconnect did not establish a new V2 channel generation")
-	}
-	rotationDeadline := time.NewTimer(40 * time.Second)
-	defer rotationDeadline.Stop()
-	rotationPoll := time.NewTicker(250 * time.Millisecond)
-	defer rotationPoll.Stop()
-	for h.count(`SELECT count(*) FROM identity.spent_refresh AS spent
-		JOIN identity.session AS s ON s.session_id = spent.session_id
-		JOIN fleet.node AS node ON node.installation_id = s.installation_id WHERE node.user_id = $1`, owner.id) == 0 {
-		select {
-		case <-rotationPoll.C:
-		case <-done:
-			t.Fatal("the Node test exited before credential rotation")
-		case <-rotationDeadline.C:
-			t.Fatal("the real Node credential family did not rotate")
-		}
-	}
-	h.stopHub()
-	h.native.Close()
-	if err := os.WriteFile(filepath.Join(coordination, "outage-ready"), nil, 0600); err != nil {
-		t.Fatal("the native outage marker could not be written")
-	}
+}
+
+func center02WaitExit(t *testing.T, run *center02NativeRun) {
+	t.Helper()
 	select {
-	case <-done:
-		if exit != nil {
-			t.Fatalf("the installed Node test failed: %v", exit)
+	case <-run.done:
+		if run.exit != nil {
+			t.Fatalf("the installed Node test failed: %v", run.exit)
 		}
-	case <-ctx.Done():
+	case <-run.ctx.Done():
 		t.Fatal("the installed Node test exceeded its time bound")
 	}
-	t.Log(output.String())
+	t.Log(run.output.String())
 }
 
 func center02DrainChild(t *testing.T, directory string, done <-chan struct{}, cancel context.CancelFunc) {
@@ -173,25 +218,56 @@ func center02DrainChild(t *testing.T, directory string, done <-chan struct{}, ca
 
 func center02QualifiedConnection(t *testing.T, ctx context.Context, h *harness, owner account, reported center02Owner) platform.ID {
 	t.Helper()
-	var enrollment, node, protocol platform.ID
-	if err := h.migration.QueryRow(ctx, `SELECT enrollment_id, node_id, protocol_epoch FROM management.node_protocol
-		WHERE account_id = $1 AND protocol_major = 2 AND revoked_at IS NULL`, owner.id).Scan(&enrollment, &node, &protocol); err != nil {
-		t.Fatal("no exact active V2 enrollment was recorded for the fixture account")
+	var qualified []string
+	switch runtime.GOOS {
+	case "windows":
+		qualified = []string{"win-wrapper-local-v1", "windows-process-executor-v1"}
+	case "linux":
+		qualified = []string{"linux-bubblewrap-sdk-v1"}
+	default:
+		t.Fatalf("the installed Node fixture requires a designated Windows or Linux host, found %s", runtime.GOOS)
 	}
-	if count := h.count(`SELECT count(*) FROM management.node_protocol
-		WHERE account_id = $1 AND protocol_major = 2 AND revoked_at IS NULL`, owner.id); count != 1 {
-		t.Fatalf("the Center retained %d active V2 protocol records for the fixture account", count)
+	observation, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var enrollment, node, protocol platform.ID
+		var count int
+		err := h.migration.QueryRow(observation, `SELECT enrollment_id, node_id, protocol_epoch, count(*) OVER ()
+			FROM management.node_protocol WHERE account_id = $1 AND protocol_major = 2 AND revoked_at IS NULL`, owner.id).
+			Scan(&enrollment, &node, &protocol, &count)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) && observation.Err() == nil {
+			t.Fatalf("the V2 enrollment observation failed: %T", err)
+		}
+		if err == nil {
+			if count != 1 {
+				t.Fatalf("the Center retained %d active V2 protocol records for the fixture account", count)
+			}
+			current, online := h.center.Hub.V2Presence(owner.id, enrollment, node, protocol)
+			if online {
+				if current.Platform != runtime.GOOS {
+					t.Fatalf("the V2 channel's platform must match the native %s test host", runtime.GOOS)
+				}
+				if !slices.Equal(current.Capabilities, qualified) {
+					t.Fatalf("the V2 channel advertised a different ordered capability set; expected %v (observed count %d)",
+						qualified, len(current.Capabilities))
+				}
+				if hex.EncodeToString(current.NodeOwnerEpoch[:]) != reported.OwnerEpoch {
+					t.Fatal("the V2 channel's durable owner epoch differs from the installed Node's local handshake")
+				}
+				if current.NodeEpoch != reported.NodeEpoch {
+					t.Fatal("the V2 channel's process epoch differs from the installed Node's local handshake")
+				}
+				return current.ConnectionID
+			}
+		}
+		select {
+		case <-ticker.C:
+		case <-observation.Done():
+			t.Fatal("the Center did not observe the fixture's exact active V2 enrollment and online channel")
+		}
 	}
-	qualified := "linux-bubblewrap-sdk-v1"
-	if runtime.GOOS == "windows" {
-		qualified = "win-wrapper-local-v1"
-	}
-	current, online := h.center.Hub.V2Presence(owner.id, enrollment, node, protocol)
-	if !online || current.Platform != runtime.GOOS || !slices.Equal(current.Capabilities, []string{qualified}) ||
-		hex.EncodeToString(current.NodeOwnerEpoch[:]) != reported.OwnerEpoch || current.NodeEpoch != reported.NodeEpoch {
-		t.Fatal("the real Center did not observe the installed Node's exact owner epoch and qualified platform profile")
-	}
-	return current.ConnectionID
 }
 
 func center02File(t *testing.T, name string) string {
@@ -218,6 +294,39 @@ func center02NodeEnvironment(inherited []string) []string {
 		filtered = append(filtered, entry)
 	}
 	return filtered
+}
+
+var center02Fingerprint = regexp.MustCompile(`^[0-9A-F]{4}(-[0-9A-F]{4}){4}$`)
+
+func center02ApproveDeviceFlow(t *testing.T, run *center02NativeRun, approval center02Approval) {
+	t.Helper()
+	code, normalized := fleet.NormalizeUserCode(approval.UserCode)
+	if !normalized || approval.VerificationURI != fleet.VerificationURI(run.harness.origin) ||
+		!center02Fingerprint.MatchString(approval.NodeKeyFingerprint) {
+		t.Fatal("the installed V2 CLI did not present the exact activation URL, normalized code and Node public-key fingerprint")
+	}
+
+	run.harness.remember(code, approval.UserCode)
+	browser := run.ownerBrowser
+	review := browser.postForm("/activate/review", url.Values{"user_code": {code}})
+	fingerprint := approval.NodeKeyFingerprint
+	tail := fingerprint[len(fingerprint)-4:]
+	masked := fingerprint[:len(fingerprint)-4] + "????"
+	command := commandPattern.FindStringSubmatch(review.text())
+	if review.status != http.StatusOK || len(command) != 2 || !strings.Contains(review.text(), masked) ||
+		strings.Contains(review.text(), fingerprint) || !strings.Contains(review.text(), `name="fingerprint_tail"`) {
+		t.Fatalf("the real Center did not show the matching review while withholding the comparison tail: %d", review.status)
+	}
+
+	if stepUp := browser.stepUpText(run.owner, fleet.ClassApproveDeviceCode, code); stepUp.status != http.StatusOK {
+		t.Fatalf("the real device approval step-up failed: %d", stepUp.status)
+	}
+	approved := browser.postForm("/activate/decision", url.Values{
+		"user_code": {code}, "command_id": {command[1]}, "decision": {"approve"}, "fingerprint_tail": {tail},
+	})
+	if approved.status != http.StatusOK || !strings.Contains(approved.text(), `data-page="activate-done"`) {
+		t.Fatalf("the real Center did not approve the device code using the displayed Node fingerprint: %d", approved.status)
+	}
 }
 
 func center02WaitFile(t *testing.T, ctx context.Context, directory, name string, done <-chan struct{}) []byte {
