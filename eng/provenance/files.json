@@ -896,6 +896,7 @@
     "eng/policy/dependency-reviews/afv2-env-01-r4.json",
     "eng/policy/dependency-reviews/afv2-env-01-r5.json",
     "eng/policy/dependency-reviews/afv2-host-01-r1.json",
+    "eng/policy/dependency-reviews/afv2-host-01-r2.json",
     "eng/policy/dependency-reviews/afv2-id-01-r1.json",
     "eng/policy/dependency-reviews/afv2-id-01-r2.json",
     "eng/policy/dependency-reviews/capacity-pacer-retire-r1.json",
@@ -1016,6 +1017,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r142.json",
     "eng/provenance/artifact-profiles/cloud-release-r143.json",
     "eng/provenance/artifact-profiles/cloud-release-r144.json",
+    "eng/provenance/artifact-profiles/cloud-release-r145.json",
     "eng/provenance/artifact-profiles/cloud-release-r15.json",
     "eng/provenance/artifact-profiles/cloud-release-r16.json",
     "eng/provenance/artifact-profiles/cloud-release-r17.json",
@@ -1130,6 +1132,7 @@
     "eng/provenance/records/center-runtime-afv2-env-01-r3.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r4.json",
     "eng/provenance/records/center-runtime-afv2-host-01-r1.json",
+    "eng/provenance/records/center-runtime-afv2-host-01-r2.json",
     "eng/provenance/records/center-runtime-afv2-id-01-r1.json",
     "eng/provenance/records/center-runtime-r1.json",
     "eng/provenance/records/center-runtime-r10.json",
@@ -1222,6 +1225,7 @@
     "eng/provenance/records/center-worker-afv2-env-01-r3.json",
     "eng/provenance/records/center-worker-afv2-env-01-r4.json",
     "eng/provenance/records/center-worker-afv2-host-01-r1.json",
+    "eng/provenance/records/center-worker-afv2-host-01-r2.json",
     "eng/provenance/records/center-worker-afv2-id-01-r1.json",
     "eng/provenance/records/center-worker-r1.json",
     "eng/provenance/records/center-worker-r10.json",
@@ -2248,5 +2252,5 @@
     "tooling/wrangler-init.ts": "web-miniflare-compat-afv2-env-01-r2",
     "center/internal/schema/migrations/0012_management_storage.sql": "afv2-center-01-management-storage-r4"
   },
-  "artifacts": ["center-runtime-afv2-host-01-r1", "center-worker-afv2-host-01-r1"]
+  "artifacts": ["center-runtime-afv2-host-01-r2", "center-worker-afv2-host-01-r2"]
 }

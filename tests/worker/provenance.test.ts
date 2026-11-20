@@ -663,7 +663,10 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/provenance/records/go-gowebauthn-legal-r1.json",
     "eng/provenance/records/go-gowebauthnx-legal-r1.json",
   ];
-  const hostReviewPath = "eng/policy/dependency-reviews/afv2-host-01-r1.json";
+  const hostReviewPaths = [
+    "eng/policy/dependency-reviews/afv2-host-01-r1.json",
+    "eng/policy/dependency-reviews/afv2-host-01-r2.json",
+  ];
   const files = [
     "eng/policy/dependency-policy.json",
     "eng/policy/dependency-reviews/af-ctr-03-r1.json",
@@ -767,7 +770,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/afv2-center-03-r2.json",
     "eng/policy/dependency-reviews/afv2-center-04-r1.json",
     "eng/policy/dependency-reviews/afv2-center-04-r2.json",
-    hostReviewPath,
+    ...hostReviewPaths,
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -798,7 +801,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
                         ? /^AF-CTR-05: /u
                         : file.includes("af-ctr-04-")
                           ? /^AF-CTR-04: /u
-                          : file === hostReviewPath
+                          : hostReviewPaths.includes(file)
                             ? /^AFV2-HOST-01: /u
                             : /^AF-CTR-03: /u,
     );
@@ -821,7 +824,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       "eng/policy/dependency-reviews/afv2-center-02-r4.json",
       "eng/policy/dependency-reviews/afv2-center-03-r3.json",
       "eng/policy/dependency-reviews/afv2-center-04-r3.json",
-      "eng/policy/dependency-reviews/afv2-host-01-r2.json",
+      "eng/policy/dependency-reviews/afv2-host-01-r3.json",
     ])
       assert.ok(!exempt.test(other), other);
     // Positive control: the rows match exactly the lines that name the two records, and every row matches one.
