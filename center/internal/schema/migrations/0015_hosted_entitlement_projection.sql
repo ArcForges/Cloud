@@ -37,6 +37,9 @@ CREATE TABLE entitlement.hosted_projection_migration (
     )
 );
 
+CREATE INDEX hosted_projection_source_grant ON entitlement.hosted_projection_migration (source_grant_id, account_id);
+CREATE INDEX hosted_projection_source_term ON entitlement.hosted_projection_migration (source_term_id, account_id);
+
 CREATE TRIGGER hosted_projection_append_only BEFORE UPDATE OR DELETE ON entitlement.hosted_projection_migration
     FOR EACH ROW EXECUTE FUNCTION entitlement.refuse_change();
 
