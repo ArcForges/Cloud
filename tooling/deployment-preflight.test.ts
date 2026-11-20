@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import {
@@ -11,6 +10,7 @@ import {
   repository,
   workflowPath,
 } from "../eng/verification/proof-gate.ts";
+import { scratchDirectory } from "../tests/worker/support/scratch.ts";
 import {
   evaluateFixtureProducer,
   evaluateFixtureTarget,
@@ -162,24 +162,20 @@ test("ambiguous and unreadable Worker inventories cannot produce a replacement s
   );
 });
 
-test("dry run refuses a missing local seal without exposing fixture contents or writing any gate", async () => {
-  const work = await mkdtemp(path.join(os.tmpdir(), "arcforges-h03-preflight-"));
-  try {
-    const evidencePath = path.join(work, "fixture.json");
-    const data = JSON.stringify({ ...fixture(), inertMarker: "must-not-enter-a-receipt" });
-    await writeFile(evidencePath, data, { mode: 0o600 });
-    const result = command("preflight", work, evidencePath);
-    assert.equal(result.status, 1, result.error?.message ?? "Expected a preflight refusal.");
-    assert.match(result.stderr, /Deployment preflight refused/u);
-    assert.doesNotMatch(result.stderr + result.stdout, /must-not-enter-a-receipt/u);
-    assert.deepEqual(await readdir(work), ["fixture.json"]);
-    assert.equal(await readFile(evidencePath, "utf8"), data);
-  } finally {
-    await rm(work, { recursive: true, force: true });
-  }
+test("dry run refuses a missing local seal without exposing fixture contents or writing any gate", async (t) => {
+  const work = scratchDirectory("arcforges-h03-preflight-", t);
+  const evidencePath = path.join(work, "fixture.json");
+  const data = JSON.stringify({ ...fixture(), inertMarker: "must-not-enter-a-receipt" });
+  await writeFile(evidencePath, data, { mode: 0o600 });
+  const result = command("preflight", work, evidencePath);
+  assert.equal(result.status, 1, result.error?.message ?? "Expected a preflight refusal.");
+  assert.match(result.stderr, /Deployment preflight refused/u);
+  assert.doesNotMatch(result.stderr + result.stdout, /must-not-enter-a-receipt/u);
+  assert.deepEqual(await readdir(work), ["fixture.json"]);
+  assert.equal(await readFile(evidencePath, "utf8"), data);
 });
 
-test("CI preflight requires the selected producer's exact artifact attempt", async () => {
+test("CI preflight requires the selected producer's exact artifact attempt", async (t) => {
   const evidence = fixture();
   const producer = evaluateFixtureProducer(evidence);
   const { responses } = evidence.github;
@@ -201,14 +197,10 @@ test("CI preflight requires the selected producer's exact artifact attempt", asy
   run.run_attempt = job.run_attempt = 2;
   artifact.name = candidateArtifactName(producer.runId, 2);
   assert.equal(evaluateFixtureProducer(evidence).candidateAttempt, 2);
-  const directory = await mkdtemp(path.join(os.tmpdir(), "arcforges-h03-preflight-"));
-  try {
-    const version = `0.1.0-ci.${producer.runNumber}.1`;
-    await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ version }));
-    await assert.rejects(preflight(directory, evidence), /exact fixture producer attempt/u);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  const directory = scratchDirectory("arcforges-h03-preflight-", t);
+  const version = `0.1.0-ci.${producer.runNumber}.1`;
+  await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ version }));
+  await assert.rejects(preflight(directory, evidence), /exact fixture producer attempt/u);
 });
 
 test("the live command's security-successor stop precedes candidate or provider operations", () => {
@@ -221,30 +213,26 @@ test("the live command's security-successor stop precedes candidate or provider 
 const stagedCandidate = process.env.ARCFORGES_HOST03_CANDIDATE;
 if (stagedCandidate) {
   test("read-only official preflight checks every member of the real clean local candidate", async (t) => {
-    const work = await mkdtemp(path.join(os.tmpdir(), "arcforges-h03-preflight-"));
-    try {
-      const candidate = path.resolve(stagedCandidate);
-      const manifest = await readJson<{ revision: string }>(path.join(candidate, "manifest.json"));
-      const evidencePath = path.join(work, "fixture.json");
-      await writeFile(evidencePath, JSON.stringify(fixture(manifest.revision)), { mode: 0o600 });
-      const before = await readdir(candidate);
-      const result = command("preflight", candidate, evidencePath);
-      assert.equal(result.status, 0, result.error?.message ?? result.stderr);
-      const report = JSON.parse(result.stdout) as {
-        producer: string;
-        archiveCustody: string;
-        authority: string;
-        applied: boolean;
-      };
-      assert.equal(report.producer, "local_unpublished");
-      assert.equal(report.archiveCustody, "not_assessed");
-      assert.equal(report.authority, "not_assessed");
-      assert.equal(report.applied, false);
-      t.diagnostic(result.stdout.trim());
-      assert.deepEqual(await readdir(candidate), before);
-      assert.deepEqual(await readdir(work), ["fixture.json"]);
-    } finally {
-      await rm(work, { recursive: true, force: true });
-    }
+    const work = scratchDirectory("arcforges-h03-preflight-", t);
+    const candidate = path.resolve(stagedCandidate);
+    const manifest = await readJson<{ revision: string }>(path.join(candidate, "manifest.json"));
+    const evidencePath = path.join(work, "fixture.json");
+    await writeFile(evidencePath, JSON.stringify(fixture(manifest.revision)), { mode: 0o600 });
+    const before = await readdir(candidate);
+    const result = command("preflight", candidate, evidencePath);
+    assert.equal(result.status, 0, result.error?.message ?? result.stderr);
+    const report = JSON.parse(result.stdout) as {
+      producer: string;
+      archiveCustody: string;
+      authority: string;
+      applied: boolean;
+    };
+    assert.equal(report.producer, "local_unpublished");
+    assert.equal(report.archiveCustody, "not_assessed");
+    assert.equal(report.authority, "not_assessed");
+    assert.equal(report.applied, false);
+    t.diagnostic(result.stdout.trim());
+    assert.deepEqual(await readdir(candidate), before);
+    assert.deepEqual(await readdir(work), ["fixture.json"]);
   });
 }
