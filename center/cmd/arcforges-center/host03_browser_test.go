@@ -7,13 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"html"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -280,22 +280,34 @@ func (b *host03Browser) inspect(scope host03Scope, sandbox, run string) {
 	}
 }
 
-func (b *host03Browser) rejectRun(scope host03Scope, run string, codes ...string) {
+func (b *host03Browser) rejectOldSession(scope host03Scope, run string) {
+	b.f.t.Helper()
+	reply, err := b.inspectRunWire(scope, run)
+	var refusal *connectv2.Error
+	if !errors.As(err, &refusal) || refusal.Code() != connectv2.CodeUnauthenticated ||
+		refusal.Message() != ingress.ReasonUnauthenticated.Code || reply.GetValue() != nil || reply.GetError() != nil {
+		b.f.t.Fatalf("expected the restored ingress to refuse the source session before typed routing: transport=%s", connectv2.CodeOf(err))
+	}
+}
+
+func (b *host03Browser) rejectRun(scope host03Scope, run string, category foundation.ErrorCategory, code, reason string) {
+	b.f.t.Helper()
+	reply, err := b.inspectRunWire(scope, run)
+	refusal := reply.GetError()
+	if err != nil || reply.GetValue() != nil || refusal.GetCategory() != category || refusal.GetCode() != code ||
+		refusal.GetDetails().GetState().GetReason() != reason ||
+		refusal.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+		b.f.t.Fatalf("expected old authority refusal %s/%s with no effect: transport=%s category=%s code=%s effect=%s reason=%q",
+			category, code, connectv2.CodeOf(err), refusal.GetCategory(), refusal.GetCode(), refusal.GetEffect(), refusal.GetDetails().GetState().GetReason())
+	}
+}
+
+func (b *host03Browser) inspectRunWire(scope host03Scope, run string) (*v2.RunServiceInspectResponse, error) {
 	b.f.t.Helper()
 	var reply v2.RunServiceInspectResponse
 	err := b.remote(scope, host03InspectRun,
 		&v2.RunServiceInspectRequest{Meta: host03RequestMeta(), RunId: host03ProtoID(host03LocalID(b.f.t, run))}, &reply)
-	if err != nil {
-		if connectv2.CodeOf(err) == connectv2.CodeUnauthenticated && slices.Contains(codes, "unauthenticated") {
-			return
-		}
-		b.f.t.Fatalf("expected a typed old-authority refusal or authenticated denial, got transport=%s", connectv2.CodeOf(err))
-	}
-	refusal := reply.GetError()
-	if reply.GetValue() != nil || !slices.Contains(codes, refusal.GetCode()) ||
-		refusal.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
-		b.f.t.Fatalf("expected old authority refusal with no effect: actual=%s/%s", refusal.GetCode(), refusal.GetEffect())
-	}
+	return &reply, err
 }
 
 func host03RequestMeta() *foundation.RequestMeta {

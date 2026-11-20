@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	foundation "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ArcForges/Cloud/center/internal/config"
@@ -116,16 +117,17 @@ func TestHost03InstalledSelfHost(t *testing.T) {
 		restored := fixture.restore(source, first)
 		fixture.serve(restored, false)
 		owner.requireRevoked()
-		owner.rejectRun(sourceScope, run, "unauthenticated")
+		owner.rejectOldSession(sourceScope, run)
 		fresh := owner.fresh()
 		fresh.signIn()
-		fresh.rejectRun(sourceScope, run, "permission_denied", "not_found", "node_offline", "node_unreachable")
-		node.endEnrollment()
+		fresh.rejectRun(sourceScope, run, foundation.ErrorCategory_ERROR_CATEGORY_STATE, "upgrade_required", "typed_v2_control_required")
+		t.Log("restored Center refused the old browser cookie and the exact old enrolled V2 binding")
 		// Restore retained the old enrollment for audit but permanently revoked
 		// its protocol. Retire that obsolete fleet row before a fresh approval.
 		if fixture.command(restored, "admin", "revoke-device", "--node", first.node.String())["account"] != fresh.account.String() {
 			t.Fatal("the operator did not retire the restored obsolete enrollment for the exact account")
 		}
+		node.endEnrollment()
 		next := node.enroll(fresh)
 		protocol := fixture.protocol(restored, &next)
 		if next.node != first.node || next.ownerEpoch != first.ownerEpoch || next.enrollment == first.enrollment {
@@ -134,7 +136,7 @@ func TestHost03InstalledSelfHost(t *testing.T) {
 		newScope := node.setGrant(sandbox, next)
 		staleGrant := newScope
 		staleGrant.grant, staleGrant.revision = sourceScope.grant, sourceScope.revision
-		fresh.rejectRun(staleGrant, run, "permission_denied")
+		fresh.rejectRun(staleGrant, run, foundation.ErrorCategory_ERROR_CATEGORY_AUTHORIZATION, "permission_denied", "remote_grant_authority_unavailable")
 		if protocol == sourceProtocol || sourceScope.grant == newScope.grant {
 			t.Fatal("restore reapproval must create a fresh protocol epoch and local grant")
 		}
