@@ -30,6 +30,7 @@ import (
 
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/buildinfo"
+	"github.com/ArcForges/Cloud/center/internal/commerce"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/entitlement"
@@ -80,6 +81,7 @@ type Center struct {
 	// Authorizer is the identity surface's authorization (the stages of access.Authorize, the feature gate among them), or nil where
 	// that surface is off.
 	Authorizer *access.Authorizer
+	commerce   *commerce.Service
 	// Store is the runtime role's PostgreSQL store, or nil when no runtime database is configured.
 	Store *store.DB
 	// Hub is the node channel (AF-CTR-05 E1a), or nil where the relay surface is off.
@@ -131,6 +133,8 @@ type Options struct {
 	// slot for the call's duration, to pin that every call releases it when it ends. A running center registers none (Run composes the
 	// center with Options{}).
 	Controls []access.Control
+	// commerceTransport is a synthetic Paddle peer available only to in-package tests.
+	commerceTransport http.RoundTripper
 	// catalogue replaces the plan catalogue with a document under a classification: TESTS ONLY (DC-12). It is unexported, so no other
 	// package (the executable included) can set it, and no environment variable, file or configuration reaches it: a running center
 	// has the catalogue of its plan configuration or none. TestNoCodeOfTheRunningCenterInjectsACatalogue parses the non-test sources of the
@@ -141,15 +145,22 @@ type Options struct {
 	catalogueClass feature.Classification
 }
 
-// New composes a center from its configuration. Pools connect lazily, so a database that is down does not stop the start; it
-// makes the center unready and its calls fail with UNAVAILABLE.
+// New composes a center from its configuration. Pools normally connect lazily. A configured commerce surface confirms its
+// durable Paddle environment before it can serve.
 func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, error) {
+	commerceEnabled := cfg.Identity.Enabled(config.SurfaceCommerce)
+	if (cfg.Plan == config.PlanConfigured) != commerceEnabled {
+		return nil, errors.New("the hosted entitlement catalogue and the commerce surface must be configured together")
+	}
+	if commerceEnabled && (cfg.Mode != config.OfficialHosted || cfg.Database == nil || !cfg.Identity.Enabled(config.SurfaceIdentity)) {
+		return nil, errors.New("commerce requires official hosting, the runtime store and the identity surface")
+	}
 	center := &Center{Config: cfg, Logger: logger, Metrics: observe.NewMetrics()}
 	disabled := make([]feature.Key, len(cfg.DisabledFeatures))
 	for index, name := range cfg.DisabledFeatures {
 		disabled[index] = feature.Key(name)
 	}
-	center.FeatureConfiguration = feature.Configure(feature.Settings{Mode: cfg.Mode, Plan: cfg.Plan, Injected: options.catalogue, InjectedClass: options.catalogueClass, Disabled: disabled})
+	center.FeatureConfiguration = feature.Configure(feature.Settings{Mode: cfg.Mode, Plan: cfg.Plan, Injected: options.catalogue, InjectedClass: options.catalogueClass, Disabled: disabled, ProductionCatalogue: cfg.HostedCatalogue})
 	center.schemaVersion.Store(-1)
 	build, err := migrate.Load(schema.Migrations())
 	if err != nil {
@@ -229,6 +240,8 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	// The page paths are served by the pages handler where the surface is on, and answered 404 (with the security headers) elsewhere.
 	pageHandler := pages.Disabled()
 	channelHandler := hub.Disabled()
+	paddleHandler := http.NotFoundHandler()
+	portalHandler := http.NotFoundHandler()
 	if cfg.Identity.Enabled(config.SurfaceIdentity) {
 		if center.Store == nil {
 			center.Close()
@@ -245,6 +258,15 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 			return nil, err
 		}
 		center.Authorizer = composed.authorizer
+		if commerceEnabled {
+			paddleHandler, err = center.composeCommerce(options, composed.clock)
+			if err != nil {
+				center.Close()
+				return nil, err
+			}
+			dispatcher.Register(commerceRPC{service: center.commerce, authorizer: center.Authorizer, clock: composed.clock}.methods()...)
+			portalHandler = commercePortal(center.commerce, center.Authorizer, composed.verifier, pipelineOptions.ClientIP)
+		}
 		if center.Hub != nil {
 			center.Hub.Bind(composed.authorizer, composed.verifier, center.Features)
 		}
@@ -258,11 +280,18 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 	mux := http.NewServeMux()
 	for _, module := range modules {
 		for _, row := range module.Pages {
+			if row.Surface == routes.SurfaceCommerce {
+				mux.Handle(row.Path, portalHandler)
+				continue
+			}
 			mux.Handle(row.Path, pageHandler)
 		}
 		// The node channel's upgrade route (AF-CTR-05 E1a): the hub where the relay surface is on, 404 elsewhere.
 		for _, row := range module.Upgrades {
 			mux.Handle(row.Path, channelHandler)
+		}
+		if module.PaddleWebhook != nil {
+			mux.Handle(module.PaddleWebhook.Path, paddleHandler)
 		}
 	}
 	mountPublicRPCs(mux, dispatcher, modules)
@@ -473,21 +502,26 @@ func (c *Center) operator(clock func() time.Time) *entitlement.Operator {
 	return entitlement.NewOperator(c.Store, c.Entitlements, c.FeatureConfiguration.OperatorGrants, clock)
 }
 
-// checkIdentityComposition fails closed when the identity and fleet surfaces' registrations, their served Connect methods and the
-// operation table disagree (SEC-01, F13): every method of the surfaces is served and has exactly one operation row, and nothing else is.
+// checkIdentityComposition compares each authenticated surface's exact routes, Connect handlers and operation rows.
 func checkIdentityComposition(modules []routes.Module) error {
-	var policies, upgrades []ingress.Policy
+	var policies, httpPolicies []ingress.Policy
 	for _, module := range modules {
-		if module.Surface == routes.SurfaceIdentity || module.Surface == routes.SurfaceFleet || module.Surface == routes.SurfaceNodes {
+		if module.Surface == routes.SurfaceIdentity || module.Surface == routes.SurfaceFleet || module.Surface == routes.SurfaceNodes ||
+			module.Surface == routes.SurfaceCommerce {
 			policies = append(policies, module.Policies...)
 		}
 		// The relay surface's upgrade route (AF-CTR-05 E1a) is authorized with its own row (fleet.nodeChannel, a session row) by the
 		// upgrade handler, not served as a Connect method: the table must name it exactly once, as it names every served method.
 		for _, row := range module.Upgrades {
-			upgrades = append(upgrades, ingress.Policy{FullName: row.Path, Kind: ingress.Unary, Authentication: ingress.Session, Surface: row.Surface})
+			httpPolicies = append(httpPolicies, ingress.Policy{FullName: row.Path, Kind: ingress.Unary, Authentication: ingress.Session, Surface: row.Surface})
+		}
+		for _, page := range module.Pages {
+			if page.Surface == routes.SurfaceCommerce {
+				httpPolicies = append(httpPolicies, ingress.Policy{FullName: page.Path, Kind: ingress.Unary, Authentication: ingress.Session, Surface: page.Surface})
+			}
 		}
 	}
-	if err := access.Check(append(slices.Clone(policies), upgrades...)); err != nil {
+	if err := access.Check(slices.Concat(policies, httpPolicies)); err != nil {
 		return err
 	}
 	served := map[string]connect.StreamType{}
@@ -498,7 +532,7 @@ func checkIdentityComposition(modules []routes.Module) error {
 	served[status.Procedure] = status.StreamType
 	fleetServer := fleetapi.New(nil, nil, nil, nil, nil)
 	for _, method := range slices.Concat(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods(),
-		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0), fleetServer.V2WatchMethods(nil, 1)) {
+		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0), fleetServer.V2WatchMethods(nil, 1), commerceRPC{}.methods()) {
 		served[method.Spec.Procedure] = method.Spec.StreamType
 	}
 	if len(served) != len(policies) {
@@ -821,6 +855,10 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	defer center.Close()
+	// Development definitions may be recorded only on a store without a merchant environment.
+	if err := center.checkCommerceFixtureStore(ctx); err != nil {
+		return err
+	}
 	// store-1: the revision that starts with a definitions version records it before it serves; a replica of another version then
 	// neither recomputes nor writes an account (AF-CTR-05 E0).
 	center.startedAt = time.Now()
@@ -901,6 +939,18 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	if cfg.MetricsLogInterval > 0 {
 		go center.logMetrics(ctx, cfg.MetricsLogInterval)
+	}
+	if center.commerce != nil {
+		reconcile, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			center.runCommerceReconciliation(reconcile)
+		}()
+		defer func() {
+			cancel()
+			<-done
+		}()
 	}
 	var result error
 	select {

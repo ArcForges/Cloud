@@ -79,6 +79,8 @@ const (
 	// PlanDevelopmentFixtures is the acceptance environment's: the development fixtures of the plan catalogue (AF-CTR-03), for
 	// attributable test identities only. It is never production configuration.
 	PlanDevelopmentFixtures PlanConfiguration = "development-fixtures"
+	// PlanConfigured selects the official deployment's validated entitlement catalogue.
+	PlanConfigured PlanConfiguration = "configured"
 )
 
 // RoutedLongPolls is how many routed long polls (WaitNodeTask, and ReadNodeTaskOutput with wait_ms) may wait at once in a center process
@@ -89,7 +91,10 @@ func RoutedLongPolls(maxConnections int) int { return max(1, maxConnections/2) }
 type Config struct {
 	Mode Mode
 	// Plan is the plan configuration (official-hosted only).
-	Plan PlanConfiguration
+	Plan            PlanConfiguration
+	HostedCatalogue []byte
+	// Commerce is the explicitly enabled official-hosted provider configuration.
+	Commerce Commerce
 	// PublicBaseURL is the canonical absolute URL under which clients reach this center (no trailing slash).
 	PublicBaseURL string
 	// HTTPAddress serves HTTP/1.1 and h2c; GRPCAddress serves h2c only and is empty when disabled; AdminAddress serves
@@ -152,17 +157,10 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	default:
 		return Config{}, invalid("%s must be %s or %s; the center does not start without an explicit mode", EnvMode, OfficialHosted, SelfHosted)
 	}
-	switch PlanConfiguration(get(EnvPlanConfiguration)) {
-	case PlanNone:
-	case PlanDevelopmentFixtures:
-		if config.Mode != OfficialHosted {
-			return Config{}, invalid("%s applies to an official-hosted center only", EnvPlanConfiguration)
-		}
-		config.Plan = PlanDevelopmentFixtures
-	default:
-		return Config{}, invalid("%s must be empty or %s", EnvPlanConfiguration, PlanDevelopmentFixtures)
-	}
 	var err error
+	if config.Plan, config.HostedCatalogue, err = loadHostedCatalogue(lookup, config.Mode); err != nil {
+		return Config{}, err
+	}
 	if config.DisabledFeatures, err = loadDisabledFeatures(lookup, config.Mode); err != nil {
 		return Config{}, err
 	}
@@ -226,6 +224,9 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	if config.Identity, err = loadIdentity(get, config.Mode, config.PublicBaseURL, time.Now()); err != nil {
+		return Config{}, err
+	}
+	if config.Commerce, err = loadCommerce(lookup, config.Identity.Enabled(SurfaceCommerce), config.Plan); err != nil {
 		return Config{}, err
 	}
 	// The routed calls hold a request connection while they wait (PN-1): where the nodes surface serves them, an account's calls in

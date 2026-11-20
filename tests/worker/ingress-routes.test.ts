@@ -19,6 +19,9 @@ import {
 } from "../../worker/ingress/routes.ts";
 import { proofRoutes } from "../../worker/tables/cloud-tables.generated.ts";
 import {
+  clientIpHeader,
+  officialHostedCenterMode,
+  paddleWebhookRoute,
   remoteEnrollmentHeader,
   remoteGrantHeader,
   remoteGrantRevisionHeader,
@@ -96,6 +99,111 @@ test("the edge credential check needs a whole Origin match and never reads a coo
     false,
   );
   assert.equal(edgeCredentials(request({ authorization: cookie }), "https://o.test").ok, false);
+});
+
+test("Paddle ingress keeps the signed bytes and returns only the durable receipt status", async () => {
+  assert.ok(paddleWebhookRoute);
+  const route = paddleWebhookRoute;
+  const path = `https://api.test/api${route.path}`;
+  const body = new TextEncoder().encode('{\n  "event_id": "fixture", "display": "测试"\n}');
+  const signature = `ts=1700000000;h1=${"a".repeat(64)}`;
+  const client = "192.0.2.45";
+  const request = (url = path, fields: RequestInit = {}) =>
+    new Request(url, {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "paddle-signature": signature,
+        "cf-connecting-ip": client,
+        authorization: "Bearer unused-browser-credential",
+        cookie: "unused=session",
+        [clientIpHeader]: "203.0.113.9",
+        traceparent: "client-input",
+      },
+      ...fields,
+    });
+  const forwarded: Request[] = [];
+  const rateKeys: string[] = [];
+  let status = 200;
+  const env: IngressEnv = {
+    SOURCE_REVISION: "fixture",
+    ARCFORGES_CENTER_MODE: officialHostedCenterMode,
+    FLAGSHIP_SURFACES: "identity,commerce",
+    HELLO_RATE_LIMITER: {
+      async limit() {
+        return { success: true };
+      },
+    },
+    IDENTITY_RATE_LIMITER: {
+      async limit({ key }) {
+        rateKeys.push(key);
+        return { success: true };
+      },
+    },
+    CLOUD_CONTAINER: {
+      getByName(name) {
+        assert.equal(name, route.instance);
+        return {
+          async fetch(request) {
+            forwarded.push(request);
+            return new Response("internal-only", {
+              status,
+              headers: { "set-cookie": "internal=only", location: "https://unexpected.test" },
+            });
+          },
+        };
+      },
+    },
+  };
+
+  for (const [candidate, settings, expected] of [
+    [request(), { ...env, FLAGSHIP_SURFACES: "identity" }, 404],
+    [request(), { ...env, ARCFORGES_CENTER_MODE: "self-hosted" }, 404],
+    [request(`${path}?opaque`), env, 404],
+    [request(`${path}/`), env, 404],
+    [request(path, { method: "GET", body: null }), env, 405],
+    [request(path, { headers: { "content-type": "application/json" } }), env, 400],
+    [
+      request(path, {
+        headers: { "content-type": "application/json", "content-encoding": "gzip" },
+      }),
+      env,
+      415,
+    ],
+  ] as const) {
+    assert.equal((await handleApiRequest(candidate, settings)).status, expected);
+  }
+  assert.equal(rateKeys.length, 0);
+  assert.equal(forwarded.length, 0);
+
+  const oversized = request(path, { body: new Uint8Array(route.maxRequestBytes + 1) });
+  assert.equal((await handleApiRequest(oversized, env)).status, 413);
+  assert.equal(forwarded.length, 0);
+
+  const reply = await handleApiRequest(request(), env);
+  assert.equal(reply.status, 200);
+  assert.equal(reply.headers.has("location"), false);
+  assert.equal(reply.headers.has("set-cookie"), false);
+  assert.equal(await reply.text(), "");
+  assert.ok(rateKeys.every((key) => key === `${route.path}:${client}`));
+  assert.equal(forwarded.length, 1);
+  const upstream = forwarded[0];
+  assert.ok(upstream);
+  assert.equal(upstream.url, `http://container${route.path}`);
+  assert.equal(upstream.method, route.method);
+  assert.equal(upstream.redirect, "manual");
+  assert.equal(upstream.headers.get("paddle-signature"), signature);
+  assert.equal(upstream.headers.get(clientIpHeader), client);
+  assert.match(upstream.headers.get("traceparent") ?? "", /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/u);
+  assert.equal(upstream.headers.has("authorization"), false);
+  assert.equal(upstream.headers.has("cookie"), false);
+  assert.deepEqual(new Uint8Array(await upstream.arrayBuffer()), body);
+
+  status = 400;
+  assert.equal((await handleApiRequest(request(), env)).status, 400);
+  status = 302;
+  assert.equal((await handleApiRequest(request(), env)).status, 503);
 });
 
 test("only fixed typed management routes forward normalized target selection headers", async () => {

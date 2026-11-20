@@ -875,3 +875,43 @@ test("the acceptance container forwards only its selected proof command key when
     );
   }
 });
+
+test("the container passes only named merchant settings to configured official commerce", () => {
+  const merchant = {
+    ARCFORGES_CENTER_COMMERCE_CATALOGUE: "{}",
+    ARCFORGES_CENTER_PADDLE_ENVIRONMENT: "sandbox",
+    ARCFORGES_CENTER_PADDLE_API_KEY: "synthetic-api-key",
+    ARCFORGES_CENTER_PADDLE_WEBHOOK_SECRET: "synthetic-webhook-key",
+    ARCFORGES_CENTER_PADDLE_PREVIOUS_WEBHOOK_SECRET: "synthetic-previous-key",
+    ARCFORGES_CENTER_PADDLE_CHECKOUT_ORIGINS: "https://checkout.example.test",
+    ARCFORGES_CENTER_PADDLE_PORTAL_ORIGINS: "https://portal.example.test",
+  };
+  const hosted = '{"fixture":false}';
+  const config = {
+    ARCFORGES_HELLO_RUNTIME: "go",
+    ARCFORGES_CENTER_MODE: "official-hosted",
+    ARCFORGES_CENTER_HOSTED_CATALOGUE: hosted,
+    FLAGSHIP_SURFACES: "identity,commerce",
+    ARCFORGES_CENTER_PADDLE_UNUSED_SECRET: "synthetic-unused",
+    ...merchant,
+  };
+  const on = centerContainerSettings(config);
+  for (const [key, value] of Object.entries(merchant)) assert.equal(on.envVars[key], value);
+  assert.equal(on.envVars.ARCFORGES_CENTER_PADDLE_UNUSED_SECRET, undefined);
+  assert.equal(on.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE, hosted);
+  assert.equal(
+    on.enableInternet,
+    false,
+    "merchant settings do not change the database egress switch",
+  );
+
+  const dark = centerContainerSettings({ ...config, FLAGSHIP_SURFACES: "identity" });
+  assert.equal(dark.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE, hosted);
+  const selfHost = centerContainerSettings({ ...config, ARCFORGES_CENTER_MODE: "self-hosted" });
+  const rollback = centerContainerSettings({ ...config, ARCFORGES_HELLO_RUNTIME: "csharp" });
+  for (const settings of [dark, selfHost, rollback]) {
+    for (const key of Object.keys(merchant)) assert.equal(settings.envVars[key], undefined);
+  }
+  assert.equal(selfHost.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE, undefined);
+  assert.equal(rollback.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE, undefined);
+});

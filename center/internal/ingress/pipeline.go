@@ -90,6 +90,9 @@ func (p *pipeline) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 	case p.options.Routes.IsPlain(path):
 		p.observe(request, Outcome{Method: "plain"})
 		p.next.ServeHTTP(writer, request)
+	case p.options.Routes.IsPaddleWebhook(path):
+		p.observe(request, Outcome{Method: path})
+		p.next.ServeHTTP(writer, request)
 	case p.options.Routes.IsUpgrade(path):
 		// An upgrade route (the node channel, AF-CTR-05 E1a) is the handler's from here: it checks the method, the upgrade headers, the
 		// surface and the credential before it upgrades, and answers every refusal itself (with its reason in a header, PN-3).
@@ -274,12 +277,11 @@ func (p *pipeline) admit(writer http.ResponseWriter, request *http.Request) {
 // request: the exact Origin first, then the session, then that session's CSRF token.
 func (p *pipeline) authenticate(request *http.Request) (*Caller, *Reason) {
 	header := request.Header
-	cookie, hasCookie := SessionCookie(header)
 	hasAuthorization := len(header.Values("Authorization")) > 0
-	if hasAuthorization && hasCookie {
-		return nil, &ReasonUnauthenticated
-	}
 	if hasAuthorization {
+		if _, hasCookie := SessionCookie(header); hasCookie {
+			return nil, &ReasonUnauthenticated
+		}
 		token, ok := BearerToken(header)
 		if !ok || p.options.Bearer == nil {
 			return nil, &ReasonUnauthenticated
@@ -298,14 +300,21 @@ func (p *pipeline) authenticate(request *http.Request) (*Caller, *Reason) {
 		}
 		return caller, nil
 	}
-	if !hasCookie || p.options.Browser == nil {
+	return AuthenticateBrowser(request, p.options.Browser)
+}
+
+// AuthenticateBrowser resolves the exact same-origin, CSRF-checked browser credential used by unsafe RPCs.
+func AuthenticateBrowser(request *http.Request, browser BrowserSessionVerifier) (*Caller, *Reason) {
+	header := request.Header
+	cookie, hasCookie := SessionCookie(header)
+	if !hasCookie || browser == nil || len(header.Values("Authorization")) > 0 {
 		return nil, &ReasonUnauthenticated
 	}
 	origins := header.Values("Origin")
-	if len(origins) != 1 || origins[0] != p.options.Browser.AllowedOrigin() {
+	if len(origins) != 1 || origins[0] != browser.AllowedOrigin() {
 		return nil, &ReasonPermissionDenied
 	}
-	credential, err := p.options.Browser.Resolve(request.Context(), cookie)
+	credential, err := browser.Resolve(request.Context(), cookie)
 	if err != nil {
 		return nil, &ReasonDependencyUnavailable
 	}

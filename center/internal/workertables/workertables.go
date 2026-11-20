@@ -77,7 +77,7 @@ export interface ApiRoute {
 }
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
-export type Surface = %SURFACE_TYPE%;
+export type Surface%SURFACE_TYPE%;
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
@@ -163,6 +163,20 @@ export interface UpgradeRoute {
   readonly instance: string;
 }
 
+/** One exact provider webhook transport. The center authenticates the raw payload and records the receipt. */
+export interface WebhookRoute {
+  readonly surface: Surface;
+  readonly method: "POST";
+  readonly path: string;
+  readonly contentType: string;
+  readonly signatureHeader: string;
+  readonly maxSignatureBytes: number;
+  readonly maxRequestBytes: number;
+  readonly maxDurationMs: number;
+  readonly instance: string;
+  readonly centerMode: string;
+}
+
 `
 
 // ErrUnsafeText reports a value that cannot be written as a plain TypeScript string.
@@ -179,7 +193,11 @@ func Render(table routes.WorkerTable) (string, error) {
 		}
 		surfaceType = strings.Join(quoted, " | ")
 	}
-	text.WriteString(strings.Replace(header, "%SURFACE_TYPE%", surfaceType, 1))
+	surfaceDeclaration := " = " + surfaceType
+	if len("export type Surface"+surfaceDeclaration+";") > 100 {
+		surfaceDeclaration = " =\n  " + surfaceType
+	}
+	text.WriteString(strings.Replace(header, "%SURFACE_TYPE%", surfaceDeclaration, 1))
 	values := []string{table.HelloPath, table.HealthPath, table.Health.Path, table.Health.Instance}
 	for _, row := range append(slices.Clone(table.Production), table.SurfaceRows...) {
 		values = append(values, row.Path, row.Instance, row.Surface)
@@ -195,6 +213,9 @@ func Render(table routes.WorkerTable) (string, error) {
 	}
 	for _, row := range table.Upgrades {
 		values = append(values, row.Path, row.Surface, row.Subprotocol, row.Instance)
+	}
+	if row := table.PaddleWebhook; row != nil {
+		values = append(values, row.Surface, row.Method, row.Path, row.ContentType, row.SignatureHeader, row.Instance)
 	}
 	for _, header := range routes.PageSecurityHeaders() {
 		values = append(values, header.Name, header.Value)
@@ -295,6 +316,7 @@ func Render(table routes.WorkerTable) (string, error) {
 	pageTable(&text, table)
 	mobileTables(&text, table)
 	upgradeTable(&text, table)
+	paddleWebhook(&text, table.PaddleWebhook)
 	text.WriteString("export const helloPath = " + quote(table.HelloPath) + ";\n")
 	text.WriteString("export const healthPath = " + quote(table.HealthPath) + ";\n")
 	text.WriteString("/** The bound of a whole request body of a method that declares no larger one, frame header included. */\n")
@@ -442,6 +464,31 @@ func upgradeTable(text *strings.Builder, table routes.WorkerTable) {
 	text.WriteString("export const upgradeRefusalBytes = " + strconv.Itoa(routes.UpgradeRefusalBytes) + ";\n")
 	text.WriteString("/** The value a forwarded reason header (the refusal header, Retry-After) must have: visible ASCII, at most 128 characters. */\n")
 	text.WriteString("export const upgradeRefusalValuePattern = /" + routes.UpgradeRefusalValuePattern + "/u;\n\n")
+}
+
+func paddleWebhook(text *strings.Builder, row *routes.WebhookRoute) {
+	text.WriteString("export const officialHostedCenterMode = " + quote(string(config.OfficialHosted)) + ";\n")
+	text.WriteString("/** Paddle v1's exact callback route. Other provider paths are absent. */\n")
+	if row == nil {
+		text.WriteString("export const paddleWebhookRoute: WebhookRoute | undefined = undefined;\n\n")
+		return
+	}
+	text.WriteString("export const paddleWebhookRoute: WebhookRoute | undefined = {\n")
+	for _, field := range []struct{ name, value string }{
+		{"surface", row.Surface},
+		{"method", row.Method},
+		{"path", row.Path},
+		{"contentType", row.ContentType},
+		{"signatureHeader", strings.ToLower(row.SignatureHeader)},
+	} {
+		text.WriteString("  " + field.name + ": " + quote(field.value) + ",\n")
+	}
+	text.WriteString("  maxSignatureBytes: " + strconv.Itoa(row.MaxSignatureBytes) + ",\n")
+	text.WriteString("  maxRequestBytes: " + strconv.Itoa(row.MaxRequestBytes) + ",\n")
+	text.WriteString("  maxDurationMs: " + strconv.Itoa(row.MaxDurationMilliseconds) + ",\n")
+	text.WriteString("  instance: " + quote(row.Instance) + ",\n")
+	text.WriteString("  centerMode: officialHostedCenterMode,\n")
+	text.WriteString("};\n\n")
 }
 
 func route(text *strings.Builder, row routes.Row, indent string) {

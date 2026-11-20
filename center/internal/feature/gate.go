@@ -29,6 +29,8 @@ const (
 type Settings struct {
 	Mode config.Mode
 	Plan config.PlanConfiguration
+	// ProductionCatalogue is the explicit operator configuration under PlanConfigured.
+	ProductionCatalogue []byte
 	// Injected is a catalogue document a test supplies instead of the embedded fixtures, with its classification (tests only: no
 	// environment variable and no file reaches it, DC-12, and the composition of a running center never sets it; a test pins that).
 	Injected      []byte
@@ -64,6 +66,8 @@ func Configure(settings Settings) Configuration {
 	case settings.Injected != nil:
 		configuration.Class = settings.InjectedClass
 		catalogue, err = ParseCatalogue(settings.Injected, settings.InjectedClass)
+	case settings.Plan == config.PlanConfigured:
+		catalogue, err = ParseCatalogue(settings.ProductionCatalogue, ClassProduction)
 	case settings.Plan == config.PlanDevelopmentFixtures:
 		configuration.Class = ClassDevelopment
 		catalogue, err = DevelopmentFixtures()

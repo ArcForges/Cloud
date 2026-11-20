@@ -190,7 +190,16 @@ type Routes struct {
 	prefixes []string
 	// upgrades are the exact paths of the WebSocket upgrade routes (AF-CTR-05 E1a, the node channel): the pipeline admits only a GET
 	// with an upgrade's headers to them and hands it to the next handler; nothing else reaches it.
-	upgrades map[string]bool
+	upgrades      map[string]bool
+	paddleWebhook string
+}
+
+// WithPaddleWebhook adds the one provider callback to the dedicated webhook lane.
+func (r *Routes) WithPaddleWebhook(path string) { r.paddleWebhook = path }
+
+// IsPaddleWebhook reports the exact signed provider callback.
+func (r *Routes) IsPaddleWebhook(path string) bool {
+	return r.paddleWebhook != "" && r.paddleWebhook == path
 }
 
 // WithUpgrades adds the exact paths of the upgrade routes.

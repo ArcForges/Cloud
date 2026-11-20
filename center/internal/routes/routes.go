@@ -82,6 +82,8 @@ type Module struct {
 	Pages []PageRoute
 	// Upgrades are the module's WebSocket upgrade routes (only the relay surface declares any: RelayUpgradeRoutes).
 	Upgrades []UpgradeRoute
+	// PaddleWebhook is the commerce surface's signed provider callback.
+	PaddleWebhook *WebhookRoute
 }
 
 // HelloMethod is the path of the anonymous Hello.
@@ -137,7 +139,11 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Module{hello, identity, pages, operations, fleet, mobile, relay, nodes}, nil
+	commerce, err := Commerce()
+	if err != nil {
+		return nil, err
+	}
+	return []Module{hello, identity, pages, operations, fleet, mobile, relay, nodes, commerce}, nil
 }
 
 // Surfaces are the switchable surfaces of the registrations, in registration order.
@@ -211,6 +217,8 @@ type WorkerTable struct {
 	// Upgrades are the WebSocket upgrade routes (the relay surface, AF-CTR-05 E1a): the Worker's upgrade handler passes them through
 	// only while their surface is enabled, and returns the center's 101 unchanged.
 	Upgrades []UpgradeRoute
+	// PaddleWebhook is the commerce surface's signed provider callback.
+	PaddleWebhook *WebhookRoute
 	// MaxBodyBytes is the bound of a request body of a method that declares no larger one: the Hello bound, which the C#
 	// rollback host generates too. Every row carries its own bound; the center's Connect reader takes MaxRequestBytes.
 	MaxBodyBytes               int
@@ -225,6 +233,10 @@ var ErrRegistration = errors.New("inconsistent center registration")
 
 // Ingress is the center's public routes: the policy registry of every module and their plain paths.
 func Ingress(modules []Module) (*ingress.Routes, error) {
+	callback, err := declaredPaddleWebhook(modules)
+	if err != nil {
+		return nil, err
+	}
 	var policies []ingress.Policy
 	var plain, upgrades []string
 	for _, module := range modules {
@@ -245,11 +257,19 @@ func Ingress(modules []Module) (*ingress.Routes, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ingress.NewRoutes(registry, plain, nil).WithUpgrades(upgrades...), nil
+	routes := ingress.NewRoutes(registry, plain, nil).WithUpgrades(upgrades...)
+	if callback != nil {
+		routes.WithPaddleWebhook(callback.Path)
+	}
+	return routes, nil
 }
 
 // Table reads the Worker's production table from the registrations, fail-closed.
 func Table(modules []Module) (WorkerTable, error) {
+	callback, err := declaredPaddleWebhook(modules)
+	if err != nil {
+		return WorkerTable{}, err
+	}
 	budgets := map[string]Budget{}
 	var rows, surfaceRows []Row
 	var plain []string
@@ -387,10 +407,27 @@ func Table(modules []Module) (WorkerTable, error) {
 		Native:                     nativeRows,
 		Apex:                       apexRows,
 		Upgrades:                   upgradeRows,
+		PaddleWebhook:              callback,
 		MaxBodyBytes:               HelloMaxBodyBytes,
 		ColdStartMilliseconds:      ColdStartMilliseconds,
 		StreamLifetimeMilliseconds: StreamLifetimeMilliseconds,
 	}, nil
+}
+
+func declaredPaddleWebhook(modules []Module) (*WebhookRoute, error) {
+	var callback *WebhookRoute
+	for _, module := range modules {
+		if module.Surface != SurfaceCommerce && module.PaddleWebhook == nil {
+			continue
+		}
+		if callback != nil || module.Surface != SurfaceCommerce || len(module.Pages) != 1 || !isCommercePortal(module.Pages[0]) || module.PaddleWebhook == nil ||
+			*module.PaddleWebhook != paddleWebhookRoute() {
+			return nil, fmt.Errorf("%w: the Paddle webhook must be declared exactly by the commerce surface", ErrRegistration)
+		}
+		value := *module.PaddleWebhook
+		callback = &value
+	}
+	return callback, nil
 }
 
 func checkBudget(policy ingress.Policy, budget Budget) error {

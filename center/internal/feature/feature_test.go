@@ -228,6 +228,38 @@ func TestACatalogueOfTheProductionClassificationStatesNoFixtureNoNoticeAndNoPric
 	}
 }
 
+func TestConfiguredCatalogueUsesOnlyExplicitProductionData(t *testing.T) {
+	for _, item := range []struct {
+		name string
+		mode config.Mode
+		plan config.PlanConfiguration
+		data []byte
+		want State
+	}{
+		{"official configured catalogue", config.OfficialHosted, config.PlanConfigured, []byte(validProduction), StateValid},
+		{"missing configured catalogue", config.OfficialHosted, config.PlanConfigured, nil, StateInvalid},
+		{"invalid configured catalogue", config.OfficialHosted, config.PlanConfigured, []byte("{}"), StateInvalid},
+		{"fixture marker under official production input", config.OfficialHosted, config.PlanConfigured, developmentFixtures, StateInvalid},
+		{"self-hosted remains independent", config.SelfHosted, config.PlanConfigured, []byte(validProduction), StateMissing},
+		{"unconfigured official remains dark", config.OfficialHosted, config.PlanNone, []byte(validProduction), StateMissing},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			configuration := Configure(Settings{Mode: item.mode, Plan: item.plan, ProductionCatalogue: item.data})
+			if configuration.State != item.want || configuration.Class != ClassProduction {
+				t.Fatalf("configuration state=%d class=%s", configuration.State, configuration.Class)
+			}
+			if item.want == StateValid {
+				if configuration.Catalogue == nil || !configuration.Catalogue.Production() ||
+					configuration.Catalogue.Version != "2026-q4" || !slices.Equal(configuration.Catalogue.Capabilities, Gated()) {
+					t.Fatalf("the configured catalogue: %+v", configuration.Catalogue)
+				}
+			} else if configuration.Catalogue != nil {
+				t.Fatal("an inactive configuration acquired a catalogue")
+			}
+		})
+	}
+}
+
 // The catalogue's rules, each pinned by a document that breaks that rule alone: the refusal must be the rule's own text, so a case
 // cannot pass on another rule's refusal (config-2). fixtureJSON is a valid development fixture of one plan.
 func TestEveryInvalidCatalogueIsRefusedByItsOwnRuleWithoutEchoingItsValues(t *testing.T) {

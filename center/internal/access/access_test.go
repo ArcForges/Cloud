@@ -31,12 +31,18 @@ func identityPolicies(t *testing.T) []ingress.Policy {
 	if err != nil {
 		t.Fatal(err)
 	}
+	commerce, err := routes.Commerce()
+	if err != nil {
+		t.Fatal(err)
+	}
 	// The relay surface's upgrade route (AF-CTR-05 E1a) is authorized with its row by the upgrade handler: it counts as served.
 	var upgrades []ingress.Policy
 	for _, row := range routes.RelayUpgradeRoutes() {
 		upgrades = append(upgrades, ingress.Policy{FullName: row.Path, Kind: ingress.Unary, Authentication: ingress.Session, Surface: row.Surface})
 	}
-	return append(append(append(module.Policies, fleet.Policies...), nodes.Policies...), upgrades...)
+	portal := commerce.Pages[0]
+	upgrades = append(upgrades, ingress.Policy{FullName: portal.Path, Kind: ingress.Unary, Authentication: ingress.Session, Surface: portal.Surface})
+	return slices.Concat(module.Policies, fleet.Policies, nodes.Policies, commerce.Policies, upgrades)
 }
 
 func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
@@ -99,6 +105,15 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"identity.refreshSession":              "R1 anonymous",
 		"identity.getProfile":                  "R1 allowed none - no-receipt active",
 		"entitlement.getSnapshot":              "R1 allowed none - no-receipt restricted",
+		"commerce.getCatalogue":                "R1 allowed none - no-receipt active browser",
+		"commerce.createPurchaseIntent":        "R2 allowed none - receipt active browser",
+		"commerce.createCheckoutAttempt":       "R2 allowed none - receipt active browser",
+		"commerce.getPurchaseState":            "R1 allowed none - no-receipt restricted browser",
+		"commerce.getSubscription":             "R1 allowed none - no-receipt restricted browser",
+		"commerce.cancelSubscription":          "R3 allowed evidence subscription receipt active browser",
+		"commerce.reactivateSubscription":      "R2 allowed none - receipt active browser",
+		"commerce.listBillingHistory":          "R1 allowed none - no-receipt restricted browser",
+		"commerce.portal":                      "R3 allowed evidence subscription no-receipt restricted browser",
 		"identity.getAccountDeletion":          "R1 upgrade none - no-receipt restricted",
 		"identity.listAuthIdentities":          "R1 allowed none - no-receipt restricted",
 		"identity.listSessions":                "R1 allowed none - no-receipt restricted",
@@ -209,6 +224,9 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 			if len(operation.RelayedScopes) > 0 {
 				got += " relayed:" + strings.Join(operation.RelayedScopes, ",")
 			}
+			if operation.BrowserOnly {
+				got += " browser"
+			}
 		}
 		if want[operation.ID] != got {
 			t.Errorf("%s: %q, want %q", operation.ID, got, want[operation.ID])
@@ -226,7 +244,8 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	want := map[string]string{"identity.beginPasskeyRegistration": TargetAccount, "identity.removeAuthIdentity": TargetCredential,
 		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession,
-		"management.deviceRevoke": TargetDevice,
+		"management.deviceRevoke":     TargetDevice,
+		"commerce.cancelSubscription": TargetSubscription, "commerce.portal": TargetSubscription,
 		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode, "fleet.revokeNode": TargetNode,
 		"fleet.submitNodeTask": TargetNode, "fleet.cancelNodeTask": TargetNode, "fleet.writeNodeFile": TargetNode, "fleet.editNodeFile": TargetNode, "fleet.executeNodeRemoval": TargetNode, "fleet.registerNodeWorkspace": TargetNode, "fleet.unregisterNodeWorkspace": TargetNode}
 	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {

@@ -126,6 +126,8 @@
 !center/internal/
 !center/internal/*/
 !center/internal/*/*.go
+!center/internal/commerce/paddle/
+!center/internal/commerce/paddle/*.go
 !center/internal/store/migrate/
 !center/internal/store/migrate/*.go
 !center/internal/store/migrate/ctr06_schema10_inventory.txt

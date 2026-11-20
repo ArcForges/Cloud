@@ -58,9 +58,10 @@ func injectionProblems(sources map[string]string) []string {
 			continue
 		}
 		inServer := strings.HasPrefix(name, "internal/server/")
-		// The two places a catalogue may enter, found first: the values of Injected and InjectedClass in the Settings literal of New.
+		// Locate the allowed test-only and deployment inputs in New's single Settings literal.
 		allowed := map[token.Pos]bool{}
 		settingsLiterals := 0
+		productionInputs := 0
 		for _, declaration := range file.Decls {
 			function, isFunction := declaration.(*ast.FuncDecl)
 			if !isFunction || name != serverFile || function.Recv != nil || function.Name.Name != "New" {
@@ -78,11 +79,18 @@ func injectionProblems(sources map[string]string) []string {
 						continue
 					}
 					key, isKey := pair.Key.(*ast.Ident)
-					if !isKey || (key.Name != "Injected" && key.Name != "InjectedClass") {
+					if !isKey {
+						continue
+					}
+					if key.Name == "ProductionCatalogue" {
+						if isSelector(pair.Value, "cfg", "HostedCatalogue") {
+							allowed[key.Pos()] = true
+							productionInputs++
+						}
 						continue
 					}
 					want := map[string]string{"Injected": "catalogue", "InjectedClass": "catalogueClass"}[key.Name]
-					if value, isValue := pair.Value.(*ast.SelectorExpr); isValue && isIdent(value.X, "options") && value.Sel.Name == want {
+					if value, isValue := pair.Value.(*ast.SelectorExpr); want != "" && isValue && isIdent(value.X, "options") && value.Sel.Name == want {
 						allowed[key.Pos()], allowed[value.Sel.Pos()] = true, true
 					}
 				}
@@ -92,6 +100,9 @@ func injectionProblems(sources map[string]string) []string {
 		if name == serverFile && settingsLiterals != 1 {
 			problems = append(problems, fmt.Sprintf("%s: New holds %d feature.Settings literals, want exactly one", name, settingsLiterals))
 		}
+		if name == serverFile && productionInputs != 1 {
+			problems = append(problems, "New must pass the configured hosted catalogue exactly once")
+		}
 		for _, declaration := range file.Decls {
 			generic, isGeneric := declaration.(*ast.GenDecl)
 			declaresOptionsType := isGeneric && declaresOptions(generic)
@@ -99,7 +110,7 @@ func injectionProblems(sources map[string]string) []string {
 				switch found := node.(type) {
 				case *ast.Ident:
 					switch {
-					case (found.Name == "Injected" || found.Name == "InjectedClass") && !allowed[found.Pos()]:
+					case (found.Name == "Injected" || found.Name == "InjectedClass" || found.Name == "ProductionCatalogue") && !allowed[found.Pos()]:
 						problems = append(problems, fmt.Sprintf("%s: %s names %s outside the Settings literal of New", name, fset.Position(found.Pos()), found.Name))
 					case inServer && (found.Name == "catalogue" || found.Name == "catalogueClass") && !declaresOptionsType && !allowed[found.Pos()]:
 						problems = append(problems, fmt.Sprintf("%s: %s names %s outside Options and the Settings literal of New", name, fset.Position(found.Pos()), found.Name))
@@ -218,7 +229,7 @@ func TestNoCodeOfTheRunningCenterInjectsACatalogue(t *testing.T) {
 func TestThePinOnTheCatalogueInjectionFindsEachWayAroundIt(t *testing.T) {
 	actual := centerSources(t)
 	const run = "center, err := New(cfg, logger, Options{})"
-	const settings = "feature.Settings{Mode: cfg.Mode, Plan: cfg.Plan, Injected: options.catalogue, InjectedClass: options.catalogueClass, Disabled: disabled}"
+	const settings = "feature.Settings{Mode: cfg.Mode, Plan: cfg.Plan, Injected: options.catalogue, InjectedClass: options.catalogueClass, Disabled: disabled, ProductionCatalogue: cfg.HostedCatalogue}"
 	mutate := func(file, old, new string) map[string]string {
 		changed := map[string]string{}
 		for name, text := range actual {
@@ -242,25 +253,26 @@ func TestThePinOnTheCatalogueInjectionFindsEachWayAroundIt(t *testing.T) {
 		return changed
 	}
 	cases := map[string]map[string]string{
-		"Run injects a production catalogue":         mutate(serverFile, run, "center, err := New(cfg, logger, Options{catalogue: []byte(`{}`), catalogueClass: feature.ClassProduction})"),
-		"Run injects the class alone":                mutate(serverFile, run, "center, err := New(cfg, logger, Options{catalogueClass: feature.ClassProduction})"),
-		"Run passes another option":                  mutate(serverFile, run, "center, err := New(cfg, logger, Options{Clock: time.Now})"),
-		"Run passes a variable":                      mutate(serverFile, run, "options := Options{}\n\tcenter, err := New(cfg, logger, options)"),
-		"Run does not call New":                      mutate(serverFile, run, "var center *Center\n\tvar err error"),
-		"Run calls New twice":                        mutate(serverFile, run, "_, _ = New(cfg, logger, Options{})\n\tcenter, err := New(cfg, logger, Options{})"),
-		"the start of the center is a method":        mutate(serverFile, run, "center, err := (&Center{}).New(cfg, logger, Options{})"),
-		"a second function reads the injection":      mutate(serverFile, "// logPlanConfiguration says", "func injected(options Options) []byte { return options.catalogue }\n\n// logPlanConfiguration says"),
-		"a method sets the injection":                mutate(serverFile, "func (c *Center) logPlanConfiguration(", "func (c *Center) inject(options *Options) { options.catalogue = nil }\n\nfunc (c *Center) logPlanConfiguration("),
-		"another file of the package reads it":       appended("internal/server/clientip.go", "var _ = Options{}.catalogueClass"),
-		"a composite literal elsewhere sets it":      appended("internal/server/clientip.go", "var _ = Options{catalogue: nil}"),
-		"New sets the fields before it configures":   mutate(serverFile, "\tcenter.FeatureConfiguration = feature.Configure("+settings+")", "\tif cfg.Mode == config.OfficialHosted && cfg.Plan == config.PlanNone {\n\t\toptions.catalogue, options.catalogueClass = []byte(`{}`), feature.ClassProduction\n\t}\n\tcenter.FeatureConfiguration = feature.Configure("+settings+")"),
-		"New takes the document from another source": mutate(serverFile, "Injected: options.catalogue,", "Injected: []byte(`{}`),"),
-		"New takes the class from another source":    mutate(serverFile, "InjectedClass: options.catalogueClass,", "InjectedClass: feature.ClassProduction,"),
-		"Run builds a second configuration":          mutate(serverFile, "\tcenter.logPlanConfiguration(logger)\n", "\tcenter.FeatureConfiguration = feature.Configure(feature.Settings{Injected: []byte(`{}`), InjectedClass: feature.ClassProduction})\n\tcenter.logPlanConfiguration(logger)\n"),
-		"New builds a second Settings literal":       mutate(serverFile, "\tcenter.schemaVersion.Store(-1)\n", "\t_ = feature.Settings{Injected: nil}\n\tcenter.schemaVersion.Store(-1)\n"),
-		"another package injects":                    appended("internal/pages/pages.go", "var _ = feature.Settings{Injected: nil}"),
-		"another package configures":                 appended("internal/pages/pages.go", "var _, _ = feature.ParseCatalogue(nil, feature.ClassProduction)"),
-		"another package calls Configure":            appended("internal/pages/pages.go", "var _ = feature.Configure(feature.Settings{})"),
+		"Run injects a production catalogue":                    mutate(serverFile, run, "center, err := New(cfg, logger, Options{catalogue: []byte(`{}`), catalogueClass: feature.ClassProduction})"),
+		"Run injects the class alone":                           mutate(serverFile, run, "center, err := New(cfg, logger, Options{catalogueClass: feature.ClassProduction})"),
+		"Run passes another option":                             mutate(serverFile, run, "center, err := New(cfg, logger, Options{Clock: time.Now})"),
+		"Run passes a variable":                                 mutate(serverFile, run, "options := Options{}\n\tcenter, err := New(cfg, logger, options)"),
+		"Run does not call New":                                 mutate(serverFile, run, "var center *Center\n\tvar err error"),
+		"Run calls New twice":                                   mutate(serverFile, run, "_, _ = New(cfg, logger, Options{})\n\tcenter, err := New(cfg, logger, Options{})"),
+		"the start of the center is a method":                   mutate(serverFile, run, "center, err := (&Center{}).New(cfg, logger, Options{})"),
+		"a second function reads the injection":                 mutate(serverFile, "// logPlanConfiguration says", "func injected(options Options) []byte { return options.catalogue }\n\n// logPlanConfiguration says"),
+		"a method sets the injection":                           mutate(serverFile, "func (c *Center) logPlanConfiguration(", "func (c *Center) inject(options *Options) { options.catalogue = nil }\n\nfunc (c *Center) logPlanConfiguration("),
+		"another file of the package reads it":                  appended("internal/server/clientip.go", "var _ = Options{}.catalogueClass"),
+		"a composite literal elsewhere sets it":                 appended("internal/server/clientip.go", "var _ = Options{catalogue: nil}"),
+		"New sets the fields before it configures":              mutate(serverFile, "\tcenter.FeatureConfiguration = feature.Configure("+settings+")", "\tif cfg.Mode == config.OfficialHosted && cfg.Plan == config.PlanNone {\n\t\toptions.catalogue, options.catalogueClass = []byte(`{}`), feature.ClassProduction\n\t}\n\tcenter.FeatureConfiguration = feature.Configure("+settings+")"),
+		"New takes the document from another source":            mutate(serverFile, "Injected: options.catalogue,", "Injected: []byte(`{}`),"),
+		"New takes the class from another source":               mutate(serverFile, "InjectedClass: options.catalogueClass,", "InjectedClass: feature.ClassProduction,"),
+		"New takes the deployment document from another source": mutate(serverFile, "ProductionCatalogue: cfg.HostedCatalogue", "ProductionCatalogue: []byte(`{}`)"),
+		"Run builds a second configuration":                     mutate(serverFile, "\tcenter.logPlanConfiguration(logger)\n", "\tcenter.FeatureConfiguration = feature.Configure(feature.Settings{Injected: []byte(`{}`), InjectedClass: feature.ClassProduction})\n\tcenter.logPlanConfiguration(logger)\n"),
+		"New builds a second Settings literal":                  mutate(serverFile, "\tcenter.schemaVersion.Store(-1)\n", "\t_ = feature.Settings{Injected: nil}\n\tcenter.schemaVersion.Store(-1)\n"),
+		"another package injects":                               appended("internal/pages/pages.go", "var _ = feature.Settings{Injected: nil}"),
+		"another package configures":                            appended("internal/pages/pages.go", "var _, _ = feature.ParseCatalogue(nil, feature.ClassProduction)"),
+		"another package calls Configure":                       appended("internal/pages/pages.go", "var _ = feature.Configure(feature.Settings{})"),
 	}
 	for name, sources := range cases {
 		t.Run(name, func(t *testing.T) {
