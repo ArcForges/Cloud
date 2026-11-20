@@ -10,7 +10,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/schema"
 )
 
-const hostedCommerceSchema16MigrationSHA = "71c2c998610787a596f00e121532c74b7480c5d3de383b07efe442f992305d5c"
+const hostedCommerceSchema16MigrationSHA = "1614c8520fd455f78871276c0d97fd648ed9c24246340058cd5e6ba90d7e6ff0"
 const hostedCommerceSchema16CatalogueSHA = ""
 const hostedCommerceSchema16InventoryDelta = ""
 

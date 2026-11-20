@@ -54,6 +54,11 @@ VALUES($1,$2,$3,gen_random_uuid(),1,2,sha256('original checkout'),'/billing',gen
 VALUES($1,$2,1,2,'ctm_archive','sub_archive',$3,'archive-catalog','pro_archive','pri_archive',5,
  $4::timestamptz-interval '2 days',$4-interval '1 day',false,'archive-evidence',$4,sha256('verified subscription'),$4,1)`,
 		f.subscription, account, f.checkout, now)
+	commerceFact(t, owner, `INSERT INTO commerce.renewal
+(renewal_id,subscription_id,account_id,command_id,provider,environment,intent_sha256,auto_renew,state,
+ result_subscription_rev,result_valid_from,result_valid_until,created_at,updated_at)
+VALUES(gen_random_uuid(),$1,$2,gen_random_uuid(),1,2,sha256('original renewal'),false,2,
+ 1,$3::timestamptz-interval '2 days',$3-interval '1 day',$3,$3)`, f.subscription, account, now)
 	commerceFact(t, owner, `INSERT INTO commerce.provider_event
 (provider,environment,event_ref,payload_sha256,semantic_sha256,event_kind,resource_ref,account_id,occurred_at,state,verified_at,received_at,processed_at)
 VALUES(1,2,'evt_archive',sha256('original event bytes'),sha256('original event meaning'),'transaction.completed','txn_archive',
@@ -169,6 +174,7 @@ VALUES(gen_random_uuid(),$1,1,'sub_unqualified','history-only',now()-interval '2
 		"UPDATE commerce.checkout SET send_claimed_at=NULL",
 		"UPDATE commerce.provider_event SET payload_sha256=sha256('replaced event') WHERE event_ref='evt_archive'",
 		"UPDATE commerce.subscription SET provider_snapshot_sha256=sha256('conflicting same revision'),rev=rev+1",
+		"UPDATE commerce.renewal SET result_valid_until=result_valid_until+interval '1 day'",
 		"UPDATE commerce.settled_period SET provider_transaction_ref='txn_replaced'",
 		"UPDATE commerce.billing_entry SET amount_minor=1",
 	} {

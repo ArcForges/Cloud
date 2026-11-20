@@ -40,6 +40,13 @@ func ApplyLifecycle(ctx context.Context, conn *pgx.Conn, build []Migration, opti
 	// This finite admission proves only its original schema12 to schema13
 	// transition. A later append runs through the ordinary migration entry.
 	build = build[:13]
+	schemas, grants := schema.AtVersion(13)
+	if options.Schemas == nil {
+		options.Schemas = schemas
+	}
+	if options.Grants == nil {
+		options.Grants = grants
+	}
 	options.defaults()
 	if err := lock(ctx, conn, options); err != nil {
 		return Result{}, err

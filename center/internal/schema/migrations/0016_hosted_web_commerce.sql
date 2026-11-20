@@ -137,6 +137,8 @@ CREATE TABLE commerce.renewal (
     state smallint NOT NULL CHECK (state BETWEEN 1 AND 4),
     send_claimed_at timestamptz,
     result_subscription_rev bigint CHECK (result_subscription_rev >= 1),
+    result_valid_from timestamptz,
+    result_valid_until timestamptz,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     UNIQUE (account_id, command_id),
@@ -145,7 +147,11 @@ CREATE TABLE commerce.renewal (
     CHECK (updated_at >= created_at),
     CHECK (send_claimed_at IS NULL OR (send_claimed_at >= created_at AND send_claimed_at <= updated_at)),
     CHECK (state <> 3 OR send_claimed_at IS NOT NULL),
-    CHECK ((state = 2) = (result_subscription_rev IS NOT NULL))
+    CHECK (
+        (state = 2 AND result_subscription_rev IS NOT NULL AND result_valid_from IS NOT NULL
+            AND result_valid_until IS NOT NULL AND result_valid_until > result_valid_from)
+        OR (state <> 2 AND result_subscription_rev IS NULL AND result_valid_from IS NULL AND result_valid_until IS NULL)
+    )
 );
 CREATE INDEX renewal_subscription ON commerce.renewal (subscription_id, account_id, provider, environment);
 CREATE UNIQUE INDEX renewal_unresolved_subscription ON commerce.renewal (subscription_id) WHERE state IN (1, 3);
