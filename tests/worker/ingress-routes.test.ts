@@ -137,12 +137,14 @@ test("only fixed typed management routes forward normalized target selection hea
   const typed = "/arcforges.sandbox.v2.RunService/Start";
   await handleApiRequest(request(typed), env);
   assert.equal(forwarded.length, 1);
-  assert.equal(forwarded[0].headers.get(remoteNodeHeader), node.toLowerCase());
-  assert.equal(forwarded[0].headers.get(remoteEnrollmentHeader), enrollment.toLowerCase());
-  assert.equal(forwarded[0].headers.get(remoteGrantHeader), grant.toLowerCase());
-  assert.equal(forwarded[0].headers.get(remoteGrantRevisionHeader), "9223372036854775807");
-  assert.equal(forwarded[0].headers.get("x-arcforges-account-id"), null);
-  assert.equal(forwarded[0].headers.get("x-arcforges-actor-id"), null);
+  const [routed] = forwarded;
+  assert.ok(routed);
+  assert.equal(routed.headers.get(remoteNodeHeader), node.toLowerCase());
+  assert.equal(routed.headers.get(remoteEnrollmentHeader), enrollment.toLowerCase());
+  assert.equal(routed.headers.get(remoteGrantHeader), grant.toLowerCase());
+  assert.equal(routed.headers.get(remoteGrantRevisionHeader), "9223372036854775807");
+  assert.equal(routed.headers.get("x-arcforges-account-id"), null);
+  assert.equal(routed.headers.get("x-arcforges-actor-id"), null);
 
   for (const invalid of ["0", "01", "+1", "1, 2", "9223372036854775808"])
     await handleApiRequest(request(typed, { [remoteGrantRevisionHeader]: invalid }), env);
@@ -151,6 +153,8 @@ test("only fixed typed management routes forward normalized target selection hea
 
   await handleApiRequest(request("/arcforges.management.v2.DeviceService/List"), env);
   assert.equal(forwarded.length, 2);
+  const [, unrelated] = forwarded;
+  assert.ok(unrelated);
   for (const name of [
     remoteNodeHeader,
     remoteEnrollmentHeader,
@@ -158,7 +162,7 @@ test("only fixed typed management routes forward normalized target selection hea
     remoteGrantRevisionHeader,
   ])
     assert.equal(
-      forwarded[1].headers.get(name),
+      unrelated.headers.get(name),
       null,
       "an unrelated route never forwards target selection",
     );
