@@ -22,12 +22,7 @@ const REQUIRED_PAGE_ALERTS = new Set([
   "center-pending-source-unavailable",
 ]);
 
-const EXPECTED_CAPABILITIES = new Set([
-  "cloud-api",
-  "identity",
-  "sync-control-plane",
-  "realtime",
-]);
+const EXPECTED_CAPABILITIES = new Set(["cloud-api", "identity", "sync-control-plane", "realtime"]);
 
 const EXPECTED_DEPENDENCIES = new Set([
   "edge-ingress",

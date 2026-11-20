@@ -157,7 +157,10 @@ test("page, ticket and dashboard classes resolve only to distinct logical destin
 test("Center pulse rules use the indexed alert routes and metric sources", () => {
   const path = join(MONITORING_ROOT, "center-pulse.rules.json");
   const { groups } = JSON.parse(readFileSync(path, "utf8"));
-  assert.deepEqual(groups.map((group) => group.name), ["arcforges-center-pulse"]);
+  assert.deepEqual(
+    groups.map((group) => group.name),
+    ["arcforges-center-pulse"],
+  );
   const metrics = new Map([
     ["center-capacity-exhausted", ["resource_in_use", "resource_limit"]],
     ["center-watch-admission-refused", ["watch_refusals_total"]],
@@ -181,9 +184,10 @@ test("Center pulse rules use the indexed alert routes and metric sources", () =>
     });
     assert.equal(rule.annotations.runbook, catalogue.runbook);
     const selected = rule.expr.match(/arcforges_center_[a-z_]+/g);
-    assert.deepEqual(new Set(selected), new Set(metrics.get(catalogue.id).map(
-      (metric) => "arcforges_center_" + metric,
-    )));
+    assert.deepEqual(
+      new Set(selected),
+      new Set(metrics.get(catalogue.id).map((metric) => "arcforges_center_" + metric)),
+    );
   }
 });
 
