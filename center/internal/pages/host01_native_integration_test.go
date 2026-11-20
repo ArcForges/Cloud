@@ -309,27 +309,39 @@ func requireHost01LapseClose(t *testing.T, run *center02NativeRun, target center
 	if err != nil {
 		t.Fatalf("read the exact enrolled protocol epoch after term expiry: %v", err)
 	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			logHost01ChannelEvidence(t, run, target, protocol, connection, end)
+		}
+	})
 	for {
+		var closeReason, closeCode string
 		var closed, lapsing, readmission bool
 		err := run.harness.migration.QueryRow(ctx, `
 WITH original AS (
-	SELECT correlation_id, actor_ref FROM audit.audit_event
-	WHERE event_type = 'fleet.channel.closed' AND reason = 'hosted_access_required' AND target_kind = 'node'
-		AND target_id = $1 AND occurred_at >= $2
+	SELECT sequence, correlation_id, actor_ref, occurred_at, reason, convert_from(payload, 'UTF8')::jsonb ->> 'code' AS code
+	FROM audit.audit_event
+	WHERE event_type = 'fleet.channel.closed' AND target_kind = 'node' AND target_id = $1
 		AND convert_from(payload, 'UTF8')::jsonb ->> 'connectionId' = $3
-		AND convert_from(payload, 'UTF8')::jsonb ->> 'code' = '4403'
+), lapse_close AS (
+	SELECT * FROM original WHERE occurred_at >= $2 AND reason = 'hosted_access_required' AND code = '4403'
 ), refusals AS (
-	SELECT g.correlation_id, o.correlation_id AS original_id FROM audit.audit_event AS g JOIN original AS o USING (actor_ref)
+	SELECT g.correlation_id, o.correlation_id AS original_id FROM audit.audit_event AS g JOIN lapse_close AS o USING (actor_ref)
 	WHERE g.event_type = 'access.gated' AND g.reason = $4 AND g.target_kind = 'operation'
 		AND g.target_id = $5 AND g.occurred_at >= $2
 )
-SELECT EXISTS (SELECT FROM original),
+SELECT COALESCE((SELECT reason FROM original ORDER BY sequence DESC LIMIT 1), ''),
+	COALESCE((SELECT code FROM original ORDER BY sequence DESC LIMIT 1), ''),
+	EXISTS (SELECT FROM lapse_close),
 	EXISTS (SELECT FROM refusals WHERE correlation_id = original_id),
 	EXISTS (SELECT FROM refusals WHERE correlation_id IS NOT NULL AND correlation_id IS DISTINCT FROM original_id)`,
 			target.enrollment.String(), end, connection.String(), string(feature.ReasonSubscriptionExpired),
-			routes.NodeChannelV2ID).Scan(&closed, &lapsing, &readmission)
+			routes.NodeChannelV2ID).Scan(&closeReason, &closeCode, &closed, &lapsing, &readmission)
 		if err != nil {
 			t.Fatalf("read authoritative hosted lapse and upgrade evidence: %v", err)
+		}
+		if closeReason != "" && (closeReason != "hosted_access_required" || closeCode != "4403") {
+			t.Fatalf("the original V2 connection closed for %s/%s before hosted lapse could close it", closeCode, closeReason)
 		}
 		if closed && lapsing && readmission {
 			if _, online := run.harness.center.Hub.V2Presence(run.owner.id, target.enrollment, target.node, protocol); online {
@@ -344,5 +356,51 @@ SELECT EXISTS (SELECT FROM original),
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for exact lapse proof: close=%t lapse=%t readmission=%t", closed, lapsing, readmission)
 		}
+	}
+}
+
+// Print only bounded metadata for the disposable fixture's exact enrolled
+// Node and account. Credentials, request bodies and raw audit payloads stay
+// in their original private stores.
+func logHost01ChannelEvidence(t *testing.T, run *center02NativeRun, target center03Target, protocol, connection platform.ID, end time.Time) {
+	t.Helper()
+	h := run.harness
+	online, present := h.center.Hub.V2Presence(run.owner.id, target.enrollment, target.node, protocol)
+	t.Logf("lapse evidence: enrollment=%s protocol=%s expectedConnection=%s expectedExpiry=%s present=%t currentConnection=%s",
+		target.enrollment, protocol, connection, end.Format(time.RFC3339Nano), present, online.ConnectionID)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(run.ctx), 3*time.Second)
+	defer cancel()
+	var installation platform.ID
+	var durable string
+	err := h.migration.QueryRow(ctx, `SELECT installation_id, COALESCE(connection_id::text, '') FROM fleet.node
+		WHERE enrollment_id=$1 AND node_id=$2 AND user_id=$3`, target.enrollment, target.node, run.owner.id).Scan(&installation, &durable)
+	if err != nil {
+		t.Logf("the fixture could not read the durable channel identity: %v", err)
+		return
+	}
+	t.Logf("lapse evidence: installation=%s durableConnection=%q", installation, durable)
+	rows, err := h.migration.Query(ctx, `SELECT occurred_at, event_type, reason, target_kind, target_id,
+		COALESCE(correlation_id::text, ''), COALESCE(convert_from(payload, 'UTF8')::jsonb ->> 'connectionId', ''),
+		COALESCE(convert_from(payload, 'UTF8')::jsonb ->> 'code', '')
+		FROM audit.audit_event WHERE actor_ref IN ($1,$2) AND occurred_at >= $3
+		AND event_type IN ('fleet.channel.accepted','fleet.channel.closed','fleet.channel.violation','access.gated','access.gate_failure','access.refused')
+		ORDER BY sequence DESC LIMIT 16`, "node:"+installation.String(), "account:"+run.owner.id.String(), end.Add(-90*time.Second))
+	if err != nil {
+		t.Logf("the fixture could not read the bounded channel audit: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var at time.Time
+		var event, reason, kind, subject, correlation, observed, code string
+		if err := rows.Scan(&at, &event, &reason, &kind, &subject, &correlation, &observed, &code); err != nil {
+			t.Logf("the bounded channel audit was invalid: %v", err)
+			return
+		}
+		t.Logf("lapse audit: at=%s event=%s reason=%s target=%s/%s correlation=%q connection=%q code=%q",
+			at.UTC().Format(time.RFC3339Nano), event, reason, kind, subject, correlation, observed, code)
+	}
+	if err := rows.Err(); err != nil {
+		t.Logf("the bounded channel audit could not finish: %v", err)
 	}
 }
