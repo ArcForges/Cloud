@@ -192,17 +192,7 @@ func TestCenter03InstalledNode(t *testing.T) {
 	if state := running.GetValue().GetRun().GetState(); state != v2.RunState_RUN_STATE_RUNNING {
 		t.Fatalf("remote reconnect changed the running workload: %s", state)
 	}
-	stop := &v2.RunServiceStopRequest{Meta: center03Meta(true, running.GetValue().GetRun().GetRevision()),
-		OwnerEpoch: center03ID(epoch), RunId: fault.run, GraceMs: proto.Uint32(0)}
-	var stopped v2.RunServiceStopResponse
-	center03Call(t, reloaded, target, sandboxv2connect.RunServiceStopProcedure, stop, &stopped, nil)
-	center03Success(t, stopped.GetError(), stopped.GetValue())
-	if !proto.Equal(stopped.GetValue().GetRun().GetRunId(), fault.run) ||
-		!proto.Equal(stopped.GetValue().GetOperation().GetCommandId(), stop.GetMeta().GetCommandId()) {
-		t.Fatal("remote Stop did not address the original native Run")
-	}
-	writeCenter03Observation(t, run, "stopped", struct{}{})
-
+	writeCenter03Observation(t, run, "revoke-ready", struct{}{})
 	revoked := center02Observation[struct{ Run string }](t, run, "revoked.json")
 	if center03ParseID(t, revoked.Run) != platform.ID(fault.run.GetValue()) {
 		t.Fatal("local fixture revoked the wrong Run scope")
@@ -218,7 +208,28 @@ func TestCenter03InstalledNode(t *testing.T) {
 	if got := center03Receipt(t, run, target, command, epoch); got.DeliveryCount != 1 || got.State != management.StateSucceeded {
 		t.Fatal("replay or revocation changed the original PostgreSQL delivery evidence")
 	}
-	writeCenter03Observation(t, run, "remote-finished", struct{}{})
+	writeCenter03Observation(t, run, "revocation-confirmed", struct{}{})
+
+	stopGrant := center02Observation[struct {
+		Grant       string
+		Revision    int64
+		RunRevision int64
+	}](t, run, "stop-authority.json")
+	stopTarget := target
+	stopTarget.grant, stopTarget.revision = center03ParseID(t, stopGrant.Grant), stopGrant.Revision
+	if stopTarget.grant == target.grant || stopGrant.Revision < 1 || stopGrant.RunRevision < 1 {
+		t.Fatal("the local owner did not provide a distinct valid Stop-only grant and the current Run revision")
+	}
+	stop := &v2.RunServiceStopRequest{Meta: center03Meta(true, &foundation.Revision{Value: proto.Int64(stopGrant.RunRevision)}),
+		OwnerEpoch: center03ID(epoch), RunId: fault.run, GraceMs: proto.Uint32(0)}
+	var stopped v2.RunServiceStopResponse
+	center03Call(t, reloaded, stopTarget, sandboxv2connect.RunServiceStopProcedure, stop, &stopped, nil)
+	center03Success(t, stopped.GetError(), stopped.GetValue())
+	if !proto.Equal(stopped.GetValue().GetRun().GetRunId(), fault.run) ||
+		!proto.Equal(stopped.GetValue().GetOperation().GetCommandId(), stop.GetMeta().GetCommandId()) {
+		t.Fatal("remote Stop under the new grant did not address the original native Run")
+	}
+	writeCenter03Observation(t, run, "stopped", struct{}{})
 	center02WaitExit(t, run)
 }
 
@@ -485,9 +496,9 @@ func qualifyCenter03Peer(t *testing.T, run *center02NativeRun, reported center02
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	wantOwner := center03ParseID(t, reported.OwnerEpoch)
-	capabilities := []string{"center-control-v2", "linux-bubblewrap-sdk-v1"}
+	capabilities := []string{"linux-bubblewrap-sdk-v1"}
 	if runtime.GOOS == "windows" {
-		capabilities = []string{"center-control-v2", "win-wrapper-local-v1", "windows-process-executor-v1"}
+		capabilities = []string{"win-wrapper-local-v1", "windows-process-executor-v1"}
 	}
 	for {
 		var enrollment, node, protocol platform.ID
@@ -499,12 +510,24 @@ func qualifyCenter03Peer(t *testing.T, run *center02NativeRun, reported center02
 		if err == nil {
 			hub := run.harness.center.Hub
 			presence, online := hub.V2Presence(run.owner.id, enrollment, node, protocol)
+			// Verified control authority independently requires the private control
+			// capability. The public presence projects the native profiles.
 			authority, ready := hub.V2ControlAuthority(ctx, run.owner.id, node, enrollment, protocol)
 			if online && ready == nil {
-				if presence.Platform != runtime.GOOS || !slices.Equal(presence.Capabilities, capabilities) ||
-					presence.NodeEpoch != reported.NodeEpoch || presence.NodeOwnerEpoch != wantOwner ||
-					authority.NodeOwnerEpoch != wantOwner || authority.ConnectionID != presence.ConnectionID {
-					t.Fatal("the installed native profile, Node epochs or exact V2 control authority differ")
+				if presence.Platform != runtime.GOOS {
+					t.Fatalf("the authenticated platform was %q, expected %q", presence.Platform, runtime.GOOS)
+				}
+				if !slices.Equal(presence.Capabilities, capabilities) {
+					t.Fatalf("the qualified native profiles were %v, expected %v", presence.Capabilities, capabilities)
+				}
+				if presence.NodeEpoch != reported.NodeEpoch {
+					t.Fatal("the authenticated Node process epoch differs from the local installed Node")
+				}
+				if presence.NodeOwnerEpoch != wantOwner || authority.NodeOwnerEpoch != wantOwner {
+					t.Fatal("the authenticated owner epoch differs from the local retained owner epoch")
+				}
+				if authority.ConnectionID != presence.ConnectionID || authority.ProtocolEpoch != protocol {
+					t.Fatal("the control authority does not match the authenticated channel and protocol")
 				}
 				if target.enrollment != (platform.ID{}) && (target.enrollment != enrollment || target.node != node) {
 					t.Fatal("the replaced channel did not preserve the Node and enrollment identities")
