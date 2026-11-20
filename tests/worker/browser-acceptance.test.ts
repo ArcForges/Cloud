@@ -2252,22 +2252,18 @@ test("every element, heading and text the operator-grant mode uses is in the cen
     assert(json.includes(name), name);
 });
 
-test("the features the form lists are the development fixture catalogue, in the order of the center's gated keys", () => {
+test("the operator form follows the price-free V2 development catalogue in the center's gated order", () => {
   const fixture = JSON.parse(
-    readFileSync(path.join(root, "center/internal/feature/fixtures/development.json"), "utf8"),
-  ) as { fixture: boolean; capabilities: string[] };
-  assert.equal(
-    fixture.fixture,
-    true,
-    "the catalogue is the illustrative fixture (MOCKED), not a priced one",
-  );
+    readFileSync(path.join(root, "center/internal/feature/fixtures/host-v2.json"), "utf8"),
+  ) as { version: string; fixture: boolean; capabilities: string[]; plans: object[] };
+  assert.equal(fixture.version, "dev-host-v2");
+  assert.equal(fixture.fixture, true);
+  for (const plan of fixture.plans) {
+    assert.deepEqual(Object.keys(plan).sort(), ["features", "id", "name"]);
+  }
   assert.deepEqual([...fixtureFeatures], fixture.capabilities);
   const source = readFileSync(path.join(root, "center/internal/feature/feature.go"), "utf8");
-  assert(
-    source.includes(
-      "return []Key{CenterNodes, CenterExecute, RemoteView, RemoteControl, CenterMCP, Push}",
-    ),
-  );
+  assert(source.includes("return []Key{CenterNodes, RemoteView, RemoteControl}"));
   assert(fixtureFeatures.includes(grantedFeature as never));
   assert.equal(grantedFeature, "remote.view");
   assert.equal(requestedDays, 1);

@@ -1014,15 +1014,8 @@ export async function runRealAuthenticator(world: World): Promise<void> {
 // ---------------------------------------------------------------------------------------------------------------------------
 // The operator grant (AF-CTR-03 B: the hosted proof of the operations surface)
 
-/** The features of the development fixture catalogue (MOCKED, illustrative), in the order the operator form lists them. */
-export const fixtureFeatures = [
-  "center.nodes",
-  "center.execute",
-  "remote.view",
-  "remote.control",
-  "center.mcp",
-  "push",
-] as const;
+/** The price-free V2 development fixture services, in the order the operator form lists them. */
+export const fixtureFeatures = ["center.nodes", "remote.view", "remote.control"] as const;
 /** The one feature the run grants, and for how long it asks: the smallest write, which should end 24 hours after the run. */
 export const grantedFeature = "remote.view";
 export const requestedDays = 1;

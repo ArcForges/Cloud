@@ -10,16 +10,19 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/schema"
 )
 
-const hostedEntitlementSchema15MigrationSHA = "277581578fdac6293e470dc31e11e19100623ac3bcb902e3ccc98dbe5a437d2c"
+const hostedEntitlementSchema15MigrationSHA = "6df860b8742148511bf8678a637e157e3deb6fa167cbfe21c30670b33aca471c"
 
-// Native PostgreSQL 18.7 on H-22 at a260d1a40ce90403e98e4765c52ed8b7c0ae58fc
-// retained all 382 schema14 entries and added six. The 388-entry inventory
-// has SHA256 3fa39f5c851367e7046a4e34e56a8cb0b4c2154e9b6a830ac07881d2d985b6d8.
-const hostedEntitlementSchema15CatalogueSHA = "80ac40cf787937de93d659c32619d98e1d6e6896e24fcc4285dcfbb16def1ae8"
+// Native PostgreSQL 18.7 on H-22 at c7c72a8de489da7e4950e6b1f106922c30ec24bf
+// retained all 382 schema14 entries and added eight, including both source
+// indexes. The 390-entry inventory has SHA256
+// 25e7640a458214184796aa72244c7edf25eee10066ecbfb48fc3144ceec1fcd3.
+const hostedEntitlementSchema15CatalogueSHA = "9e07e0dbb53ec581f6193d2351d80a3d62408f2ed3eaadeb39355fbb36f8e68e"
 
 const hostedEntitlementSchema15InventoryDelta = `CONSTRAINT entitlement hosted_projection_migration hosted_projection_migration_pkey
 FK CONSTRAINT entitlement hosted_projection_migration hosted_projection_grant
 FK CONSTRAINT entitlement hosted_projection_migration hosted_projection_term
+INDEX entitlement hosted_projection_source_grant
+INDEX entitlement hosted_projection_source_term
 TABLE DATA entitlement hosted_projection_migration
 TABLE entitlement hosted_projection_migration
 TRIGGER entitlement hosted_projection_migration hosted_projection_append_only`
