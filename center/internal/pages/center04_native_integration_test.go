@@ -31,6 +31,7 @@ import (
 )
 
 const center04Required = "ARCFORGES_CENTER04_E2E_REQUIRED"
+const center04ExpiryRequired = "ARCFORGES_CENTER04_EXPIRY_REQUIRED"
 
 type center04Scope struct {
 	Grant, Sandbox, Run, RunEpoch string
@@ -46,7 +47,7 @@ func (s center04Scope) target(t *testing.T, base center03Target) center03Target 
 // TestCenter04InstalledNode uses the exact installed package, ordinary HTTPS,
 // owner-local IPC and a real PostgreSQL Center on the designated native host.
 func TestCenter04InstalledNode(t *testing.T) {
-	run := startCenter04InstalledNode(t)
+	run := startCenter04InstalledNode(t, center04Required, "ArcForges.ClosedLoop.Tests.RemoteStreamCenterTests", 5*time.Minute)
 	approval := center02Observation[center02Approval](t, run, "approval.json")
 	browser := run.ownerBrowser
 	center02ApproveBrowserFlow(t, run.ctx, run.harness, browser, run.owner, approval.VerificationURI)
@@ -128,6 +129,147 @@ func TestCenter04InstalledNode(t *testing.T) {
 		t.Fatal("the expiry case requires its own Sandbox, because the revoked staging still holds the original transfer scope")
 	}
 	center04RejectLaterGrant(t, run, freshBrowser, short.target(t, peer), shortScope, ownerEpoch, short.SandboxRevision, "expire", "expired")
+	center02WaitExit(t, run)
+}
+
+// TestCenter04InstalledTransferExpires waits for the installed Node's real
+// one-hour export expiry. The fast paired case does not inherit this deadline.
+func TestCenter04InstalledTransferExpires(t *testing.T) {
+	run := startCenter04InstalledNode(t, center04ExpiryRequired, "ArcForges.ClosedLoop.Tests.RemoteStreamCenterExpiryTests", 65*time.Minute)
+	approval := center02Observation[center02Approval](t, run, "approval.json")
+	browser := run.ownerBrowser
+	center02ApproveBrowserFlow(t, run.ctx, run.harness, browser, run.owner, approval.VerificationURI)
+	reported := center02Observation[center02Owner](t, run, "connected.json")
+	var peer center03Target
+	qualifyCenter03Peer(t, run, reported, &peer)
+	center02ConfirmConnection(t, run.coordination)
+
+	owned := center02Observation[struct {
+		center04Scope
+		Digest string
+		Bytes  uint64
+	}](t, run, "file-scope.json")
+	decoded, err := hex.DecodeString(owned.Digest)
+	if err != nil || len(decoded) != sha256.Size || owned.Bytes == 0 || owned.Bytes > 1<<20 {
+		t.Fatal("the disposable source did not report its exact bounded length and SHA-256")
+	}
+	target := owned.target(t, peer)
+	sandbox := center03ID(center03ParseID(t, owned.Sandbox))
+	ownerEpoch := center03ParseID(t, reported.OwnerEpoch)
+	begin := &v2.DataServiceBeginExportRequest{
+		Meta:       center03Meta(true, &foundation.Revision{Value: proto.Int64(owned.SandboxRevision)}),
+		OwnerEpoch: center03ID(ownerEpoch), SandboxId: sandbox, RelativePath: proto.String("data/natural-expiry.bin"),
+	}
+	startedAt := time.Now()
+	var started v2.DataServiceBeginExportResponse
+	center04Call(t, run, browser, target, sandboxv2connect.DataServiceBeginExportProcedure, begin, &started, nil)
+	center03Success(t, started.GetError(), started.GetValue())
+	id := started.GetValue().GetTransfer().GetTransferId()
+	if len(id.GetValue()) != 16 {
+		t.Fatal("the natural-expiry fixture did not create exactly one export identity")
+	}
+
+	var original *v2.Transfer
+	materializeBy := time.Now().Add(18 * time.Second)
+	for time.Now().Before(materializeBy) {
+		observed := center04Inspect(t, run, browser, target, id).GetValue().GetTransfer()
+		if !proto.Equal(observed.GetTransferId(), id) || !proto.Equal(observed.GetSandboxId(), sandbox) ||
+			observed.GetDirection() != "export" || observed.GetClosedAt() != nil {
+			t.Fatal("the original export must remain in its granted scope during materialization")
+		}
+		if observed.GetState() == v2.TransferState_TRANSFER_STATE_COMPLETE {
+			original = observed
+			break
+		}
+		if observed.GetState() != v2.TransferState_TRANSFER_STATE_OPEN && observed.GetState() != v2.TransferState_TRANSFER_STATE_STREAMING {
+			t.Fatalf("the original export did not materialize: %s", observed.GetState())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	verifyCenter04Export(t, original, id, sandbox, owned.Digest, owned.Bytes, false)
+	expiry := original.GetExpiresAt()
+	if expiry == nil {
+		t.Fatal("the installed Node did not report the export lifetime")
+	}
+	expiresAt := time.Unix(expiry.GetUnixSeconds(), int64(expiry.GetNanos()))
+	if expiresAt.Before(startedAt.Add(time.Hour-2*time.Second)) || expiresAt.After(time.Now().Add(time.Hour+2*time.Second)) {
+		t.Fatal("the disposable export did not use the installed Node's one-hour lifetime")
+	}
+
+	read := &v2.DataServiceReadExportRequest{Meta: center03Meta(false, nil), TransferId: id,
+		Offset: proto.Uint64(0), MaxBytes: proto.Uint32(uint32(owned.Bytes))}
+	var before v2.DataServiceReadExportResponse
+	center04Call(t, run, browser, target, sandboxv2connect.DataServiceReadExportProcedure, read, &before, nil)
+	center03Success(t, before.GetError(), before.GetValue())
+	chunk := before.GetValue().GetChunk()
+	observedHash := sha256.Sum256(chunk.GetData())
+	if !chunk.GetEof() || chunk.GetOffset() != 0 || uint64(len(chunk.GetData())) != owned.Bytes ||
+		!bytes.Equal(observedHash[:], decoded) {
+		t.Fatal("the original native snapshot's range did not verify before expiration")
+	}
+	writeCenter03Observation(t, run, "expiry-export.json", map[string]any{
+		"transfer": hex.EncodeToString(id.GetValue()), "digest": owned.Digest, "bytes": owned.Bytes,
+	})
+	t.Logf("waiting for the original export's real expiry at %s", expiresAt.UTC().Format(time.RFC3339Nano))
+	wait := time.NewTimer(time.Until(expiresAt))
+	defer wait.Stop()
+	select {
+	case <-wait.C:
+	case <-run.done:
+		t.Fatal("the installed Node fixture ended before its original export expired")
+	case <-run.ctx.Done():
+		t.Fatal("the native fixture deadline elapsed before the original export expired")
+	}
+
+	fresh := run.harness.newBrowser()
+	fresh.mustSignIn(run.owner)
+	fresh.bootstrapState()
+	qualifyCenter03Peer(t, run, reported, &peer)
+	closedBy := time.Now().Add(45 * time.Second)
+	var closedAt *foundation.Instant
+	for time.Now().Before(closedBy) {
+		current := center04Inspect(t, run, fresh, target, id).GetValue().GetTransfer()
+		closedAt = current.GetClosedAt()
+		verifyCenter04Export(t, current, id, sandbox, owned.Digest, owned.Bytes, closedAt != nil)
+		want := proto.CloneOf(original)
+		want.ClosedAt = closedAt
+		if !proto.Equal(current, want) {
+			t.Fatal("natural expiration changed the original completed export beyond its closure time")
+		}
+		if closedAt != nil {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if closedAt == nil || time.Unix(closedAt.GetUnixSeconds(), int64(closedAt.GetNanos())).Before(expiresAt) {
+		t.Fatal("the installed Node did not close the original snapshot at or after its actual expiry")
+	}
+
+	read.Meta = center03Meta(false, nil)
+	var after v2.DataServiceReadExportResponse
+	center04Call(t, run, fresh, target, sandboxv2connect.DataServiceReadExportProcedure, read, &after, nil)
+	failure := after.GetError()
+	if after.GetValue() != nil || !v2.ValidateDataServiceReadExportResponse(&after) ||
+		failure.GetCategory() != foundation.ErrorCategory_ERROR_CATEGORY_STATE || failure.GetCode() != "managed_use" ||
+		failure.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN ||
+		failure.GetDetails().GetState().GetReason() != "transfer_closed" ||
+		!proto.Equal(after.GetMeta().GetCorrelationId(), read.GetMeta().GetCorrelationId()) ||
+		!proto.Equal(failure.GetCorrelationId(), read.GetMeta().GetCorrelationId()) {
+		t.Fatal("the naturally closed snapshot did not refuse the same authorized range without an effect")
+	}
+	if got := run.harness.count("SELECT count(*) FROM management.command_identity WHERE account_id=$1 AND method=$2",
+		run.owner.id, "DataService.BeginExport"); got != 1 {
+		t.Fatalf("the expiry fixture has %d BeginExport identities, expected exactly one", got)
+	}
+	command := platform.ID(begin.GetMeta().GetCommandId().GetValue())
+	identity, receipt, err := management.New(run.harness.center.Store).InspectOriginal(run.ctx, management.Authority{
+		Account: run.owner.id, Actor: run.owner.id, Node: target.node, Enrollment: target.enrollment,
+		Grant: target.grant, GrantRevision: target.revision,
+	}, command)
+	if err != nil || identity.OwnerEpoch != ownerEpoch || identity.Method != "DataService.BeginExport" || receipt.DeliveryCount != 1 {
+		t.Fatal("the original BeginExport command was not retained as one exact delivery")
+	}
+	writeCenter03Observation(t, run, "expiry-confirmed", struct{}{})
 	center02WaitExit(t, run)
 }
 
@@ -583,9 +725,9 @@ func center04Stream(t *testing.T, run *center02NativeRun, b *browser, target cen
 	}
 }
 
-func startCenter04InstalledNode(t *testing.T) *center02NativeRun {
+func startCenter04InstalledNode(t *testing.T, required, testClass string, duration time.Duration) *center02NativeRun {
 	t.Helper()
-	if os.Getenv(center04Required) != "1" {
+	if os.Getenv(required) != "1" {
 		t.Skip("the installed stream and data supplement requires a scoped native fixture")
 	}
 	project := center02File(t, center02Project)
@@ -616,12 +758,12 @@ func startCenter04InstalledNode(t *testing.T) *center02NativeRun {
 	b.mustSignIn(owner)
 	b.bootstrapState()
 	dir := t.TempDir()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
 	t.Cleanup(cancel)
-	processContext, cancelProcess := context.WithTimeout(context.Background(), 6*time.Minute)
+	processContext, cancelProcess := context.WithTimeout(context.Background(), duration+time.Minute)
 	t.Cleanup(cancelProcess)
 	command := exec.CommandContext(processContext, "dotnet", "test", "--project", project, "-c", "Release", "--no-build",
-		"--filter-class", "ArcForges.ClosedLoop.Tests.RemoteStreamCenterTests", "--minimum-expected-tests", "1", "--fail-skips", "on")
+		"--filter-class", testClass, "--minimum-expected-tests", "1", "--fail-skips", "on")
 	command.Dir = filepath.Dir(project)
 	command.WaitDelay = 5 * time.Second
 	command.Env = append(center02NodeEnvironment(command.Environ()), center02Required+"=1", center02URL+"="+h.origin, center02Evidence+"="+dir)
