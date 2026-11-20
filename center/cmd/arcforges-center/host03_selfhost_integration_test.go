@@ -314,9 +314,14 @@ func (f *host03Fixture) command(db host03Database, arguments ...string) map[stri
 	defer cancel()
 	cmd := exec.CommandContext(ctx, f.binary, arguments...)
 	cmd.Env = host03Environment(f.env(db))
-	var output bytes.Buffer
+	var output, diagnostic bytes.Buffer
 	cmd.Stdout = &output
+	cmd.Stderr = &diagnostic
 	if err := cmd.Run(); err != nil {
+		if len(arguments) == 10 && arguments[0] == "admin" && arguments[1] == "restore-logical-backup" {
+			f.t.Fatalf("the self-host Center logical restore command failed: %T (%v), phase=%s", err,
+				host03Exit(err), host03RestoreDiagnostic(diagnostic.String()))
+		}
 		f.t.Fatalf("the self-host Center %s command failed: %T (%v)", strings.Join(arguments[:min(2, len(arguments))], " "), err, host03Exit(err))
 	}
 	var report map[string]any

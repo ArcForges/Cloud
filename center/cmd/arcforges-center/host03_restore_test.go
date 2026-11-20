@@ -5,10 +5,12 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
 
 func (f *host03Fixture) restore(source host03Database, first host03Enrollment) host03Database {
@@ -20,8 +22,12 @@ func (f *host03Fixture) restore(source host03Database, first host03Enrollment) h
 	if captured["archiveSha256"] != archiveSHA || captured["metadataSha256"] != metadataSHA {
 		f.t.Fatal("the protected backup receipt did not bind the exact produced archive and metadata")
 	}
-	target := host03Database{name: source.name + "_restored", runtimeRole: source.name + "_restored_runtime",
+	targetName := source.name + "_restored"
+	target := host03Database{name: targetName, runtimeRole: targetName + "_rt",
 		migrationURL: source.migrationURL, archiveSHA: archiveSHA, metadataSHA: metadataSHA}
+	if migrate.ValidRoleName(target.runtimeRole) != nil {
+		f.t.Fatal("the fixture did not generate a target runtime group name within the admitted bounds")
+	}
 	f.t.Cleanup(func() { pgtest.Drop(f.t, target.name) })
 	restored := f.command(target, "admin", "restore-logical-backup", "--archive", archive, "--sha256", archiveSHA,
 		"--metadata", metadata, "--metadata-sha256", metadataSHA)
@@ -45,6 +51,44 @@ FROM management.node_protocol p JOIN fleet.node n USING (enrollment_id) WHERE p.
 		f.t.Fatal("the restored database retained source enrollment history but failed to revoke source protocol or live connection authority")
 	}
 	return f.rotate(target)
+}
+
+// The tool emits its existing classifications to stderr. Record only fixed
+// labels for known phases so archive paths, SQL text and credentials cannot
+// cross from command stderr to shared fixture output.
+func host03RestoreDiagnostic(stderr string) string {
+	for _, known := range []struct{ text, phase string }{
+		{"restore configuration was refused", "configuration_refused"},
+		{"runtime role name", "role_name_refused"},
+		{"distinct maintenance database", "maintenance_endpoint_refused"},
+		{"unsupported backup schema", "schema_refused"},
+		{"backup metadata", "metadata_refused"},
+		{"required PostgreSQL backup tool", "native_tool_unavailable"},
+		{"private restore workspace", "private_workspace_unavailable"},
+		{"backup inventory", "archive_inventory_mismatch"},
+		{"archive history or sequence assertions", "archive_assertion_mismatch"},
+		{"archive is corrupt or unreadable", "archive_unreadable"},
+		{"maintenance database could not be reached", "maintenance_database_unavailable"},
+		{"destination or a runtime role already exists", "target_already_exists"},
+		{"migration owner has unknown members", "target_migration_role_shared"},
+		{"destination ACL is not isolated", "target_acl_not_isolated"},
+		{"destination could not be", "target_creation_or_connection_unconfirmed"},
+		{"fresh destination admission outcome", "target_fresh_admission_uncertain"},
+		{"restore child did not complete", "native_restore_child_uncertain"},
+		{"the restored security schema", "restored_security_mismatch"},
+		{"destination has an unknown writer", "target_writer_or_connection_unconfirmed"},
+		{"restored table data does not match", "restored_snapshot_mismatch"},
+		{"restored catalogue", "restored_catalogue_mismatch"},
+		{"restored migration history", "restored_history_mismatch"},
+		{"restored sequence", "restored_sequence_mismatch"},
+		{"verified restore could not commit readiness", "restore_admission_uncertain"},
+		{"restore readiness committed", "restore_admission_recheck_unconfirmed"},
+	} {
+		if strings.Contains(stderr, known.text) {
+			return known.phase
+		}
+	}
+	return "unclassified"
 }
 
 func (f *host03Fixture) protocol(db host03Database, value *host03Enrollment) platform.ID {
