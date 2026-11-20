@@ -42,7 +42,7 @@ type D1Gate = { target?: string; revision?: string; status?: string };
 type DeploymentWorkerConfig = WorkerConfig & { vars: { ARCFORGES_CENTER_MODE?: string } };
 
 // CLOUD.84 U10: the sealed C# migrator makes the decision. Promotion checks its exact target and commit.
-function requireGatePassed(
+function checkD1Gate(
   record: D1Gate | undefined,
   target: "production" | "proof",
   revision: string,
@@ -54,14 +54,16 @@ function requireGatePassed(
     throw new Error("the migration step did not pass; nothing is promoted");
 }
 
-function readD1Gate(target: "production" | "proof"): D1Gate | undefined {
+function requireGatePassed(target: "production" | "proof", revision: string): void {
+  let record: D1Gate | undefined;
   try {
-    return JSON.parse(
+    record = JSON.parse(
       readFileSync(path.join(root, "artifacts", `migration-gate-${target}.json`), "utf8"),
     ) as D1Gate;
   } catch {
-    return undefined;
+    // The shared check refuses a missing or unreadable gate record.
   }
+  checkD1Gate(record, target, revision);
 }
 
 function requireFlagshipConfig(config: DeploymentWorkerConfig): void {
@@ -172,7 +174,7 @@ export async function evaluateFixtureTarget(
   schemaVersion: number,
 ) {
   requireFlagshipConfig(config);
-  requireGatePassed(fixture.d1, "production", revision);
+  checkD1Gate(fixture.d1, "production", revision);
   const runtimeRole = promotionRuntimeRole(fixture.postgres, "production", revision, schemaVersion);
   const roles = fixture.databaseRoles;
   assert(
@@ -379,7 +381,7 @@ async function deploy() {
   await requireCurrentMain(candidate.revision);
   // CLOUD.70: nothing is pushed or promoted unless the gated D1 migration step passed for this very candidate
   // (a failing or missing step stops promotion; the workflow step before this one writes the record).
-  requireGatePassed(readD1Gate("production"), "production", candidate.revision);
+  requireGatePassed("production", candidate.revision);
   // AF-CTR-02: and the PostgreSQL step migrated the production database for this very candidate.
   const runtimeRole = promotionRuntimeRole(
     await readGate("production"),
