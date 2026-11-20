@@ -6,16 +6,19 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -129,6 +132,11 @@ type harness struct {
 	t         *testing.T
 	center    *server.Center
 	url       string
+	origin    string
+	rpID      string
+	http      *http.Client
+	native    *httptest.Server
+	stopHub   func()
 	migration *pgx.Conn
 	clock     *clock
 	logs      *lockedBuffer
@@ -183,6 +191,8 @@ type settings struct {
 	controls []access.Control
 	// relay composes and starts the node channel (AF-CTR-05 E1a) with a throwaway command key; the surfaces must name relay.
 	relay bool
+	// nativeCertificate serves the composed Center directly on an isolated HTTPS localhost listener for the installed Node test.
+	nativeCertificate *tls.Certificate
 }
 
 const writePolicy = `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`
@@ -206,9 +216,21 @@ func newHarness(t *testing.T, options settings) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, migration: migration, mail: mail.NewFake(), clock: &clock{now: time.Now().UTC()}, logs: &lockedBuffer{}, database: name}
+	h := &harness{t: t, migration: migration, mail: mail.NewFake(), clock: &clock{now: time.Now().UTC()}, logs: &lockedBuffer{}, database: name,
+		origin: origin, rpID: rpID}
+	baseURL := publicBaseURL
+	if options.nativeCertificate != nil {
+		h.native = httptest.NewUnstartedServer(nil)
+		t.Cleanup(h.native.Close)
+		address, ok := h.native.Listener.Addr().(*net.TCPAddr)
+		if !ok || !address.IP.Equal(net.IPv4(127, 0, 0, 1)) {
+			t.Fatal("the native Center test requires an IPv4 loopback listener")
+		}
+		baseURL = "https://localhost:" + strconv.Itoa(address.Port)
+		h.origin, h.rpID = baseURL, "localhost"
+	}
 	values := map[string]string{
-		config.EnvMode: string(config.SelfHosted), config.EnvPublicBaseURL: publicBaseURL, config.EnvDatabaseURL: rotation.RuntimeURL,
+		config.EnvMode: string(config.SelfHosted), config.EnvPublicBaseURL: baseURL, config.EnvDatabaseURL: rotation.RuntimeURL,
 		config.EnvSurfaces: "identity,pages", config.EnvIdentityPolicy: options.policy, config.EnvClientIPHeader: config.ClientIPHeader,
 		config.EnvTrustedProxies: "127.0.0.0/8,::1/128",
 	}
@@ -264,11 +286,12 @@ func newHarness(t *testing.T, options settings) *harness {
 			t.Fatal(err)
 		}
 		center.Hub.Start(context.Background())
-		t.Cleanup(func() {
+		h.stopHub = sync.OnceFunc(func() {
 			stop, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			center.Hub.Stop(stop)
 		})
+		t.Cleanup(h.stopHub)
 	}
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -279,9 +302,19 @@ func newHarness(t *testing.T, options settings) *harness {
 			}
 		}
 	})
-	listener := httptest.NewServer(center.Public())
-	t.Cleanup(listener.Close)
-	h.center, h.url = center, listener.URL
+	h.center = center
+	if h.native != nil {
+		h.native.Config.Handler = center.Public()
+		h.native.TLS = &tls.Config{Certificates: []tls.Certificate{*options.nativeCertificate}, MinVersion: tls.VersionTLS12}
+		h.native.StartTLS()
+		h.url, h.http = baseURL, h.native.Client()
+		h.http.Timeout = 10 * time.Second
+	} else {
+		listener := httptest.NewServer(center.Public())
+		t.Cleanup(listener.Close)
+		h.url, h.http = listener.URL, listener.Client()
+	}
+	h.http.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return h
 }
 
@@ -364,7 +397,7 @@ func (h *harness) do(r request) response {
 	}
 	if r.method == http.MethodPost && !r.noOrigin {
 		if r.origin == "" {
-			r.origin = origin
+			r.origin = h.origin
 		}
 		httpRequest.Header.Set("Origin", r.origin)
 	}
@@ -377,8 +410,7 @@ func (h *harness) do(r request) response {
 	for name, values := range r.headers {
 		httpRequest.Header[name] = values
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	reply, err := client.Do(httpRequest)
+	reply, err := h.http.Do(httpRequest)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -559,11 +591,11 @@ type account struct {
 // seedAccount creates an account by the store, with a passkey made by a virtual authenticator and verified by the relying party.
 func (h *harness) seedAccount(state int16) account {
 	h.t.Helper()
-	rp, err := passkey.New(rpID, origin)
+	rp, err := passkey.New(h.rpID, h.origin)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	result := account{id: platform.NewID(), handle: randomBytes(h.t, 32), authenticator: virtual.New(rpID, origin)}
+	result := account{id: platform.NewID(), handle: randomBytes(h.t, 32), authenticator: virtual.New(h.rpID, h.origin)}
 	challenge := randomBytes(h.t, 32)
 	creation, key := result.authenticator.Create(challenge, result.handle)
 	credential, err := rp.VerifyCreation(challenge, result.handle, creation, time.Now().Add(time.Minute))
@@ -590,11 +622,11 @@ VALUES ($1, $2, 1, 'passkey', $3, 'Seeded key', $4, $5, 0, false, false, '{}', $
 // authenticator holds it.
 func (h *harness) addPasskey(who account) account {
 	h.t.Helper()
-	rp, err := passkey.New(rpID, origin)
+	rp, err := passkey.New(h.rpID, h.origin)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	authenticator := virtual.New(rpID, origin)
+	authenticator := virtual.New(h.rpID, h.origin)
 	challenge := randomBytes(h.t, 32)
 	creation, key := authenticator.Create(challenge, who.handle)
 	credential, err := rp.VerifyCreation(challenge, who.handle, creation, time.Now().Add(time.Minute))

@@ -563,13 +563,14 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
   const config = gitleaksConfig(readFileSync(path.join(owner, ".gitleaks.toml"), "utf8"));
   assert.deepEqual(config.extend, ["useDefault = true"]);
   const keys = ["description", "condition", "targetRules", "paths", "regexTarget", "regexes"];
-  for (const block of config.allowlists) {
+  const priorBlocks = config.allowlists.slice(0, -1);
+  for (const block of priorBlocks) {
     assert.deepEqual(Object.keys(block), keys);
     assert.equal(block.condition, "AND");
     assert.deepEqual(block.targetRules, ["generic-api-key"]);
   }
   // S31 and S44: 64-hex values of the release profiles and of the Contracts identity copy, unchanged.
-  const [s31, s44, rfc6455, ...rows] = config.allowlists;
+  const [s31, s44, rfc6455, ...rows] = priorBlocks;
   assert.ok(s31 && s44 && rfc6455);
   assert.match(String(s31.description), /^S31: /u);
   assert.deepEqual(s31.paths, ["^eng/provenance/artifact-profiles/cloud-release-r[0-9]+\\.json$"]);
@@ -606,6 +607,55 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       `const key = "${sampleNonce}";`,
     ),
   );
+  // Historical Go fixture: the exact public RFC 6455 nonce on one immutable line.
+  const historical = config.allowlists.at(-1);
+  assert.ok(historical);
+  assert.deepEqual(Object.keys(historical), [
+    "description",
+    "condition",
+    "targetRules",
+    "commits",
+    "paths",
+    "regexTarget",
+    "regexes",
+  ]);
+  assert.match(String(historical.description), /^AFV2-CENTER-02 RFC 6455: /u);
+  assert.equal(historical.condition, "AND");
+  assert.deepEqual(historical.targetRules, ["generic-api-key"]);
+  const historicalCommit = "96879109906e174b9796c9de537571a107cc19e7";
+  const historicalPath = "center/internal/identityapi/access_integration_test.go";
+  assert.deepEqual(historical.commits, [historicalCommit]);
+  assert.deepEqual(historical.paths, [`^${regexText(historicalPath)}$`]);
+  assert.equal(historical.regexTarget, "line");
+  assert.deepEqual(historical.regexes, [
+    String.raw`^\n\trequest\.Header\.Set\(\"Sec-WebSocket-Key\", \"${sampleNonce}\"\)$`,
+  ]);
+  const sourceLine = git(owner, "show", `${historicalCommit}:${historicalPath}`).split("\n")[195];
+  assert.equal(sourceLine, `\trequest.Header.Set("Sec-WebSocket-Key", "${sampleNonce}")`);
+  assert.ok(sourceLine);
+  const historicalPattern = gitleaksPattern(String(historical.regexes?.[0]));
+  const historicalFile = gitleaksPattern(String(historical.paths?.[0]));
+  const matchesHistorical = (commit: string, pathname: string, line: string) =>
+    historical.commits?.includes(commit) &&
+    historicalFile.test(pathname) &&
+    historicalPattern.test(line);
+  // The pinned Git locator includes the preceding newline in this finding's line.
+  const scannerLine = "\n" + sourceLine;
+  assert.ok(matchesHistorical(historicalCommit, historicalPath, scannerLine));
+  assert.ok(!matchesHistorical(historicalCommit, historicalPath, sourceLine));
+  assert.ok(!matchesHistorical("0".repeat(40), historicalPath, scannerLine));
+  assert.ok(!matchesHistorical("", historicalPath, scannerLine));
+  assert.ok(!matchesHistorical(historicalCommit, `x/${historicalPath}`, scannerLine));
+  assert.ok(!matchesHistorical(historicalCommit, `${historicalPath}.backup`, scannerLine));
+  const anotherNonce = Buffer.from("another sample!!").toString("base64");
+  assert.ok(
+    !matchesHistorical(
+      historicalCommit,
+      historicalPath,
+      scannerLine.replace(sampleNonce, anotherNonce),
+    ),
+  );
+  assert.ok(!matchesHistorical(historicalCommit, historicalPath, scannerLine + " // appended"));
   // One block per exact reviewed policy/receipt file below, each row one exact
   // key-and-digest line of an immutable record named in the inputs maps.
   // The digests are computed here from the records, so this file holds no digest literal.
@@ -709,6 +759,9 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     "eng/policy/dependency-reviews/afv2-center-01-r3.json",
     "eng/policy/dependency-reviews/afv2-id-01-r1.json",
     "eng/policy/dependency-reviews/afv2-id-01-r2.json",
+    "eng/policy/dependency-reviews/afv2-center-02-r1.json",
+    "eng/policy/dependency-reviews/afv2-center-02-r2.json",
+    "eng/policy/dependency-reviews/afv2-center-02-r3.json",
   ];
   assert.equal(rows.length, files.length, "a new allowlist block needs its own reviewed pin");
   const expected = records.map(
@@ -719,21 +772,23 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     assert.ok(block);
     assert.match(
       String(block.description),
-      file.includes("afv2-id-01-")
-        ? /^AFV2-ID-01: /u
-        : file.includes("afv2-center-01-")
-          ? /^AFV2-CENTER-01: /u
-          : file.includes("afv2-base-01-")
-            ? /^AFV2-BASE-01: /u
-            : file.includes("afv2-env-01-")
-              ? /^AFV2-ENV-01: /u
-              : file.includes("af-ctr-06-")
-                ? /^AF-CTR-06: /u
-                : file.includes("af-ctr-05-")
-                  ? /^AF-CTR-05: /u
-                  : file.includes("af-ctr-04-")
-                    ? /^AF-CTR-04: /u
-                    : /^AF-CTR-03: /u,
+      file.includes("afv2-center-02-")
+        ? /^AFV2-CENTER-02: /u
+        : file.includes("afv2-id-01-")
+          ? /^AFV2-ID-01: /u
+          : file.includes("afv2-center-01-")
+            ? /^AFV2-CENTER-01: /u
+            : file.includes("afv2-base-01-")
+              ? /^AFV2-BASE-01: /u
+              : file.includes("afv2-env-01-")
+                ? /^AFV2-ENV-01: /u
+                : file.includes("af-ctr-06-")
+                  ? /^AF-CTR-06: /u
+                  : file.includes("af-ctr-05-")
+                    ? /^AF-CTR-05: /u
+                    : file.includes("af-ctr-04-")
+                      ? /^AF-CTR-04: /u
+                      : /^AF-CTR-03: /u,
     );
     assert.equal(block.regexTarget, "line");
     assert.deepEqual(block.paths, [`^${regexText(file)}$`]);
@@ -751,6 +806,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
       "eng/policy/dependency-reviews/af-ctr-06-bridge-r2.json",
       "eng/policy/dependency-reviews/afv2-center-01-r4.json",
       "eng/policy/dependency-reviews/afv2-id-01-r3.json",
+      "eng/policy/dependency-reviews/afv2-center-02-r4.json",
     ])
       assert.ok(!exempt.test(other), other);
     // Positive control: the rows match exactly the lines that name the two records, and every row matches one.

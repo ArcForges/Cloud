@@ -113,6 +113,9 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"identity.revokeAllSessions":           "R3 upgrade evidence account receipt restricted",
 		"device.rename":                        "R1 upgrade none - receipt restricted",
 		"device.revoke":                        "R3 upgrade-unless-own evidence-unless-own device receipt restricted",
+		"management.deviceList":                "R1 allowed none - no-receipt restricted",
+		"management.deviceInspect":             "R1 allowed none - no-receipt restricted",
+		"management.deviceRevoke":              "R3 upgrade-unless-own evidence-unless-own device receipt restricted",
 		// AF-CTR-04 E1a (CTR4-DES-02 as amended by cloud-4 and Q24): the node rows.
 		"fleet.refreshNodeSession": "R1 anonymous",
 		"fleet.reportNodeInfo":     "R1 allowed none - receipt active node",
@@ -129,7 +132,8 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.lookupDeviceCode":         "R2 upgrade none - no-receipt active",
 		"fleet.approveDeviceCode":        "R3 upgrade evidence-on-approve user_code receipt active",
 		// AF-CTR-05 E1a (CTR5-SUR-02): the node channel, the first gated row (TestOperationRowsAreCheckedForConsistency).
-		"fleet.nodeChannel": "R2 allowed none - no-receipt active node",
+		"fleet.nodeChannel":      "R2 allowed none - no-receipt active node",
+		"management.nodeChannel": "R2 allowed none - no-receipt active node",
 		// AF-CTR-05 E2a (CTR5-SUR-02 as amended by PB-1, C-N6 and Q20): the node registry; the reads also admit a node-relayed caller,
 		// RenameNode and RevokeNode are a person's device management, RevokeNode with evidence bound to the node.
 		"fleet.listNodes":  "R1 allowed none - no-receipt active relayed:node",
@@ -198,6 +202,7 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	want := map[string]string{"identity.beginPasskeyRegistration": TargetAccount, "identity.removeAuthIdentity": TargetCredential,
 		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession,
+		"management.deviceRevoke": TargetDevice,
 		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode, "fleet.revokeNode": TargetNode,
 		"fleet.submitNodeTask": TargetNode, "fleet.cancelNodeTask": TargetNode, "fleet.writeNodeFile": TargetNode, "fleet.editNodeFile": TargetNode, "fleet.executeNodeRemoval": TargetNode, "fleet.registerNodeWorkspace": TargetNode, "fleet.unregisterNodeWorkspace": TargetNode}
 	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {

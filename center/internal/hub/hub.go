@@ -395,6 +395,14 @@ func (h *Hub) Connected(nodeID platform.ID) bool {
 	return ok
 }
 
+// LegacyConnected is the admission observation for V1 routing only.
+func (h *Hub) LegacyConnected(nodeID platform.ID) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c := h.nodes[nodeID]
+	return c != nil && c.v2 == nil && !c.closing.Load()
+}
+
 // Count is the number of accepted connections.
 func (h *Hub) Count() int {
 	h.mu.Lock()

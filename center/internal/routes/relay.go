@@ -20,6 +20,10 @@ const (
 	NodeChannelID = "fleet.nodeChannel"
 	// NodeChannelSubprotocol is the one subprotocol the upgrade admits and the center selects.
 	NodeChannelSubprotocol = "arcforges.relay.v1"
+	// V2 uses its own private enrollment channel and never offers V1 routed operations.
+	NodeChannelV2Path        = "/fleet/v2/node"
+	NodeChannelV2ID          = "management.nodeChannel"
+	NodeChannelV2Subprotocol = "arcforges.relay.v2"
 	// NodeChannelMaxFrameBytes is the largest message either side sends on the channel (Plan CTR5-HUB-03, C.9: 1 MiB): the
 	// platform's WebSocket message limit (Cloudflare Workers and Durable Objects, 32 MiB) leaves ample headroom over it.
 	NodeChannelMaxFrameBytes = 1 << 20
@@ -66,10 +70,12 @@ type UpgradeRoute struct {
 
 // RelayUpgradeRoutes are the upgrade routes of the relay surface: the node channel.
 func RelayUpgradeRoutes() []UpgradeRoute {
-	return []UpgradeRoute{{
-		Path: NodeChannelPath, ID: NodeChannelID, Surface: SurfaceRelay, Subprotocol: NodeChannelSubprotocol, MaxFrameBytes: NodeChannelMaxFrameBytes,
-		MaxDurationMilliseconds: NodeChannelUpgradeMilliseconds, Instance: HealthInstance,
-	}}
+	return []UpgradeRoute{
+		{Path: NodeChannelPath, ID: NodeChannelID, Surface: SurfaceRelay, Subprotocol: NodeChannelSubprotocol, MaxFrameBytes: NodeChannelMaxFrameBytes,
+			MaxDurationMilliseconds: NodeChannelUpgradeMilliseconds, Instance: HealthInstance},
+		{Path: NodeChannelV2Path, ID: NodeChannelV2ID, Surface: SurfaceRelay, Subprotocol: NodeChannelV2Subprotocol, MaxFrameBytes: NodeChannelMaxFrameBytes,
+			MaxDurationMilliseconds: NodeChannelUpgradeMilliseconds, Instance: HealthInstance},
+	}
 }
 
 // ErrUpgradeRegistration is the error of an inconsistent upgrade route.

@@ -112,6 +112,12 @@ func newHarness(t *testing.T, options settings) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if cfg.Identity.Enabled(config.SurfaceRelay) {
+		key, _ := db.CommandKey("ARCFORGES_CENTER_KEY_TEST")
+		if err := cfg.ApplyCommandKeys([]config.CommandKey{key}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	h := &harness{t: t, db: db, policy: cfg.Identity.Policy, logs: &lockedBuffer{}, inbox: &inbox{}}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: h.inbox, Background: func(work func()) { work() }})
 	if err != nil {

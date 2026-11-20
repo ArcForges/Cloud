@@ -13,6 +13,7 @@ import (
 	"time"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
 	"google.golang.org/protobuf/proto"
 
@@ -28,10 +29,11 @@ import (
 // be left unchecked. The session's own session and device stay open to it (sign-out and removing this phone, A-09), and the
 // upgrade class turns it into an account session.
 func TestMobileLimitedNeedsStepUp(t *testing.T) {
-	h := newHarness(t, settings{policy: writePolicy})
+	h := newManagementIdentityHarness(t)
 	who := h.seedAccount(1, "")
 	limited := h.issue(who.id, session.ScopeMobileLimited, false)
 	other := h.issue(who.id, session.ScopeAccount, false)
+	node := h.enrollManagedDevice(who, bearer(other.access))
 	credential := h.credentialIDs(who.id)[0]
 	requests := map[string]proto.Message{
 		"/arcforges.publicapi.v1.IdentityService/GetAccountDeletion": &publicapiv1.IdentityServiceGetAccountDeletionRequest{Meta: meta()},
@@ -48,6 +50,7 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 		renameDevicePath: &publicapiv1.DeviceServiceRenameRequest{Meta: command(), DeviceId: idOf(h.deviceOf(other.sessionID)),
 			Name: proto.String("Renamed")},
 		revokeDevicePath: &publicapiv1.DeviceServiceRevokeRequest{Meta: command(), DeviceId: idOf(h.deviceOf(other.sessionID))},
+		managementv2connect.DeviceServiceRevokeProcedure: node.revokeRequest(),
 	}
 	checked := 0
 	for _, operation := range access.Operations() {
@@ -76,8 +79,8 @@ func TestMobileLimitedNeedsStepUp(t *testing.T) {
 	for path := range requests {
 		t.Errorf("%s has a request, but the operation table opens it to mobile.limited", path)
 	}
-	if checked != 10 {
-		t.Fatalf("%d methods need the upgrade, want 10", checked)
+	if checked != 11 {
+		t.Fatalf("%d methods need the upgrade, want 11", checked)
 	}
 
 	// Its own session and device need neither the upgrade nor evidence.

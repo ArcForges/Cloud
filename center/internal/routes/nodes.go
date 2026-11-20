@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
+	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 )
@@ -71,6 +72,14 @@ func NodesMethods() []IdentityMethod {
 	}
 }
 
+func managementDeviceMethods() []IdentityMethod {
+	return []IdentityMethod{
+		{managementv2connect.DeviceServiceListProcedure, true, nodesRequestBytes},
+		{managementv2connect.DeviceServiceInspectProcedure, true, nodesRequestBytes},
+		{managementv2connect.DeviceServiceRevokeProcedure, true, nodesRequestBytes},
+	}
+}
+
 // ListNodesReplyBytes is ListNodes' reply bound: one FleetNode per live enrollment, at most config.MaxNodesPerAccountBound (1,000), and a
 // FleetNode is at most 612 bytes (two names of 64 UTF-16 units of 3-byte characters, a 128-character version, its IDs and the largest
 // instants), so the worst reply frame is 615,031 bytes; 640 KiB holds it with its trailers (fleetapi's
@@ -78,11 +87,19 @@ func NodesMethods() []IdentityMethod {
 // Connect send bound (routes.MaxResponseBytes).
 const ListNodesReplyBytes = 655_360
 
+// ListDevicesReplyBytes bounds 200 entries with a retained name, exact IDs and
+// the closed V2 profile capability set, including framed responses.
+const ListDevicesReplyBytes = 131_072
+
 // nodesBudget is a registry method's transport budget: the contract's deadline (5 s, RevokeNode 10 s); ListNodes replies up to
 // ListNodesReplyBytes, the others 64 KiB.
 func nodesBudget(path string) Budget {
 	deadline, reply := 5_000, 65_536
 	switch path {
+	case managementv2connect.DeviceServiceListProcedure:
+		deadline, reply = 10_000, ListDevicesReplyBytes
+	case managementv2connect.DeviceServiceInspectProcedure, managementv2connect.DeviceServiceRevokeProcedure:
+		deadline = 10_000
 	case fleetv1connect.FleetServiceRevokeNodeProcedure:
 		deadline = 10_000
 	case fleetv1connect.FleetServiceListNodesProcedure:
@@ -103,15 +120,16 @@ func nodesBudget(path string) Budget {
 // Nodes is the nodes surface's module: its FleetService methods.
 func Nodes() (Module, error) {
 	module := Module{Name: "nodes", Surface: SurfaceNodes, Budgets: map[string]Budget{}}
-	for _, method := range NodesMethods() {
+	for _, method := range append(NodesMethods(), managementDeviceMethods()...) {
 		policy, err := ingress.NewUnary(method.Path, ingress.Session, ingress.NoScope, method.MaxRequestBytes, true)
 		if err != nil {
 			return Module{}, err
 		}
 		budget := nodesBudget(method.Path)
 		policy = policy.InSurface(SurfaceNodes)
-		if method.Path == fleetv1connect.FleetServiceWaitNodeTaskProcedure || method.Path == fleetv1connect.FleetServiceReadNodeTaskOutputProcedure {
-			// The routed long polls outlast the server's timeouts (PN-1): their connection deadlines follow their budget.
+		switch method.Path {
+		case managementv2connect.DeviceServiceListProcedure, managementv2connect.DeviceServiceInspectProcedure, managementv2connect.DeviceServiceRevokeProcedure,
+			fleetv1connect.FleetServiceWaitNodeTaskProcedure, fleetv1connect.FleetServiceReadNodeTaskOutputProcedure:
 			policy = policy.WithDeadline(time.Duration(budget.MaxDurationMilliseconds) * time.Millisecond)
 		}
 		module.Policies = append(module.Policies, policy)

@@ -18,6 +18,7 @@ import {
 } from "../../worker/tables/center-tables.generated.ts";
 
 const path = "/api/fleet/v1/node";
+const v2Path = "/api/fleet/v2/node";
 const token = `Bearer afn_${"a".repeat(40)}`;
 const key = "dGhlIHNhbXBsZSBub25jZQ==";
 
@@ -84,7 +85,7 @@ function switching(): Response {
   } as unknown as Response;
 }
 
-test("the generated route is the relay surface's one upgrade route, served by the one center instance", () => {
+test("the relay's two protocol upgrades use distinct subprotocols on the same Center instance", () => {
   assert.deepEqual(
     upgradeRoutes.map((route) => [
       route.surface,
@@ -93,13 +94,17 @@ test("the generated route is the relay surface's one upgrade route, served by th
       route.subprotocol,
       route.instance,
     ]),
-    [["relay", "GET", "/fleet/v1/node", "arcforges.relay.v1", "hello"]],
+    [
+      ["relay", "GET", "/fleet/v1/node", "arcforges.relay.v1", "hello"],
+      ["relay", "GET", "/fleet/v2/node", "arcforges.relay.v2", "hello"],
+    ],
   );
   assert(surfaceNames.includes("relay"));
-  assert.equal(upgradeTable.size, 1);
+  assert.equal(upgradeTable.size, 2);
   assert(upgradeTable.has(path));
+  assert(upgradeTable.has(v2Path));
   // The frame bound leaves ample headroom under the platform's WebSocket message limit (32 MiB, Durable Objects).
-  assert((upgradeRoutes[0]?.maxFrameBytes ?? Infinity) <= 1 << 20);
+  for (const route of upgradeRoutes) assert(route.maxFrameBytes <= 1 << 20);
   assert.equal(upgradeRefusalHeader, "arcforges-refusal");
 });
 
@@ -125,6 +130,28 @@ test("the Container's 101 is returned unchanged: the same Response object, with 
   assert.equal(forwarded.headers.get("sec-websocket-key"), key);
   assert.equal(forwarded.headers.get(clientIpHeader), "203.0.113.9");
   assert.match(forwarded.headers.get("traceparent") ?? "", /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/u);
+});
+
+test("V2 forwards only its negotiated subprotocol to the exact upgrade path", async () => {
+  const reply = switching();
+  const { env, seen } = bindings(() => reply);
+  const wrong = await routeRequest(
+    new Request(`https://api.example.test${v2Path}`, { headers: upgradeHeaders() }),
+    env,
+  );
+  assert.equal(wrong.status, 400);
+  assert.equal(seen.length, 0);
+  const response = await routeRequest(
+    new Request(`https://api.example.test${v2Path}`, {
+      headers: upgradeHeaders({ "sec-websocket-protocol": "arcforges.relay.v2" }),
+    }),
+    env,
+  );
+  assert.equal(response, reply);
+  const forwarded = seen[0];
+  assert(forwarded !== undefined);
+  assert.equal(forwarded.request.headers.get("sec-websocket-protocol"), "arcforges.relay.v2");
+  assert.equal(new URL(forwarded.request.url).pathname, "/fleet/v2/node");
 });
 
 test("a cookie, an Origin and any other client header never reach the Container (PN-4)", async () => {

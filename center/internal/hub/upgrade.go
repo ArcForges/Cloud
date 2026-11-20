@@ -24,6 +24,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/pages"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
+	"github.com/ArcForges/Cloud/center/internal/session"
 	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
@@ -36,6 +37,11 @@ var upgradePolicy = ingress.Policy{FullName: routes.NodeChannelPath, Kind: ingre
 // as a JSON ArcError and its closed reason in the ArcForges-Refusal header (PN-3); after the upgrade, a RelayClose and a close code.
 func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	call := correlation.ForRequest(request.Header.Values(ingress.TraceparentHeader), "")
+	isV2 := request.URL.Path == routes.NodeChannelV2Path
+	policy, subprotocol := upgradePolicy, routes.NodeChannelSubprotocol
+	if isV2 {
+		policy.FullName, subprotocol = routes.NodeChannelV2Path, routes.NodeChannelV2Subprotocol
+	}
 	if !h.surface() {
 		// A disabled surface: the path is not served.
 		h.refuse(writer, call, http.StatusNotFound, arc.NotActivated(routes.SurfaceRelay))
@@ -91,7 +97,7 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	// The operation row: the node scope, the upgrade-rate buckets, access.authorized, the gate of center.nodes (in that order).
-	admitted := &ingress.Call{Policy: upgradePolicy, Caller: *caller, Correlation: call, ClientIP: clientIP}
+	admitted := &ingress.Call{Policy: policy, Caller: *caller, Correlation: call, ClientIP: clientIP}
 	if h.options.ClientOrigin != nil {
 		admitted.Origin = h.options.ClientOrigin(request)
 	}
@@ -112,6 +118,23 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.metrics.ObserveChannel("refused", "node")
 		h.refuse(writer, call, 0, arc.Unauthenticated())
 		return
+	case node.protocolRevoked:
+		h.metrics.ObserveChannel("refused", "credential")
+		h.refuse(writer, call, 0, arc.CredentialRevoked())
+		return
+	case !isV2 && node.protocolEpoch != (platform.ID{}):
+		h.metrics.ObserveChannel("refused", "node")
+		h.refuse(writer, call, http.StatusForbidden, arc.InvalidState("node", "upgrade_required"))
+		return
+	}
+	var upgradeAccessHash [32]byte
+	if isV2 {
+		secret, valid := session.ParseToken(session.AccessPrefix, token)
+		if !valid {
+			h.refuse(writer, call, 0, arc.Unauthenticated())
+			return
+		}
+		upgradeAccessHash = secret.Digest()
 	}
 	release := func() {}
 	if h.options.Slot != nil {
@@ -137,7 +160,7 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.refuse(writer, call, 0, arc.Unavailable())
 		return
 	}
-	ws, err := websocket.Accept(writer, request, &websocket.AcceptOptions{Subprotocols: []string{routes.NodeChannelSubprotocol},
+	ws, err := websocket.Accept(writer, request, &websocket.AcceptOptions{Subprotocols: []string{subprotocol},
 		CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		release()
@@ -149,8 +172,16 @@ func (h *Hub) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	c := &conn{hub: h, ws: ws, sessionID: parseID(caller.SessionID), userID: parseID(caller.UserID), deviceID: parseID(caller.DeviceID),
 		installationID: parseID(caller.InstallationID), nodeID: node.nodeID, enrollmentID: node.enrollmentID, nodeName: node.name, publicKey: node.publicKey,
 		connectionID: platform.NewID(), fence: fence, accessExpires: expires, tokenDigest: sha256.Sum256([]byte(token)), queue: make(chan outbound, h.settings.SendQueueFrames),
-		calls: map[platform.ID]*pending{}, stopWrites: make(chan struct{}), writerDone: make(chan struct{}), closeDone: make(chan struct{}),
+		upgradeAccessHash: upgradeAccessHash,
+		calls:             map[platform.ID]*pending{}, stopWrites: make(chan struct{}), writerDone: make(chan struct{}), closeDone: make(chan struct{}),
 		finished: make(chan struct{})}
+	if isV2 {
+		epoch := node.protocolEpoch
+		if epoch == (platform.ID{}) {
+			epoch = platform.NewID()
+		}
+		c.v2 = &v2Codec{enrollment: c.enrollmentID, epoch: epoch, account: c.userID, fence: fence}
+	}
 	if raw := correlation.IDBytes(call.CorrelationID); len(raw) == 16 {
 		var id platform.ID
 		copy(id[:], raw)
@@ -186,10 +217,14 @@ func admissible(request *http.Request) *arc.Refusal {
 	case len(header.Values("Sec-WebSocket-Key")) != 1:
 		return arc.InvalidArgument("key", "required")
 	}
+	subprotocol := routes.NodeChannelSubprotocol
+	if request.URL.Path == routes.NodeChannelV2Path {
+		subprotocol = routes.NodeChannelV2Subprotocol
+	}
 	offered := 0
 	for _, line := range header.Values("Sec-WebSocket-Protocol") {
 		for item := range strings.SplitSeq(line, ",") {
-			if strings.TrimSpace(item) != routes.NodeChannelSubprotocol {
+			if strings.TrimSpace(item) != subprotocol {
 				return arc.InvalidArgument("subprotocol", "not_admitted")
 			}
 			offered++
@@ -225,6 +260,8 @@ type liveNodeRow struct {
 	nodeID, enrollmentID platform.ID
 	name                 string
 	publicKey            []byte
+	protocolEpoch        platform.ID
+	protocolRevoked      bool
 }
 
 // liveNode reads the live node row of the credential's installation in its account, with the key registered for that installation:
@@ -233,10 +270,14 @@ func (h *Hub) liveNode(ctx context.Context, caller ingress.Caller) (*liveNodeRow
 	var row liveNodeRow
 	found := true
 	err := h.db.InTx(ctx, "read the node of a channel", store.TxOptions{ReadOnly: true, Timeout: presenceTimeout}, func(ctx context.Context, tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT n.node_id, n.enrollment_id, n.display_name, i.public_key FROM fleet.node n
+		err := tx.QueryRow(ctx, `SELECT n.node_id, n.enrollment_id, n.display_name, i.public_key,
+    coalesce(p.protocol_epoch, '00000000-0000-0000-0000-000000000000'::uuid), p.revoked_at IS NOT NULL
+FROM fleet.node n
 JOIN device.installation i ON i.installation_id = n.installation_id
+LEFT JOIN management.node_protocol p ON p.enrollment_id = n.enrollment_id AND p.node_id = n.node_id AND p.account_id = n.user_id
 WHERE n.installation_id = $1 AND n.user_id = $2 AND n.revoked_at IS NULL AND i.revoked_at IS NULL AND i.public_key IS NOT NULL`,
-			parseID(caller.InstallationID), parseID(caller.UserID)).Scan(&row.nodeID, &row.enrollmentID, &row.name, &row.publicKey)
+			parseID(caller.InstallationID), parseID(caller.UserID)).
+			Scan(&row.nodeID, &row.enrollmentID, &row.name, &row.publicKey, &row.protocolEpoch, &row.protocolRevoked)
 		if errors.Is(err, pgx.ErrNoRows) {
 			found = false
 			return nil
