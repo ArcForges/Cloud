@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -122,7 +123,11 @@ func TestCenter04InstalledNode(t *testing.T) {
 
 	center04RejectLaterGrant(t, run, freshBrowser, transfer, fileScope, ownerEpoch, files.SandboxRevision, "revoke", "revoked")
 	short := center02Observation[center04Scope](t, run, "short-grant.json")
-	center04RejectLaterGrant(t, run, freshBrowser, short.target(t, peer), fileScope, ownerEpoch, files.SandboxRevision, "expire", "expired")
+	shortScope := center03ID(center03ParseID(t, short.Sandbox))
+	if proto.Equal(shortScope, fileScope) {
+		t.Fatal("the expiry case requires its own Sandbox, because the revoked staging still holds the original transfer scope")
+	}
+	center04RejectLaterGrant(t, run, freshBrowser, short.target(t, peer), shortScope, ownerEpoch, short.SandboxRevision, "expire", "expired")
 	center02WaitExit(t, run)
 }
 
@@ -258,7 +263,7 @@ func center04RejectOversize(t *testing.T, run *center02NativeRun, b *browser, ta
 func center04Upload(t *testing.T, run *center02NativeRun, b *browser, target center03Target, scope, epoch *foundation.Id,
 	revision int64, payload []byte, digest string) {
 	t.Helper()
-	started := center04BeginImport(t, run, b, target, scope, epoch, revision, "round-trip.bin", uint64(len(payload)), digest)
+	started := center04BeginImport(t, run, b, target, scope, epoch, revision, "round-trip", "round-trip.bin", uint64(len(payload)), digest)
 	id := started.GetValue().GetTransfer().GetTransferId()
 	center04RecordTransfer(t, run, "import.json", id)
 	var prefix v2.DataServiceWriteImportResponse
@@ -303,12 +308,17 @@ func center04Upload(t *testing.T, run *center02NativeRun, b *browser, target cen
 	if !proto.Equal(imported.GetTransferId(), id) || !proto.Equal(imported.GetSandboxId(), scope) ||
 		imported.GetSha256() != digest || imported.GetVerifiedOffset() != uint64(len(payload)) ||
 		imported.GetState() != v2.TransferState_TRANSFER_STATE_COMPLETE || !proto.Equal(imported, loss.commit.GetTransfer()) ||
+		imported.GetClosedAt() != nil ||
 		!proto.Equal(effect.GetCommandId(), commit.GetMeta().GetCommandId()) || !proto.Equal(effect.GetOwnerEpoch(), epoch) ||
 		effect.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_HAPPENED {
 		t.Fatal("the one-file import did not produce its exact completed transfer and durable commit effect")
 	}
-	if imported.GetClosedAt() == nil {
-		center04Close(t, run, b, target, epoch, imported, readback.GetMeta().GetResultRev())
+	center04Close(t, run, b, target, epoch, imported, readback.GetMeta().GetResultRev())
+	closed := center04Inspect(t, run, b, target, id).GetValue().GetTransfer()
+	expected := proto.CloneOf(imported)
+	expected.ClosedAt = closed.GetClosedAt()
+	if expected.GetClosedAt() == nil || !proto.Equal(closed, expected) {
+		t.Fatal("the original authorized import did not retain its exact committed state and digest after closing")
 	}
 }
 
@@ -356,18 +366,20 @@ func center04Export(t *testing.T, run *center02NativeRun, b *browser, target cen
 }
 
 func center04BeginImport(t *testing.T, run *center02NativeRun, b *browser, target center03Target, scope, epoch *foundation.Id,
-	revision int64, name string, size uint64, digest string) *v2.DataServiceBeginImportResponse {
+	revision int64, phase, name string, size uint64, digest string) *v2.DataServiceBeginImportResponse {
 	t.Helper()
 	request := &v2.DataServiceBeginImportRequest{Meta: center03Meta(true, &foundation.Revision{Value: proto.Int64(revision)}),
 		OwnerEpoch: epoch, SandboxId: scope, RelativePath: proto.String("data/" + name), ByteLength: proto.Uint64(size),
 		Sha256: proto.String(digest), Overwrite: proto.Bool(false)}
 	var begun v2.DataServiceBeginImportResponse
 	center04Call(t, run, b, target, sandboxv2connect.DataServiceBeginImportProcedure, request, &begun, nil)
-	center03Success(t, begun.GetError(), begun.GetValue())
+	if begun.GetError() != nil || begun.GetValue() == nil {
+		t.Fatalf("%s BeginImport expected usable staging, got %s", phase, center04DataError(begun.GetError()))
+	}
 	staged := begun.GetValue().GetTransfer()
 	if !proto.Equal(staged.GetSandboxId(), scope) || staged.GetDirection() != "import" || staged.GetVerifiedOffset() != 0 ||
 		staged.GetByteLength() != size || staged.GetClosedAt() != nil || staged.GetExpiresAt() == nil {
-		t.Fatal("BeginImport did not open an exact zero-byte staging for the granted Sandbox")
+		t.Fatalf("%s BeginImport did not open exact zero-byte staging for its granted Sandbox", phase)
 	}
 	return &begun
 }
@@ -420,7 +432,7 @@ func center04RejectLaterGrant(t *testing.T, run *center02NativeRun, b *browser, 
 	t.Helper()
 	content := []byte{'Z'}
 	hash := sha256.Sum256(content)
-	staged := center04BeginImport(t, run, b, target, scope, epoch, revision, result+".bin", 1, hex.EncodeToString(hash[:]))
+	staged := center04BeginImport(t, run, b, target, scope, epoch, revision, trigger, result+".bin", 1, hex.EncodeToString(hash[:]))
 	original := staged.GetValue().GetTransfer()
 	id := original.GetTransferId()
 	center04RecordTransfer(t, run, result+"-import.json", id)
@@ -433,7 +445,7 @@ func center04RejectLaterGrant(t *testing.T, run *center02NativeRun, b *browser, 
 		TransferId: id, Offset: proto.Uint64(0), Chunk: content}
 	var refused v2.DataServiceWriteImportResponse
 	center04Call(t, run, b, target, sandboxv2connect.DataServiceWriteImportProcedure, write, &refused, nil)
-	center03Denied(t, refused.GetError(), "permission_denied")
+	center04RequireGrantRefusal(t, trigger, "WriteImport", refused.GetError())
 	if refused.GetValue() != nil {
 		t.Fatal("a denied WriteImport returned observable mutation data")
 	}
@@ -442,12 +454,16 @@ func center04RejectLaterGrant(t *testing.T, run *center02NativeRun, b *browser, 
 			OwnerEpoch: epoch, TransferId: id}
 		var denied v2.DataServiceCommitImportResponse
 		center04Call(t, run, b, target, sandboxv2connect.DataServiceCommitImportProcedure, commit, &denied, nil)
-		center03Denied(t, denied.GetError(), "permission_denied")
+		center04RequireGrantRefusal(t, trigger, "CommitImport", denied.GetError())
 	}
 	var invisible v2.DataServiceInspectTransferResponse
 	center04Call(t, run, b, target, sandboxv2connect.DataServiceInspectTransferProcedure,
 		&v2.DataServiceInspectTransferRequest{Meta: center03Meta(false, nil), TransferId: id}, &invisible, nil)
-	center03Denied(t, invisible.GetError(), "permission_denied")
+	failure := invisible.GetError()
+	if invisible.GetValue() != nil || failure.GetCategory() != foundation.ErrorCategory_ERROR_CATEGORY_STATE ||
+		failure.GetCode() != "not_found" || failure.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+		t.Fatalf("%s InspectTransfer did not conceal the transfer after grant loss: %s", trigger, center04DataError(failure))
+	}
 	writeCenter03Observation(t, run, trigger+"-refused", struct{}{})
 }
 
@@ -473,6 +489,37 @@ type center04LostResult struct {
 	command  platform.ID
 	read     *v2.DataChunk
 	commit   *v2.DataServiceCommitImportValue
+}
+
+func center04RequireGrantRefusal(t *testing.T, phase, method string, failure *foundation.ArcError) {
+	t.Helper()
+	if failure.GetCategory() != foundation.ErrorCategory_ERROR_CATEGORY_AUTHORIZATION || failure.GetCode() != "permission_denied" ||
+		failure.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+		t.Fatalf("%s %s expected AUTHORIZATION/permission_denied/DID_NOT_HAPPEN, got %s", phase, method, center04DataError(failure))
+	}
+}
+
+func center04DataError(failure *foundation.ArcError) string {
+	if failure == nil {
+		return "no typed error"
+	}
+	code, reason := failure.GetCode(), failure.GetDetails().GetState().GetReason()
+	switch code {
+	case "outcome_unknown", "permission_denied", "disk_space", "busy", "invalid_argument", "not_found",
+		"command_id_reused", "owner_epoch_retired", "revision_mismatch", "overloaded", "internal", "store_corrupt",
+		"unauthenticated", "node_offline":
+	default:
+		code = "other"
+	}
+	switch reason {
+	case "", "admission_commit_uncertain", "no_verified_response", "no_delivery_not_confirmed", "unclaimed_result",
+		"result_unverifiable", "result_identity_mismatch", "result_settlement_unconfirmed", "transfer_storage_limit",
+		"transfer_staging_capacity", "import_stage_pending_reconciliation", "remote_grant_authority_unavailable":
+	default:
+		reason = "other"
+	}
+	return fmt.Sprintf("category=%s code=%s effect=%s retry=%s retry_at_present=%t reason=%q",
+		failure.GetCategory(), code, failure.GetEffect(), failure.GetRetry().GetMode(), failure.GetRetry().GetRetryAt() != nil, reason)
 }
 
 func (f *center04LostResult) CallV2(ctx context.Context, authority management.V2ControlAuthority, call management.V2ControlCall,
