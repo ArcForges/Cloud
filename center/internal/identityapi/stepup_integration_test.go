@@ -66,7 +66,7 @@ WHERE device_id=$1 AND user_id=$2 AND revoked_at IS NULL`, node.id, who.id).Scan
 		sandboxv2connect.SandboxServiceConfigureProcedure: &sandboxv2.SandboxServiceConfigureRequest{Meta: typedMeta(true),
 			SandboxId: sandboxID, Config: config, OwnerEpoch: ownerEpoch},
 		sandboxv2connect.RunServiceStartProcedure: &sandboxv2.RunServiceStartRequest{Meta: typedMeta(true),
-			SandboxId: sandboxID, Argv: []string{"fixture"}, OwnerEpoch: ownerEpoch},
+			SandboxId: sandboxID, Argv: []string{"fixture"}, OwnerEpoch: ownerEpoch, TerminalMode: sandboxv2.TerminalMode_TERMINAL_MODE_PIPES.Enum()},
 		sandboxv2connect.RunServiceStopProcedure: &sandboxv2.RunServiceStopRequest{Meta: typedMeta(false), RunId: idOf(platform.NewID()), OwnerEpoch: ownerEpoch},
 		sandboxv2connect.ResourceServiceSetPolicyProcedure: &sandboxv2.ResourceServiceSetPolicyRequest{Meta: typedMeta(true),
 			ScopeKind: proto.String("sandbox"), ScopeId: sandboxID, Policy: policy, OwnerEpoch: ownerEpoch},

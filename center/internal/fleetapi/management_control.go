@@ -193,7 +193,7 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 		err := r.db.InTx(ctx, "read exact V2 control target", store.TxOptions{ReadOnly: true}, func(ctx context.Context, tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT n.user_id,p.protocol_epoch FROM fleet.node n
  LEFT JOIN management.node_protocol p ON (p.enrollment_id,p.node_id,p.account_id)=(n.enrollment_id,n.node_id,n.user_id)
- WHERE n.node_id=$1 AND n.enrollment_id=$2 AND n.revoked_at IS NULL AND p.revoked_at IS NULL`, node, enrollment).
+ AND p.revoked_at IS NULL WHERE n.node_id=$1 AND n.enrollment_id=$2 AND n.revoked_at IS NULL`, node, enrollment).
 				Scan(&owner, &protocol)
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -221,21 +221,21 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 			return nil, arc.PermissionDenied("sandbox_repair_local_only")
 		}
 	}
-	if protocol == nil {
-		return nil, controlUpgradeRequired()
-	}
-	if r.transport == nil {
-		return nil, arc.NodeOffline(node[:], r.clock())
-	}
 	ctx, cancel := context.WithTimeout(ctx, routes.RoutedDeadline)
 	defer cancel()
+	if protocol == nil {
+		return nil, r.admissionUnavailable(ctx, scope, selected, request, controlUpgradeRequired())
+	}
+	if r.transport == nil {
+		return nil, r.admissionUnavailable(ctx, scope, selected, request, arc.NodeOffline(node[:], r.clock()))
+	}
 	channel, err := r.transport.V2ControlAuthority(ctx, scope.Account, node, enrollment, *protocol)
 	if err != nil {
-		return nil, r.transportFailure(err, node)
+		return nil, r.admissionUnavailable(ctx, scope, selected, request, r.transportFailure(err, node))
 	}
 	if channel.AccountID != scope.Account || channel.NodeID != node || channel.EnrollmentID != enrollment ||
 		channel.ProtocolEpoch != *protocol || channel.NodeOwnerEpoch == (platform.ID{}) {
-		return nil, arc.NodeOffline(node[:], r.clock())
+		return nil, r.admissionUnavailable(ctx, scope, selected, request, arc.NodeOffline(node[:], r.clock()))
 	}
 	deadline, _ := ctx.Deadline()
 	routed := management.V2ControlCall{Selector: management.V2ControlSelector(selected.Selector),
@@ -265,6 +265,38 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 	}
 	reply, err := decodeResponse(body)
 	return reply, r.transportFailure(err, node)
+}
+
+// Admission refused before sending says nothing about an older attempt. A
+// scoped metadata read can prove absence or no delivery, never authorize
+// disclosure of a receipt whose original Node grant cannot be checked.
+func (r *managementRouter) admissionUnavailable(ctx context.Context, scope management.Authority,
+	selected routes.ManagementMethod, request controlRequest, unavailable error) error {
+	var command *foundationv1.Id
+	if query, ok := request.(*v2.NodeServiceGetOperationRequest); ok {
+		command = query.GetCommandId()
+	} else if selected.Mutation {
+		command = request.GetMeta().GetCommandId()
+	}
+	commandID, valid := parseID(command)
+	if !valid {
+		return unavailable
+	}
+	_, receipt, err := r.receipts.InspectOriginal(ctx, scope, commandID)
+	return controlAdmissionRefusal(receipt, err, unavailable)
+}
+
+func controlAdmissionRefusal(receipt management.Receipt, readErr, unavailable error) error {
+	if errors.Is(readErr, pgx.ErrNoRows) || (readErr == nil && receipt.State == management.StateNotDelivered &&
+		!receipt.MayHaveDelivered && receipt.DeliveryCount == 0 && receipt.FinalAt == nil &&
+		receipt.Effect != nil && *receipt.Effect == management.EffectDidNotHappen) {
+		return unavailable
+	}
+	return controlReadbackUnavailable()
+}
+
+func controlReadbackUnavailable() *connect.Error {
+	return connect.NewError(connect.CodeUnavailable, "original_operation_readback_unavailable")
 }
 
 func controlLease(channel management.V2ControlAuthority) management.Lease {
@@ -346,12 +378,13 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 	case errors.Is(err, management.ErrIdentityConflict), errors.Is(err, management.ErrLegacyCommand):
 		return nil, arc.CommandIDReused()
 	case errors.Is(err, management.ErrReplayExpired):
-		return nil, &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "expired",
-			State: "operation", Reason: "replay_window_expired"}
+		return nil, r.admissionUnavailable(ctx, scope, selected, request,
+			&arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "expired",
+				State: "operation", Reason: "replay_window_expired"})
 	case errors.Is(err, store.ErrCommitUnknown):
 		return nil, controlUnknown("admission_commit_uncertain")
 	case err != nil:
-		return nil, r.transportFailure(err, scope.Node)
+		return nil, r.admissionUnavailable(ctx, scope, selected, request, r.transportFailure(err, scope.Node))
 	}
 	if receipt.FinalAt != nil || receipt.MayHaveDelivered {
 		return nil, r.observeReplay(ctx, scope, channel, lease, routed, request.GetMeta())
@@ -462,6 +495,10 @@ func (r *managementRouter) reconcile(ctx context.Context, scope management.Autho
 	if err != nil {
 		return nil, r.transportFailure(errControlResult, scope.Node)
 	}
+	if receipt.FinalAt != nil && (observation.State == management.StateAccepted || observation.State == management.StateUnknown ||
+		receipt.Effect == nil || *receipt.Effect != observation.Effect) {
+		return nil, controlReadbackUnavailable()
+	}
 	if receipt.FinalAt == nil && receipt.MayHaveDelivered && observation.State != management.StateAccepted && observation.State != management.StateUnknown {
 		settlement, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 		defer cancel()
@@ -481,42 +518,41 @@ func (r *managementRouter) observeReplay(ctx context.Context, scope management.A
 		return arc.Unauthenticated()
 	}
 	if err := r.access.RecheckFeature(ctx, call, sandboxv2connect.NodeServiceGetOperationProcedure); err != nil {
-		return err
+		return controlReadbackUnavailable()
 	}
 	query, read, err := controlReadbackRequest(routed, meta)
 	if err != nil {
-		return controlUnknown("reconciliation_request_unavailable")
+		return controlReadbackUnavailable()
 	}
 	response, err := r.reconcile(ctx, scope, channel, lease, query, read, func(payload []byte) (controlResponse, error) {
 		return decodeControlResponse(payload, &v2.NodeServiceGetOperationResponse{}, meta.GetCorrelationId(), v2.ValidateNodeServiceGetOperationResponse)
 	})
-	var unavailable *connect.Error
-	if errors.As(err, &unavailable) {
-		return unavailable
+	if err != nil {
+		return controlReadbackUnavailable()
 	}
-	if err == nil {
-		observed := response.(*v2.NodeServiceGetOperationResponse)
-		if refusal := observed.GetError(); refusal != nil {
-			if refusal.GetCode() == "not_found" {
-				return controlUnknown("original_operation_not_observed")
-			}
-			return &storedRefusal{refusal}
-		}
-		operation := observed.GetValue().GetOperation()
-		if operation.GetResponseCompacted() {
-			return controlCompacted(operation)
-		}
-		if operation.GetError() != nil && operation.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN {
-			return &storedRefusal{operation.GetError()}
-		}
-		if operation.GetState() == v2.OperationState_OPERATION_STATE_SUCCEEDED ||
-			operation.GetState() == v2.OperationState_OPERATION_STATE_FAILED {
-			return controlReconciled(observed)
-		}
+	return controlReplayReadback(response.(*v2.NodeServiceGetOperationResponse))
+}
+
+func controlReplayReadback(observed *v2.NodeServiceGetOperationResponse) error {
+	operation := observed.GetValue().GetOperation()
+	if operation == nil {
+		// A refusal to read makes no claim about the prior mutation's effect.
+		return controlReadbackUnavailable()
 	}
-	// The database is not a substitute for the current Node grant check. An
-	// unreachable verifier must not disclose a previously observed result.
-	return controlUnknown("original_operation_reconciliation_required")
+	if operation.GetResponseCompacted() {
+		return controlCompacted(operation)
+	}
+	if operation.GetError() != nil && operation.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN {
+		return &storedRefusal{operation.GetError()}
+	}
+	switch operation.GetState() {
+	case v2.OperationState_OPERATION_STATE_SUCCEEDED, v2.OperationState_OPERATION_STATE_FAILED:
+		return controlReconciled(observed)
+	case v2.OperationState_OPERATION_STATE_ACCEPTED, v2.OperationState_OPERATION_STATE_UNKNOWN:
+		return controlUnknown("original_operation_reconciliation_required")
+	default:
+		return controlReadbackUnavailable()
+	}
 }
 
 func controlReadbackRequest(routed management.V2ControlCall, meta *foundationv1.RequestMeta) (*v2.NodeServiceGetOperationRequest, management.V2ControlCall, error) {
@@ -534,7 +570,7 @@ func (r *managementRouter) confirmControlDisclosure(ctx context.Context, identit
 	channel management.V2ControlAuthority, routed management.V2ControlCall, meta *foundationv1.RequestMeta,
 	want management.Observation, settleErr error) error {
 	r.logger.WarnContext(ctx, "V2 result metadata settlement unavailable", "method", identity.Method, "operation", identity.Command.String())
-	unavailable := connect.NewError(connect.CodeUnavailable, "original_operation_readback_unavailable")
+	unavailable := controlReadbackUnavailable()
 	call, ok := ingress.CallFrom(ctx)
 	if !ok || !retryableControlSettlement(settleErr) || ctx.Err() != nil {
 		return unavailable

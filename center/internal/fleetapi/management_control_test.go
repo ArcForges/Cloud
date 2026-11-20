@@ -16,6 +16,7 @@ import (
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	v2 "github.com/ArcForges/Contracts/go/arcforges/sandbox/v2"
 	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ArcForges/Cloud/center/internal/arc"
@@ -74,7 +75,67 @@ type replayReadbackFixture struct {
 }
 
 func (r replayReadbackFixture) Start(context.Context, *v2.RunServiceStartRequest) (*v2.RunServiceStartResponse, error) {
-	return nil, controlReconciled(r.result)
+	return nil, controlReplayReadback(r.result)
+}
+
+func TestV2ControlUnavailableDoesNotClaimAnOriginalDidNotHappen(t *testing.T) {
+	now := time.Now().UTC()
+	node := platform.NewID()
+	noEffect, happened := management.EffectDidNotHappen, management.EffectHappened
+	offline := arc.NodeOffline(node[:], now)
+	for _, tc := range []struct {
+		name           string
+		receipt        management.Receipt
+		readErr        error
+		provenNoEffect bool
+	}{
+		{name: "fresh scoped command", readErr: pgx.ErrNoRows, provenNoEffect: true},
+		{name: "proven never sent", receipt: management.Receipt{State: management.StateNotDelivered, Effect: &noEffect}, provenNoEffect: true},
+		{name: "accepted", receipt: management.Receipt{State: management.StateAccepted}},
+		{name: "possible delivery", receipt: management.Receipt{State: management.StateUnknown, MayHaveDelivered: true, DeliveryCount: 1}},
+		{name: "verified prior effect", receipt: management.Receipt{State: management.StateSucceeded, MayHaveDelivered: true, DeliveryCount: 1,
+			Effect: &happened, FinalAt: &now, ResultID: &node}},
+		{name: "receipt query unavailable", readErr: store.ErrUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reply := controlAdmissionRefusal(tc.receipt, tc.readErr, offline)
+			if tc.provenNoEffect {
+				if reply != offline || offline.ArcError(correlation.Context{}).GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+					t.Fatal("fresh or proven unattempted commands should keep the existing offline refusal")
+				}
+				return
+			}
+			requireUnavailableReadback(t, reply)
+		})
+	}
+
+	// No result was disclosed when a signed GetOperation refused the read.
+	for _, refusal := range []*arc.Refusal{arc.PermissionDenied("view"), arc.NotFound("operation", node[:]), controlRetiredEpoch()} {
+		reply := &v2.NodeServiceGetOperationResponse{Outcome: &v2.NodeServiceGetOperationResponse_Error{
+			Error: refusal.ArcError(correlation.Context{}),
+		}}
+		requireUnavailableReadback(t, controlReplayReadback(reply))
+	}
+
+	// A visible signed receipt can truthfully report a still unresolved effect.
+	unresolved := &v2.NodeServiceGetOperationResponse{Outcome: &v2.NodeServiceGetOperationResponse_Value{
+		Value: &v2.NodeServiceGetOperationValue{Operation: &v2.Operation{
+			State: v2.OperationState_OPERATION_STATE_UNKNOWN.Enum(), Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN.Enum(),
+		}},
+	}}
+	failure, ok := errors.AsType[*arc.Refusal](controlReplayReadback(unresolved))
+	if !ok || failure.Code != "outcome_unknown" || failure.Effect != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||
+		failure.Reconcile != "NodeService.GetOperation" {
+		t.Fatal("the original visible unresolved operation should direct reconciliation")
+	}
+}
+
+func requireUnavailableReadback(t *testing.T, err error) {
+	t.Helper()
+	failure, ok := errors.AsType[*connect.Error](err)
+	if !ok || failure.Code() != connect.CodeUnavailable || failure.Message() != "original_operation_readback_unavailable" || len(failure.Details()) != 0 {
+		t.Fatalf("expected an unavailable readback without prior state, got %v", err)
+	}
 }
 
 func TestV2ControlSettlementRequiresCompatibleFreshEvidence(t *testing.T) {
