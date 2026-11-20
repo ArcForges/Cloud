@@ -6,20 +6,31 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	fleetv1 "github.com/ArcForges/Contracts/go/arcforges/fleet/v1"
+	"github.com/ArcForges/Contracts/go/arcforges/fleet/v1/fleetv1connect"
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+	managementv2 "github.com/ArcForges/Contracts/go/arcforges/management/v2"
+	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/config"
+	"github.com/ArcForges/Cloud/center/internal/dbtest"
 	"github.com/ArcForges/Cloud/center/internal/device"
+	"github.com/ArcForges/Cloud/center/internal/fleet"
 	"github.com/ArcForges/Cloud/center/internal/identity"
+	"github.com/ArcForges/Cloud/center/internal/nodetest"
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
@@ -85,6 +96,124 @@ VALUES ($1, $2, $3, $4, '1.0.0', $5, $6, $6, 1)`, grant.InstallationID, grant.De
 	return result
 }
 
+func newManagementIdentityHarness(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t, settings{policy: writePolicy, surfaces: "identity,pages,fleet,relay,nodes"})
+	key, _ := dbtest.RegisterCommandKey(t, h.migration, "ARCFORGES_CENTER_KEY_TEST")
+	if err := h.center.Config.ApplyCommandKeys([]config.CommandKey{key}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.center.CheckCommandKeys(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.center.Hub.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		h.center.Hub.Stop(ctx)
+	})
+	if _, ready := h.center.Hub.Routable(); !ready {
+		t.Fatal("the management fixture did not acquire its isolated hub lease")
+	}
+	return h
+}
+
+type managedDeviceTarget struct {
+	id       platform.ID
+	revision int64
+}
+
+func (target managedDeviceTarget) revokeRequest() *managementv2.DeviceServiceRevokeRequest {
+	m := command()
+	m.ExpectedRev = &foundationv1.Revision{Value: proto.Int64(target.revision)}
+	return &managementv2.DeviceServiceRevokeRequest{Meta: m, DeviceId: idOf(target.id)}
+}
+
+// enrollManagedDevice completes the real approval and enrollment protocols with
+// software key inputs. No channel is opened and no protocol binding is seeded.
+func (h *harness) enrollManagedDevice(owner account, from caller) managedDeviceTarget {
+	h.t.Helper()
+	node, err := nodetest.New()
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	signIn := nodetest.NewSignIn()
+	begun := rpc(h, fleetv1connect.NodeEnrollmentServiceBeginNodeSignInProcedure, node.BeginRequest(signIn),
+		caller{}, &fleetv1.NodeEnrollmentServiceBeginNodeSignInResponse{})
+	expect(h.t, "begin node enrollment", begun.GetError(), "")
+	flow := begun.GetValue().GetFlowId()
+	var flowID platform.ID
+	if len(flow.GetValue()) != len(flowID) {
+		h.t.Fatal("enrollment did not return a flow identity")
+	}
+	copy(flowID[:], flow.GetValue())
+	review := rpc(h, fleetv1connect.NodeEnrollmentServiceGetNodeSignInFlowProcedure,
+		&fleetv1.NodeEnrollmentServiceGetNodeSignInFlowRequest{Meta: meta(), FlowId: flow}, from,
+		&fleetv1.NodeEnrollmentServiceGetNodeSignInFlowResponse{})
+	expect(h.t, "review node enrollment", review.GetError(), "")
+	h.stepUp(owner, from, fleet.ClassApproveNodeSignIn, flowID)
+	approved := rpc(h, fleetv1connect.NodeEnrollmentServiceApproveNodeSignInProcedure,
+		&fleetv1.NodeEnrollmentServiceApproveNodeSignInRequest{Meta: meta(), FlowId: flow, Approve: proto.Bool(true)}, from,
+		&fleetv1.NodeEnrollmentServiceApproveNodeSignInResponse{})
+	expect(h.t, "approve node enrollment", approved.GetError(), "")
+	code, err := signIn.LoopbackCode(approved.GetValue().GetRedirectUrl())
+	if err != nil {
+		h.t.Fatal("enrollment did not retain its loopback binding")
+	}
+	h.remember(code)
+	completed := rpc(h, fleetv1connect.NodeEnrollmentServiceCompleteNodeSignInProcedure,
+		node.CompleteRequest(flowID, code, signIn, node.CompleteProof(publicBaseURL, flowID, code)), caller{},
+		&fleetv1.NodeEnrollmentServiceCompleteNodeSignInResponse{})
+	expect(h.t, "complete node enrollment", completed.GetError(), "")
+	credentials := completed.GetValue().GetCredentials()
+	if credentials == nil {
+		h.t.Fatal("enrollment did not produce a Node credential")
+	}
+	h.remember(credentials.GetAccessToken(), credentials.GetRefreshToken())
+	var target managedDeviceTarget
+	err = h.migration.QueryRow(context.Background(), `SELECT d.device_id,d.rev FROM fleet.node n
+ JOIN device.device d USING(device_id,user_id) WHERE n.node_id=$1 AND n.user_id=$2 AND n.revoked_at IS NULL`,
+		node.ID, owner.id).Scan(&target.id, &target.revision)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return target
+}
+
+func (h *harness) v2UpgradeRefusal(token string) (int, string, *foundationv1.ArcError) {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, h.url+routes.NodeChannelV2Path, nil)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set(config.ClientIPHeader, "203.0.113.10")
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	request.Header.Set("Sec-WebSocket-Protocol", routes.NodeChannelV2Subprotocol)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode == http.StatusSwitchingProtocols {
+		h.t.Fatal("the authorization probe unexpectedly upgraded")
+	}
+	var body struct{ Error json.RawMessage }
+	if err := json.NewDecoder(io.LimitReader(response.Body, routes.UpgradeRefusalBytes)).Decode(&body); err != nil {
+		h.t.Fatal(err)
+	}
+	var refusal foundationv1.ArcError
+	if err := protojson.Unmarshal(body.Error, &refusal); err != nil || !retryAdvice(&refusal) {
+		h.t.Fatal("the upgrade refusal did not carry a valid ArcError")
+	}
+	return response.StatusCode, response.Header.Get(routes.RefusalHeader), &refusal
+}
+
 // sessionReads are the session methods A1a serves, with an empty request each.
 func sessionReads() map[string]proto.Message {
 	return map[string]proto.Message{
@@ -92,12 +221,13 @@ func sessionReads() map[string]proto.Message {
 		identities:   &publicapiv1.IdentityServiceListAuthIdentitiesRequest{Meta: meta(), Page: page(10)},
 		sessionsPath: &publicapiv1.IdentityServiceListSessionsRequest{Meta: meta(), Page: page(10)},
 		devicesPath:  &publicapiv1.DeviceServiceListRequest{Meta: meta(), Page: page(10)},
+		managementv2connect.DeviceServiceListProcedure: &managementv2.DeviceServiceListRequest{Meta: meta(), Limit: proto.Uint32(10)},
 	}
 }
 
 // sessionRequests is one request for every session row of the operation table. RevokeSession and DeviceService.Revoke name the
 // given session and device, and the writes name the given credential, so a call admitted by mistake would take effect.
-func sessionRequests(who account, credential, target platform.ID, targetDevice platform.ID) map[string]proto.Message {
+func sessionRequests(who account, credential, target platform.ID, targetDevice platform.ID, node managedDeviceTarget) map[string]proto.Message {
 	requests := sessionReads()
 	requests["/arcforges.publicapi.v1.IdentityService/GetAccountDeletion"] = &publicapiv1.IdentityServiceGetAccountDeletionRequest{Meta: meta()}
 	requests[beginStepUpPath] = &publicapiv1.IdentityServiceBeginStepUpRequest{Meta: meta(), OperationClass: proto.String(identity.ClassRevokeAllSessions),
@@ -116,6 +246,8 @@ func sessionRequests(who account, credential, target platform.ID, targetDevice p
 	requests[revokeAllPath] = &publicapiv1.IdentityServiceRevokeAllSessionsRequest{Meta: command()}
 	requests[renameDevicePath] = &publicapiv1.DeviceServiceRenameRequest{Meta: command(), DeviceId: idOf(targetDevice), Name: proto.String("Renamed")}
 	requests[revokeDevicePath] = &publicapiv1.DeviceServiceRevokeRequest{Meta: command(), DeviceId: idOf(targetDevice)}
+	requests[managementv2connect.DeviceServiceInspectProcedure] = &managementv2.DeviceServiceInspectRequest{Meta: meta(), DeviceId: idOf(node.id)}
+	requests[managementv2connect.DeviceServiceRevokeProcedure] = node.revokeRequest()
 	return requests
 }
 
@@ -124,8 +256,9 @@ func sessionRequests(who account, credential, target platform.ID, targetDevice p
 func sessionRows(t *testing.T, requests map[string]proto.Message, each func(operation access.Operation, request proto.Message)) {
 	t.Helper()
 	for _, operation := range access.Operations() {
-		// The fleet surface's node rows (AF-CTR-04) have their own scope matrix (fleetapi TestScopeMatrixOverFleetRows).
-		if !operation.Session || strings.HasPrefix(operation.ID, "fleet.") {
+		// Fleet V1 has its own scope matrix. The V2 WebSocket applies a
+		// different scope rule, covered by real GET upgrades below.
+		if !operation.Session || strings.HasPrefix(operation.ID, "fleet.") || operation.Path == routes.NodeChannelV2Path {
 			continue
 		}
 		request, ok := requests[operation.Path]
@@ -194,12 +327,33 @@ func (h *harness) writes() string {
 // production policy admits them), nothing is written, no receipt is kept, and each refusal is audited; mobile.limited reaches
 // every A1a read; a restricted account is refused exactly the methods that are not its security operations.
 func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
-	h := newHarness(t, settings{policy: writePolicy})
+	h := newManagementIdentityHarness(t)
 	who := h.seedAccount(1, "")
+	owner := h.signIn(who, newClaim(t), caller{})
+	ownerDevice := h.enrollManagedDevice(who, bearer(owner.GetAccessToken()))
+	upgrade, found := access.Lookup(routes.NodeChannelV2Path)
+	if !found || upgrade.ID != routes.NodeChannelV2ID || !upgrade.Session ||
+		len(upgrade.Scopes) != 1 || upgrade.Scopes[0] != session.ScopeNode.String() {
+		t.Fatal("the served V2 WebSocket has no exact node-only authorization row")
+	}
+	refuseUpgrade := func(token string) {
+		t.Helper()
+		before, receipts, audits := h.writes(), h.receipts(), h.audits("access.refused")
+		status, header, refusal := h.v2UpgradeRefusal(token)
+		if status != http.StatusForbidden || header != "AUTHORIZATION/permission_denied" ||
+			failure(refusal) != header || refusal.GetDetails().GetState().GetReason() != upgrade.ID ||
+			refusal.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
+			t.Errorf("the V2 WebSocket authorization refusal: HTTP %d %q %v", status, header, refusal)
+		}
+		if h.writes() != before || h.receipts() != receipts || h.audits("access.refused") != audits+1 {
+			t.Error("the refused V2 WebSocket wrote, kept a receipt or was not audited")
+		}
+	}
+	refuseUpgrade(owner.GetAccessToken())
 	for _, scope := range []session.Scope{session.ScopeNode, session.ScopePush, session.ScopeAutomation} {
 		credential := h.issue(who.id, scope, false)
 		// Its own session and device: the targets a mobile.limited session may reach without evidence.
-		requests := sessionRequests(who, h.credentialIDs(who.id)[0], credential.sessionID, h.deviceOf(credential.sessionID))
+		requests := sessionRequests(who, h.credentialIDs(who.id)[0], credential.sessionID, h.deviceOf(credential.sessionID), ownerDevice)
 		sessionRows(t, requests, func(operation access.Operation, request proto.Message) {
 			before, receipts, audits := h.writes(), h.receipts(), h.audits("access.refused")
 			refusal := domainError(t, h.post(operation.Path, request, bearer(credential.access)))
@@ -210,6 +364,20 @@ func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
 				t.Errorf("%s on %s wrote, kept a receipt or was not audited", scope, operation.ID)
 			}
 		})
+		if scope == session.ScopeNode {
+			// This fixture token has the right scope but no enrolled Node row
+			// for its installation. It passes the operation table, then stops
+			// before socket upgrade at the enrollment lookup.
+			audits, receipts := h.audits("access.authorized"), h.receipts()
+			status, header, failureValue := h.v2UpgradeRefusal(credential.access)
+			if status != http.StatusUnauthorized || header != "AUTHENTICATION/unauthenticated" ||
+				failure(failureValue) != header || h.audits("access.authorized") != audits+1 ||
+				h.receipts() != receipts || h.count("SELECT count(*) FROM management.node_protocol") != 0 {
+				t.Errorf("the unenrolled Node's V2 WebSocket: HTTP %d %q %v", status, header, failureValue)
+			}
+		} else {
+			refuseUpgrade(credential.access)
+		}
 		refreshed := rpc(h, refreshPath, &publicapiv1.IdentityServiceRefreshSessionRequest{Meta: meta(), RefreshToken: proto.String(credential.refresh),
 			InstallationId: &foundationv1.Id{Value: credential.installation[:]}}, caller{}, &publicapiv1.IdentityServiceRefreshSessionResponse{})
 		if failure(refreshed.GetError()) != "AUTHORIZATION/permission_denied" {
@@ -239,10 +407,14 @@ func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
 	}
 	// A restricted account is refused exactly the rows that are not security operations; the security operations answer as they
 	// would for any account (a step-up, a domain refusal or success), never permission_denied.
-	restricted := h.seedAccount(2, "")
+	restricted := h.seedAccount(1, "")
 	credential := h.issue(restricted.id, session.ScopeAccount, false)
 	other := h.issue(restricted.id, session.ScopeAccount, false)
-	requests := sessionRequests(restricted, h.credentialIDs(restricted.id)[0], other.sessionID, h.deviceOf(other.sessionID))
+	restrictedDevice := h.enrollManagedDevice(restricted, bearer(credential.access))
+	if _, err := h.migration.Exec(context.Background(), "UPDATE identity.user SET state=2,rev=rev+1 WHERE user_id=$1", restricted.id); err != nil {
+		t.Fatal(err)
+	}
+	requests := sessionRequests(restricted, h.credentialIDs(restricted.id)[0], other.sessionID, h.deviceOf(other.sessionID), restrictedDevice)
 	sessionRows(t, requests, func(operation access.Operation, request proto.Message) {
 		before, receipts, audits := h.writes(), h.receipts(), h.audits("access.refused")
 		refusal := domainError(t, h.post(operation.Path, request, bearer(credential.access)))
@@ -254,6 +426,7 @@ func TestOnlyAccountSessionsReachTheSessionMethods(t *testing.T) {
 			t.Errorf("a restricted account on %s wrote, kept a receipt or was not audited", operation.ID)
 		}
 	})
+	refuseUpgrade(credential.access)
 	h.verifyAudit()
 }
 

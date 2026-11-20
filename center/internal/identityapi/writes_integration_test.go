@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+	managementv2 "github.com/ArcForges/Contracts/go/arcforges/management/v2"
+	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
@@ -398,7 +400,7 @@ func TestHealthStatesTheServedSurfaces(t *testing.T) {
 // result is scanned for the address. The writes are checked against the operation table (E7): a row with a receipt that this test
 // does not run, or a receipt of a method whose row names none, fails it.
 func TestNoReceiptHoldsAnAddress(t *testing.T) {
-	h := newHarness(t, settings{policy: writePolicy})
+	h := newManagementIdentityHarness(t)
 	address := "c1.person@example.org"
 	who := h.seedAccount(1, address)
 	h.remember(address)
@@ -440,6 +442,17 @@ func TestNoReceiptHoldsAnAddress(t *testing.T) {
 	h.stepUp(who, from, identity.ClassRevokeDevice, device)
 	expect(t, "a device revocation", rpc(h, revokeDevicePath, &publicapiv1.DeviceServiceRevokeRequest{Meta: command(), DeviceId: idOf(device)}, from,
 		&publicapiv1.DeviceServiceRevokeResponse{}).GetError(), "")
+	node := h.enrollManagedDevice(who, from)
+	h.stepUp(who, from, "management.deviceRevoke", node.id)
+	managed := rpc(h, managementv2connect.DeviceServiceRevokeProcedure, node.revokeRequest(), from,
+		&managementv2.DeviceServiceRevokeResponse{})
+	expect(t, "a V2 device revocation for the receipt scan", managed.GetError(), "")
+	if revokedNode := managed.GetValue().GetDevice(); revokedNode.GetPresence() != "revoked" ||
+		revokedNode.GetRevision().GetValue() != node.revision+1 ||
+		h.count(`SELECT count(*) FROM identity.session s JOIN fleet.node n USING(installation_id) WHERE n.device_id=$1
+ AND n.revoked_at IS NOT NULL AND s.revoked_at IS NOT NULL AND s.scope=3`, node.id) != 1 {
+		t.Fatal("V2 revocation did not commit its device revision and credential revocation")
+	}
 	h.stepUp(who, from, identity.ClassRemoveCredential, email)
 	expect(t, "the e-mail identity's removal", rpc(h, removeCredentialPath, &publicapiv1.IdentityServiceRemoveAuthIdentityRequest{Meta: command(),
 		CredentialId: idOf(email)}, from, &publicapiv1.IdentityServiceRemoveAuthIdentityResponse{}).GetError(), "")
