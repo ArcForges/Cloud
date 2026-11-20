@@ -32,6 +32,7 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/access"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
+	"github.com/ArcForges/Cloud/center/internal/hub"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey"
 	"github.com/ArcForges/Cloud/center/internal/identity/passkey/virtual"
@@ -195,6 +196,8 @@ type settings struct {
 	nativeCertificate *tls.Certificate
 	// nativeHandler optionally wraps that listener's real handler before it starts.
 	nativeHandler func(http.Handler) http.Handler
+	// nativeTokenRefreshInterval matches an installed fixture's credential cadence.
+	nativeTokenRefreshInterval time.Duration
 }
 
 const writePolicy = `{"stepUpPerAccountLimit": 1000, "signInFailuresAccountLimit": 1000, "signInPerPrefixLimit": 1000}`
@@ -277,8 +280,14 @@ func newHarness(t *testing.T, options settings) *harness {
 			t.Fatal(err)
 		}
 	}
+	var nativeHub *hub.Settings
+	if options.nativeTokenRefreshInterval > 0 {
+		settings := hub.SettingsOf(cfg.Identity.Policy)
+		settings.TokenRefreshInterval = options.nativeTokenRefreshInterval
+		nativeHub = &settings
+	}
 	center, err := server.New(cfg, observe.NewLogger(h.logs, slog.LevelDebug), server.Options{Mail: h.mail, Clock: h.clock.Now, Background: func(work func()) { work() },
-		Controls: options.controls})
+		Controls: options.controls, Hub: nativeHub})
 	if err != nil {
 		t.Fatal(err)
 	}
