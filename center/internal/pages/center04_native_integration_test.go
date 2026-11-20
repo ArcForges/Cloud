@@ -923,10 +923,10 @@ func center04Usage(t *testing.T, run *center02NativeRun, b *browser, scope cente
 		sample := frame.GetSnapshot()
 		if sample == nil || frame.GetError() != nil || !proto.Equal(sample.GetScopeId(), sandbox) ||
 			sample.GetScopeKind() != "sandbox" || sample.GetSampleEpoch() == "" || sample.GetSampledAt() == nil ||
-			sample.GetPolicyRevision().GetValue() < 1 {
+			sample.GetPolicyRevision().GetValue() < 1 || sample.GetSampleSequence() == 0 {
 			t.Fatal("the resource frame is not a complete snapshot for the authorized Sandbox")
 		}
-		if sample.GetStale() || sample.GetSampleSequence() == 0 {
+		if sample.GetStale() {
 			continue
 		}
 		previousAt, currentAt := previous.GetSampledAt(), sample.GetSampledAt()

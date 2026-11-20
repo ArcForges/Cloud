@@ -211,7 +211,8 @@ func watchMethod[Q, F any, Request interface {
 				}
 				frame := Frame(new(F))
 				outcome := watchSkip
-				if len(answer) != 1 || answer[0] != 0 {
+				idle := len(answer) == 1 && answer[0] == 0
+				if !idle {
 					if len(answer) < 2 || answer[0] != 1 ||
 						(method.Path == sandboxv2connect.RunServiceWatchOutputProcedure && len(answer)-1 > maxOutputFrameBytes) {
 						return failure(r.transportFailure(errControlResult, scope.Node))
@@ -252,7 +253,7 @@ func watchMethod[Q, F any, Request interface {
 				}
 				if outcome == watchSkip || interval != nil {
 					delay := watchIdleDelay
-					if interval != nil {
+					if interval != nil && !idle {
 						delay = interval(request)
 					}
 					select {
