@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -392,7 +393,8 @@ func center03Success(t *testing.T, failure *foundation.ArcError, value proto.Mes
 func center03Denied(t *testing.T, failure *foundation.ArcError, code string) {
 	t.Helper()
 	if failure.GetCode() != code || failure.GetEffect() != foundation.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN {
-		t.Fatalf("wanted typed %s/DID_NOT_HAPPEN, got %s/%s", code, failure.GetCode(), failure.GetEffect())
+		t.Fatalf("wanted typed %s/DID_NOT_HAPPEN, got %s/%s with state reason %q",
+			code, failure.GetCode(), failure.GetEffect(), failure.GetDetails().GetState().GetReason())
 	}
 }
 
@@ -483,6 +485,12 @@ func startCenter03InstalledNode(t *testing.T) *center02NativeRun {
 	t.Cleanup(func() {
 		center02DrainChild(t, dir, run.done, cancelProcess)
 		if t.Failed() {
+			for line := range strings.SplitSeq(h.logs.String(), "\n") {
+				var event struct{ Msg, Phase, Outcome string }
+				if json.Unmarshal([]byte(line), &event) == nil && event.Msg == "V2 control channel" {
+					t.Logf("the V2 control transport reported %s/%s", event.Phase, event.Outcome)
+				}
+			}
 			t.Log(run.output.String())
 		}
 	})
