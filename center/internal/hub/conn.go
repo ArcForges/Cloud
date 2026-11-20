@@ -682,6 +682,9 @@ func (c *conn) recheckLapse(ctx context.Context) {
 	if c.v2 != nil {
 		operation = routes.NodeChannelV2ID
 		reason = access.V2FeatureRefusal(decision.Reason).Code
+		if decision.Reason == feature.ReasonOperatorLimit {
+			reason = string(decision.Reason)
+		}
 	}
 	c.auditAs(audit, access.AuditGated, string(decision.Reason), "operation", operation, map[string]any{"operation": operation,
 		"feature": string(feature.CenterNodes), "reason": string(decision.Reason)})

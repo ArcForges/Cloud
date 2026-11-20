@@ -103,7 +103,7 @@ func TestV2UpgradeNamesHostedAndOperatorLimits(t *testing.T) {
 		{"official without entitlement", settings{mode: config.OfficialHosted, plan: config.PlanDevelopmentFixtures},
 			"ENTITLEMENT/hosted_access_required", "hosted_access_required", "entitlement"},
 		{"self-hosted operator limit", settings{disabled: "center.nodes"},
-			"RESOURCE/operator_limit", "operator_limit", "resource"},
+			"RESOURCE/overloaded", "overloaded", "resource"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			h := newHarness(t, scenario.settings)
@@ -121,6 +121,13 @@ func TestV2UpgradeNamesHostedAndOperatorLimits(t *testing.T) {
 			if got.status != http.StatusForbidden || got.reason != scenario.reason ||
 				got.body["category"] != scenario.category || got.body["code"] != scenario.code || got.body["effect"] != "didNotHappen" {
 				t.Fatalf("expected typed V2 refusal with no effect: %+v", got)
+			}
+			if scenario.code == "overloaded" {
+				details, _ := got.body["details"].(map[string]any)
+				state, _ := details["state"].(map[string]any)
+				if state["reason"] != "operator_limit" || got.retry == "" {
+					t.Fatalf("expected the scoped operator limit and retry instant: %+v", got)
+				}
 			}
 		})
 	}

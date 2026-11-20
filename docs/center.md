@@ -300,8 +300,8 @@ available to authenticated callers according to their individual policies.
 
 `feature.OperationKeys` lists the V2 service groups. The access table checks each gated operation's group and key after
 authentication, target ownership, authorization, applicable resource controls and audit. A V2 hosted entitlement refusal is
-`ENTITLEMENT/hosted_access_required`. A self-hosted operator service limit uses `RESOURCE/operator_limit`. The finite V1
-compatibility routes retain their published gate and error semantics. Historical entitlement records keep their original keys and
+`ENTITLEMENT/hosted_access_required`. A self-hosted operator service limit uses the published `RESOURCE/overloaded` error
+with state reason `operator_limit`. The finite V1 compatibility routes retain their published gate and error semantics. Historical entitlement records keep their original keys and
 validity intervals.
 
 | Key              | Group               | Gates                                     |

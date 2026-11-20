@@ -150,6 +150,21 @@ func scheduleHost01ProviderEnd(t *testing.T, run *center02NativeRun, previous pl
 	if err = tx.Commit(run.ctx); err != nil {
 		t.Fatalf("commit the fixture provider correction: %v", err)
 	}
+	// The provider fixture writes facts directly, so publish their projection
+	// through the real resolver before testing its wall-clock expiry.
+	snapshot, err := run.harness.center.Entitlements.Refresh(run.ctx, run.owner.id.String())
+	if err != nil {
+		t.Fatalf("refresh the replacement provider facts: %v", err)
+	}
+	if snapshot.ValidUntil == nil || *snapshot.ValidUntil != entitlement.FromTime(end) {
+		t.Fatalf("the refreshed provider projection did not expire at %s", end.Format(time.RFC3339Nano))
+	}
+	for _, key := range []feature.Key{feature.CenterNodes, feature.RemoteView, feature.RemoteControl} {
+		entry, ok := snapshot.Capability(string(key))
+		if !ok || !entry.Granted {
+			t.Fatalf("the replacement term did not preserve active access for %s before expiry", key)
+		}
+	}
 	if !time.Now().Before(end) {
 		t.Fatal("the replacement service term elapsed before the fixture could observe its valid interval")
 	}

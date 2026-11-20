@@ -997,8 +997,9 @@ func (a *Authorizer) gated(ctx context.Context, call *ingress.Call, operation Op
 func V2FeatureRefusal(reason feature.Reason) *arc.Refusal {
 	switch reason {
 	case feature.ReasonOperatorLimit:
-		return &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE, Code: "operator_limit",
-			State: "feature", Reason: string(reason)}
+		refusal := arc.Unavailable()
+		refusal.State, refusal.Reason = "feature", string(reason)
+		return refusal
 	case feature.ReasonModeInvalid, feature.ReasonUnknownFeature, feature.ReasonNoAccount:
 		return arc.Unavailable()
 	default:

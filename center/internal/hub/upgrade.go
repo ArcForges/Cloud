@@ -352,8 +352,10 @@ func upgradeStatus(value *foundationv1.ArcError) int {
 		return http.StatusNotFound
 	case foundationv1.ErrorCategory_ERROR_CATEGORY_RESOURCE:
 		switch value.GetCode() {
-		case "operator_limit":
-			return http.StatusForbidden
+		case "overloaded":
+			if value.GetDetails().GetState().GetReason() == "operator_limit" {
+				return http.StatusForbidden
+			}
 		case "rate_limited":
 			return http.StatusTooManyRequests
 		}
