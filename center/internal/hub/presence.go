@@ -59,11 +59,16 @@ func (h *Hub) markOnline(ctx context.Context, enrollmentID, connectionID platfor
 		var current platform.ID
 		err := tx.QueryRow(ctx, `SELECT enrollment_id FROM fleet.node
 WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&current)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNodeGone
-		}
-		if err != nil {
+		nodeGone := errors.Is(err, pgx.ErrNoRows)
+		if err != nil && !nodeGone {
 			return err
+		}
+		// Match V2's enrollment-before-lease lock order while reporting a stale lease first.
+		if err := lockPresenceLease(ctx, tx, fence); err != nil {
+			return err
+		}
+		if nodeGone {
+			return ErrNodeGone
 		}
 		var v2Bound bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM management.node_protocol WHERE enrollment_id=$1)`,
@@ -72,9 +77,6 @@ WHERE enrollment_id=$1 AND revoked_at IS NULL FOR UPDATE`, enrollmentID).Scan(&c
 		}
 		if v2Bound {
 			return errProtocolChanged
-		}
-		if err = lockPresenceLease(ctx, tx, fence); err != nil {
-			return err
 		}
 		return writeOnline(ctx, tx, current, connectionID, fence, now)
 	})
