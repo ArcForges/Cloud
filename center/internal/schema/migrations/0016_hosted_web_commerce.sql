@@ -390,7 +390,7 @@ SELECT u.user_id AS account_id
 FROM identity.user u
 WHERE EXISTS (
     SELECT 1 FROM commerce.subscription s
-    WHERE s.account_id = u.user_id AND (s.state NOT IN (5, 6) OR s.auto_renew)
+    WHERE s.account_id = u.user_id AND (s.state <> 5 OR s.auto_renew)
 ) OR EXISTS (
     SELECT 1 FROM commerce.purchase p WHERE p.account_id = u.user_id AND p.state IN (1, 2)
 ) OR EXISTS (

@@ -155,6 +155,10 @@ func TestHostedCommerceAppendPreservesSchema15AndGuards(t *testing.T) {
 	}
 	f := seedHostedCommerceFacts(t, owner, seedNamespaceFixture(t, owner).account)
 	checkCommercePending(t, owner, f.account, false)
+	commerceFact(t, owner, "UPDATE commerce.subscription SET state=6,rev=rev+1 WHERE subscription_id=$1", f.subscription)
+	checkCommercePending(t, owner, f.account, true)
+	commerceFact(t, owner, "UPDATE commerce.subscription SET state=5,rev=rev+1 WHERE subscription_id=$1", f.subscription)
+	checkCommercePending(t, owner, f.account, false)
 	seedQueuedCommerceEvent(t, owner)
 	checkCommercePending(t, owner, f.account, true)
 	other := seedNamespaceFixture(t, owner).account

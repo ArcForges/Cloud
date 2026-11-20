@@ -10,12 +10,9 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/schema"
 )
 
-const hostedCommerceSchema16MigrationSHA = "92de4d5b3b4e352e64a442304ea3d6de7fb4316d09d5a2f26bfeee209b4c8b85"
+const hostedCommerceSchema16MigrationSHA = "dff7e02565e017d055a555ca1ff5c549e5a2aa976aded5b51312b06d504f0b4e"
 
-// Native PostgreSQL 18.7 on H-22 at 358a6e55dabf6c35e938078ff8293e20c801c7d3
-// retained all 390 schema15 entries and added 102. The 492-entry inventory has SHA256
-// bc7e06def0c69afb52fb5461263e8c3bc2a121b41de890994316ca8f5637cfac.
-const hostedCommerceSchema16CatalogueSHA = "f706ac006ef6346a711796d21740590905715ca6ee3244daa28b01c30830f9f1"
+const hostedCommerceSchema16CatalogueSHA = ""
 
 const hostedCommerceSchema16InventoryDelta = `CONSTRAINT commerce billing_entry billing_entry_pkey
 CONSTRAINT commerce billing_entry billing_entry_provider_environment_provider_entry_ref_kind_key
@@ -127,7 +124,7 @@ func hostedCommerceBackupDefinition() (string, string, error) {
 	}
 	build, err := Load(schema.Migrations())
 	if err != nil || len(build) < 16 || build[15].Name != "0016_hosted_web_commerce.sql" ||
-		build[15].SHA256 != hostedCommerceSchema16MigrationSHA {
+		build[15].SHA256 != hostedCommerceSchema16MigrationSHA || len(hostedCommerceSchema16CatalogueSHA) != 64 {
 		return "", "", errors.New("schema16 backup catalogue qualification does not match this migration build")
 	}
 	objects := strings.Split(strings.TrimSuffix(previous, "\n")+"\n"+hostedCommerceSchema16InventoryDelta, "\n")
