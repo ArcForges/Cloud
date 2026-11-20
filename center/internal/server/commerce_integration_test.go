@@ -21,15 +21,20 @@ import (
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	publicapiv1 "github.com/ArcForges/Contracts/go/arcforges/publicapi/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/publicapi/v1/publicapiv1connect"
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/ArcForges/Cloud/center/internal/access"
+	"github.com/ArcForges/Cloud/center/internal/arc"
 	"github.com/ArcForges/Cloud/center/internal/config"
 	"github.com/ArcForges/Cloud/center/internal/dbtest"
+	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/identity"
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/platform"
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/session"
+	"github.com/ArcForges/Cloud/center/internal/store"
 )
 
 const (
@@ -39,11 +44,13 @@ const (
 	host02Subscription  = "sub_01hv8p95hhbb2nsarbq3f0rwx8"
 	host02Offer         = "11111111-2222-4333-8444-555555555555"
 	host02PortalURL     = "https://portal.fixture.test/subscriptions?token=fixture-ephemeral&subscription_id=" + host02Subscription
+	host02PrivateEmail  = "commerce-owner@example.test"
 )
 
 type commerceFixtureTransport struct {
 	portal   atomic.Int64
 	checkout atomic.Int64
+	cancel   atomic.Int64
 }
 
 func (f *commerceFixtureTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -55,6 +62,10 @@ func (f *commerceFixtureTransport) RoundTrip(request *http.Request) (*http.Respo
 			f.checkout.Add(1)
 		}
 		return nil, fmt.Errorf("fixture checkout provider result unavailable")
+	}
+	if request.Method == http.MethodPost && request.URL.Path == "/subscriptions/"+host02Subscription+"/cancel" {
+		f.cancel.Add(1)
+		return nil, fmt.Errorf("fixture cancellation provider result unavailable")
 	}
 	if request.Method != http.MethodPost || request.URL.Path != "/customers/"+host02Customer+"/portal-sessions" {
 		return nil, fmt.Errorf("unexpected isolated fixture operation")
@@ -118,6 +129,11 @@ func TestConfiguredCommerceBrowserRoutesAndDurableSignedAdmission(t *testing.T) 
 	}
 
 	account := db.Account(1)
+	if _, err := db.Migration.Exec(t.Context(), `INSERT INTO identity.auth_identity
+ (auth_identity_id,user_id,method,provider_id,subject,created_at,rev) VALUES ($1,$2,2,'email',$3,$4,1)`,
+		platform.NewID(), account, host02PrivateEmail, now); err != nil {
+		t.Fatal(err)
+	}
 	browser := db.Session(account, 1)
 	headers := host02BrowserHeaders(browser)
 	catalogue := &publicapiv1.CommerceServiceGetCatalogueResponse{}
@@ -206,6 +222,10 @@ func TestConfiguredCommerceBrowserRoutesAndDurableSignedAdmission(t *testing.T) 
 		t.Fatal("a consumed portal proof was accepted again")
 	}
 
+	cancelRequest, reactivateRequest := checkHost02RenewalReceipts(t, listener, db, peer, browser, subscriptionID, now)
+	checkHost02CommerceSessions(t, listener, db, account, now, catalogueRequest, create, checkoutRequest, cancelRequest, reactivateRequest)
+	checkHost02ReceiptPrivacy(t, db, browser)
+
 	event := []byte(fmt.Sprintf(`{"event_id":"evt_01hv8p95hhbb2nsarbq3f0rwx8","notification_id":"ntf_01hv8p95hhbb2nsarbq3f0rwx8",
 		"event_type":"subscription.updated","occurred_at":%q,"data":{"id":%q}}`, now.Format(time.RFC3339Nano), host02Subscription))
 	callback := func(listener *httptest.Server, raw []byte, signed bool) int {
@@ -278,6 +298,211 @@ func TestConfiguredCommerceBrowserRoutesAndDurableSignedAdmission(t *testing.T) 
 	defer cancel()
 	if err := Run(ctx, development, logger); err == nil || !strings.Contains(err.Error(), "without a configured Paddle environment") {
 		t.Fatal("a Center with development fixtures served a merchant-pinned store")
+	}
+}
+
+func checkHost02RenewalReceipts(t *testing.T, listener *httptest.Server, db *dbtest.Database, peer *commerceFixtureTransport,
+	browser dbtest.Session, subscriptionID platform.ID, now time.Time) (*publicapiv1.CommerceServiceCancelSubscriptionRequest, *publicapiv1.CommerceServiceReactivateSubscriptionRequest) {
+	t.Helper()
+	headers := host02BrowserHeaders(browser)
+	reactivateRequest := &publicapiv1.CommerceServiceReactivateSubscriptionRequest{
+		Meta:           &foundationv1.RequestMeta{CommandId: wireCommerceID(platform.NewID()), ExpectedRev: wireCommerceRevision(1)},
+		SubscriptionId: wireCommerceID(subscriptionID),
+	}
+	reactivate := &publicapiv1.CommerceServiceReactivateSubscriptionResponse{}
+	readHost02Commerce(t, listener, publicapiv1connect.CommerceServiceReactivateSubscriptionProcedure, headers, reactivateRequest, reactivate)
+	if reactivate.GetValue().GetSubscription().GetState() != publicapiv1.SubscriptionState_SUBSCRIPTION_STATE_ACTIVE {
+		t.Fatal("renewal already active did not produce the typed stored result")
+	}
+	cancelID := platform.NewID()
+	cancelRequest := &publicapiv1.CommerceServiceCancelSubscriptionRequest{
+		Meta:           &foundationv1.RequestMeta{CommandId: wireCommerceID(cancelID), ExpectedRev: wireCommerceRevision(1)},
+		SubscriptionId: wireCommerceID(subscriptionID),
+	}
+	cancel := &publicapiv1.CommerceServiceCancelSubscriptionResponse{}
+	readHost02Commerce(t, listener, publicapiv1connect.CommerceServiceCancelSubscriptionProcedure, headers, cancelRequest, cancel)
+	if cancel.GetError().GetCode() != "step_up_required" || peer.cancel.Load() != 0 ||
+		db.Count("SELECT count(*) FROM platform.command_receipt WHERE command_id=$1", cancelID) != 0 {
+		t.Fatal("cancellation without the exact evidence reached the provider or reserved a receipt")
+	}
+	target, err := hex.DecodeString(identity.TargetHash("commerce.cancelSubscription", browser.User, subscriptionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.ProveStepUp(browser, "commerce.cancelSubscription", target, now)
+	readHost02Commerce(t, listener, publicapiv1connect.CommerceServiceCancelSubscriptionProcedure, headers, cancelRequest, cancel)
+	if cancel.GetError().GetCode() != "internal" || cancel.GetError().GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_UNKNOWN ||
+		peer.cancel.Load() != 1 {
+		t.Fatal("the authorized cancellation did not reserve exactly one uncertain provider send")
+	}
+	return cancelRequest, reactivateRequest
+}
+
+type host02Reply interface {
+	proto.Message
+	GetError() *foundationv1.ArcError
+}
+
+func checkHost02CommerceSessions(t *testing.T, listener *httptest.Server, db *dbtest.Database, account platform.ID, now time.Time,
+	catalogue *publicapiv1.CommerceServiceGetCatalogueRequest, create *publicapiv1.CommerceServiceCreatePurchaseIntentRequest,
+	checkout *publicapiv1.CommerceServiceCreateCheckoutAttemptRequest, cancel *publicapiv1.CommerceServiceCancelSubscriptionRequest,
+	reactivate *publicapiv1.CommerceServiceReactivateSubscriptionRequest) {
+	t.Helper()
+	requests := map[string]struct {
+		input  proto.Message
+		output host02Reply
+	}{
+		publicapiv1connect.CommerceServiceGetCatalogueProcedure:          {catalogue, &publicapiv1.CommerceServiceGetCatalogueResponse{}},
+		publicapiv1connect.CommerceServiceCreatePurchaseIntentProcedure:  {create, &publicapiv1.CommerceServiceCreatePurchaseIntentResponse{}},
+		publicapiv1connect.CommerceServiceCreateCheckoutAttemptProcedure: {checkout, &publicapiv1.CommerceServiceCreateCheckoutAttemptResponse{}},
+		publicapiv1connect.CommerceServiceGetPurchaseStateProcedure: {
+			&publicapiv1.CommerceServiceGetPurchaseStateRequest{Meta: &foundationv1.RequestMeta{}, PurchaseIntentId: create.PurchaseIntentId},
+			&publicapiv1.CommerceServiceGetPurchaseStateResponse{},
+		},
+		publicapiv1connect.CommerceServiceGetSubscriptionProcedure: {
+			&publicapiv1.CommerceServiceGetSubscriptionRequest{Meta: &foundationv1.RequestMeta{}},
+			&publicapiv1.CommerceServiceGetSubscriptionResponse{},
+		},
+		publicapiv1connect.CommerceServiceCancelSubscriptionProcedure:     {cancel, &publicapiv1.CommerceServiceCancelSubscriptionResponse{}},
+		publicapiv1connect.CommerceServiceReactivateSubscriptionProcedure: {reactivate, &publicapiv1.CommerceServiceReactivateSubscriptionResponse{}},
+		publicapiv1connect.CommerceServiceListBillingHistoryProcedure: {
+			&publicapiv1.CommerceServiceListBillingHistoryRequest{Meta: &foundationv1.RequestMeta{},
+				Period: &foundationv1.TimeRangeUtc{From: arc.Instant(now.Add(-time.Hour)), Until: arc.Instant(now)}, Page: &foundationv1.PageRequest{}},
+			&publicapiv1.CommerceServiceListBillingHistoryResponse{},
+		},
+	}
+	modules, err := routes.Center()
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, err := routes.Table(modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := 0
+	for _, row := range table.SurfaceRows {
+		if row.Surface == routes.SurfaceCommerce {
+			if _, ok := requests[row.Path]; !ok || row.Auth != "session" {
+				t.Fatalf("unexpected commerce Worker registration: %s", row.Path)
+			}
+			listed++
+		}
+	}
+	if listed != len(requests) {
+		t.Fatal("the Worker registrations differ from the exact commerce RPC set")
+	}
+	service := publicapiv1.File_arcforges_publicapi_v1_commerce_proto.Services().ByName("CommerceService")
+	catalogueBytes, err := proto.Marshal(catalogue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anonymous := map[string]string{config.ClientIPHeader: "203.0.113.7"}
+	for index := range service.Methods().Len() {
+		procedure := "/" + string(service.FullName()) + "/" + string(service.Methods().Get(index).Name())
+		if _, served := requests[procedure]; !served {
+			reply := grpcWeb(t, listener.URL, procedure, ingress.Frame(catalogueBytes), anonymous)
+			if reply.trailers["grpc-status"] != "12" || len(reply.messages) != 0 {
+				t.Fatalf("retired commerce procedure %s is registered", procedure)
+			}
+		}
+	}
+	before := db.Count("SELECT count(*) FROM platform.command_receipt")
+	for path, exchange := range requests {
+		raw, err := proto.Marshal(exchange.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply := grpcWeb(t, listener.URL, path, ingress.Frame(raw), anonymous)
+		if reply.trailers["grpc-status"] != "16" || len(reply.messages) != 0 {
+			t.Fatalf("anonymous request reached %s", path)
+		}
+	}
+	for _, scope := range []session.Scope{session.ScopeAccount, session.ScopeMobileLimited, session.ScopeNode, session.ScopePush, session.ScopeAutomation} {
+		token := issueHost02Native(t, db, account, scope, now)
+		native := map[string]string{config.ClientIPHeader: "203.0.113.7", "Authorization": "Bearer " + token}
+		for path, exchange := range requests {
+			audits := db.Count("SELECT count(*) FROM audit.audit_event WHERE event_type='access.refused'")
+			operation, found := access.Lookup(path)
+			readHost02Commerce(t, listener, path, native, exchange.input, exchange.output)
+			failure := exchange.output.GetError()
+			if !found || failure.GetCode() != "permission_denied" || failure.GetEffect() != foundationv1.EffectCertainty_EFFECT_CERTAINTY_DID_NOT_HAPPEN ||
+				failure.GetDetails().GetState().GetReason() != operation.ID ||
+				db.Count("SELECT count(*) FROM audit.audit_event WHERE event_type='access.refused'") != audits+1 {
+				t.Fatalf("native %s was not refused and audited for %s", scope, path)
+			}
+		}
+	}
+	if db.Count("SELECT count(*) FROM platform.command_receipt") != before {
+		t.Fatal("a refused credential wrote a command receipt")
+	}
+}
+
+func issueHost02Native(t *testing.T, db *dbtest.Database, account platform.ID, scope session.Scope, now time.Time) string {
+	t.Helper()
+	grant := session.Grant{UserID: account, DeviceID: platform.NewID(), InstallationID: platform.NewID(), Scope: scope,
+		Product: device.ProductMobile, Purpose: session.PurposeAuthenticate, AuthMethod: 1, AuthenticatedAt: now}
+	devicePlatform, installationPlatform := int16(device.PlatformAndroid), "android-15"
+	if scope == session.ScopeNode {
+		grant.Product, devicePlatform, installationPlatform = device.ProductNode, int16(device.PlatformLinux), "linux-x64"
+	}
+	ctx := t.Context()
+	if _, err := db.Migration.Exec(ctx, `INSERT INTO device.device
+ (device_id,user_id,display_name,platform,trust_level,remote_enabled,first_seen_at,last_seen_at,rev)
+ VALUES ($1,$2,'Commerce fixture',$3,1,false,$4,$4,1)`, grant.DeviceID, grant.UserID, devicePlatform, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Migration.Exec(ctx, `INSERT INTO device.installation
+ (installation_id,device_id,user_id,product_id,app_version,platform,installed_at,last_active_at,rev)
+ VALUES ($1,$2,$3,$4,'1.0.0',$5,$6,$6,1)`, grant.InstallationID, grant.DeviceID, account, grant.Product, installationPlatform, now); err != nil {
+		t.Fatal(err)
+	}
+	var issued session.Native
+	if err := db.Runtime.InTx(ctx, "issue commerce fixture credential", store.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		issued, err = session.IssueNative(ctx, tx, config.DefaultIdentityPolicy(), grant, now)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return issued.AccessToken
+}
+
+func checkHost02ReceiptPrivacy(t *testing.T, db *dbtest.Database, browser dbtest.Session) {
+	t.Helper()
+	rows, err := db.Migration.Query(t.Context(), `SELECT operation, request_sha256, result FROM platform.command_receipt
+ WHERE operation LIKE '/arcforges.publicapi.v1.CommerceService/%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	want := map[string]bool{
+		publicapiv1connect.CommerceServiceCreatePurchaseIntentProcedure:   true,
+		publicapiv1connect.CommerceServiceCreateCheckoutAttemptProcedure:  true,
+		publicapiv1connect.CommerceServiceCancelSubscriptionProcedure:     true,
+		publicapiv1connect.CommerceServiceReactivateSubscriptionProcedure: true,
+	}
+	handle := session.Secret(browser.Handle)
+	for rows.Next() {
+		var operation string
+		var digest, result []byte
+		if err := rows.Scan(&operation, &digest, &result); err != nil {
+			t.Fatal(err)
+		}
+		if !want[operation] || len(digest) != sha256.Size {
+			t.Fatalf("unexpected commerce receipt for %s", operation)
+		}
+		delete(want, operation)
+		for _, secret := range []string{host02PrivateEmail, "fixture-ephemeral", handle.Text(), session.CSRF(handle)} {
+			if bytes.Contains(bytes.ToLower(result), []byte(strings.ToLower(secret))) {
+				t.Fatalf("a commerce receipt retained private data for %s", operation)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing commerce receipts: %v", want)
 	}
 }
 
