@@ -138,6 +138,39 @@ func requireUnavailableReadback(t *testing.T, err error) {
 	}
 }
 
+func TestV2ControlExpiredDeliveryStillReadsTheOriginalOperation(t *testing.T) {
+	identity := management.Identity{Method: "RunService.Start", OwnerEpoch: platform.NewID(), IntentSHA256: [32]byte{1}}
+	operation := &v2.Operation{Method: proto.String(identity.Method), AggregateId: id(platform.NewID()),
+		State: v2.OperationState_OPERATION_STATE_SUCCEEDED.Enum(), Effect: foundationv1.EffectCertainty_EFFECT_CERTAINTY_HAPPENED.Enum(),
+		ResponseCompacted: proto.Bool(true)}
+	verified := &v2.NodeServiceGetOperationResponse{Outcome: &v2.NodeServiceGetOperationResponse_Value{
+		Value: &v2.NodeServiceGetOperationValue{Operation: operation},
+	}}
+	reads := 0
+	readback := func() error {
+		reads++
+		return controlReplayReadback(verified)
+	}
+	possible := management.Receipt{State: management.StateUnknown, MayHaveDelivered: true, DeliveryCount: 1}
+	result, ok := errors.AsType[*arc.Refusal](controlExpiredReplay(identity, identity, possible, nil, readback))
+	if !ok || result.Code != "receipt_compacted" || result.Effect != operation.GetEffect() || reads != 1 {
+		t.Fatal("a possible delivery must still read the original effect after the delivery deadline")
+	}
+	noEffect := management.EffectDidNotHappen
+	notDelivered := management.Receipt{State: management.StateNotDelivered, Effect: &noEffect}
+	expired, ok := errors.AsType[*arc.Refusal](controlExpiredReplay(identity, identity, notDelivered, nil, readback))
+	if !ok || expired.Code != "expired" || reads != 1 {
+		t.Fatal("a proven unattempted command should expire without readback")
+	}
+	requireUnavailableReadback(t, controlExpiredReplay(identity, identity, possible, pgx.ErrNoRows, readback))
+	changed := identity
+	changed.IntentSHA256[0]++
+	requireUnavailableReadback(t, controlExpiredReplay(identity, changed, possible, nil, readback))
+	if reads != 1 {
+		t.Fatal("an unconfirmed exact scope must not request readback")
+	}
+}
+
 func TestV2ControlSettlementRequiresCompatibleFreshEvidence(t *testing.T) {
 	if !retryableControlSettlement(store.ErrCommitUnknown) || !retryableControlSettlement(store.ErrUnavailable) ||
 		retryableControlSettlement(management.ErrLease) || retryableControlSettlement(management.ErrIdentityConflict) {

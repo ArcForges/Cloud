@@ -287,12 +287,15 @@ func (r *managementRouter) admissionUnavailable(ctx context.Context, scope manag
 }
 
 func controlAdmissionRefusal(receipt management.Receipt, readErr, unavailable error) error {
-	if errors.Is(readErr, pgx.ErrNoRows) || (readErr == nil && receipt.State == management.StateNotDelivered &&
-		!receipt.MayHaveDelivered && receipt.DeliveryCount == 0 && receipt.FinalAt == nil &&
-		receipt.Effect != nil && *receipt.Effect == management.EffectDidNotHappen) {
+	if errors.Is(readErr, pgx.ErrNoRows) || readErr == nil && controlNeverDelivered(receipt) {
 		return unavailable
 	}
 	return controlReadbackUnavailable()
+}
+
+func controlNeverDelivered(receipt management.Receipt) bool {
+	return receipt.State == management.StateNotDelivered && !receipt.MayHaveDelivered &&
+		receipt.DeliveryCount == 0 && receipt.FinalAt == nil && receipt.Effect != nil && *receipt.Effect == management.EffectDidNotHappen
 }
 
 func controlReadbackUnavailable() *connect.Error {
@@ -378,9 +381,10 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 	case errors.Is(err, management.ErrIdentityConflict), errors.Is(err, management.ErrLegacyCommand):
 		return nil, arc.CommandIDReused()
 	case errors.Is(err, management.ErrReplayExpired):
-		return nil, r.admissionUnavailable(ctx, scope, selected, request,
-			&arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "expired",
-				State: "operation", Reason: "replay_window_expired"})
+		original, retained, readErr := r.receipts.InspectOriginal(ctx, scope, command)
+		return nil, controlExpiredReplay(identity, original, retained, readErr, func() error {
+			return r.observeReplay(ctx, scope, channel, lease, routed, request.GetMeta())
+		})
 	case errors.Is(err, store.ErrCommitUnknown):
 		return nil, controlUnknown("admission_commit_uncertain")
 	case err != nil:
@@ -444,6 +448,20 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 		}
 	}
 	return reply, nil
+}
+
+// The dispatch horizon limits new delivery. It does not hide the original
+// effect or supersede the Node's later response compaction policy.
+func controlExpiredReplay(expected, scoped management.Identity, receipt management.Receipt, readErr error, readback func() error) error {
+	if readErr != nil || scoped.Method != expected.Method || scoped.OwnerEpoch != expected.OwnerEpoch ||
+		scoped.IntentSHA256 != expected.IntentSHA256 {
+		return controlReadbackUnavailable()
+	}
+	if controlNeverDelivered(receipt) {
+		return &arc.Refusal{Category: foundationv1.ErrorCategory_ERROR_CATEGORY_STATE, Code: "expired",
+			State: "operation", Reason: "replay_window_expired"}
+	}
+	return readback()
 }
 
 func (r *managementRouter) retainUncertain(ctx context.Context, identity management.Identity, lease management.Lease) {
