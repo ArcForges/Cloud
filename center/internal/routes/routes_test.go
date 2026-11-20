@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
+
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 )
 
@@ -116,6 +118,16 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.sandbox.v2.RunService/Inspect session 253952",
 		"/arcforges.sandbox.v2.ResourceService/GetBudget session 253952",
 		"/arcforges.sandbox.v2.ResourceService/SetPolicy session 253952",
+		"/arcforges.sandbox.v2.DataService/BeginImport session 253952",
+		"/arcforges.sandbox.v2.DataService/WriteImport session 2097152",
+		"/arcforges.sandbox.v2.DataService/CommitImport session 253952",
+		"/arcforges.sandbox.v2.DataService/BeginExport session 253952",
+		"/arcforges.sandbox.v2.DataService/ReadExport session 253952",
+		"/arcforges.sandbox.v2.DataService/InspectTransfer session 253952",
+		"/arcforges.sandbox.v2.DataService/CloseTransfer session 253952",
+		"/arcforges.sandbox.v2.RunService/WatchOutput session 4096",
+		"/arcforges.sandbox.v2.NodeService/WatchEvents session 4096",
+		"/arcforges.sandbox.v2.ResourceService/WatchUsage session 4096",
 	}
 	if len(table.Surfaces) != 7 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
 		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || table.Surfaces[6] != SurfaceNodes ||
@@ -126,11 +138,23 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		// The fleet rows carry the contract's deadline of each method (F3: 5 s for GetNodeSignInFlow and LookupDeviceCode, 15 s for
 		// CompleteNodeSignIn, 10 s for the others); the identity rows the identity surface's 15 s.
 		surface, deadline, reply := SurfaceIdentity, 15_000, 65_536
+		kind := "unary"
 		remoteTarget := false
 		switch {
 		case strings.HasPrefix(row.Path, "/arcforges.sandbox.v2."):
 			surface, deadline, reply = SurfaceNodes, 10_000, RoutedReplyBytes
 			remoteTarget = true
+			switch row.Path {
+			case sandboxv2connect.RunServiceWatchOutputProcedure, sandboxv2connect.NodeServiceWatchEventsProcedure,
+				sandboxv2connect.ResourceServiceWatchUsageProcedure:
+				kind = "serverStream"
+			case sandboxv2connect.DataServiceBeginImportProcedure, sandboxv2connect.DataServiceWriteImportProcedure,
+				sandboxv2connect.DataServiceCommitImportProcedure, sandboxv2connect.DataServiceBeginExportProcedure,
+				sandboxv2connect.DataServiceCloseTransferProcedure:
+				deadline = 30_000
+			case sandboxv2connect.DataServiceReadExportProcedure:
+				deadline, reply = 30_000, ingress.DataTransferWireBytes
+			}
 		case strings.HasPrefix(row.Path, "/arcforges.management.v2.DeviceService/"):
 			surface, deadline = SurfaceNodes, 10_000
 			if row.Path == "/arcforges.management.v2.DeviceService/List" {
@@ -165,7 +189,7 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 			}
 		}
 		if got := fmt.Sprintf("%s %s %d", row.Path, row.Auth, row.MaxRequestBytes); got != served[index] || row.Surface != surface ||
-			!row.RequestMeta || row.Instance != HealthInstance || row.Kind != "unary" || row.MaxFrameBytes != reply ||
+			!row.RequestMeta || row.Instance != HealthInstance || row.Kind != kind || row.MaxFrameBytes != reply ||
 			row.MaxUnaryResponseBytes != reply || row.MaxDurationMilliseconds != deadline || row.RemoteTarget != remoteTarget {
 			t.Fatalf("surface row %d: %+v", index, row)
 		}
@@ -284,7 +308,7 @@ func TestTheCenterSendsEveryReplyItsBudgetsAdmit(t *testing.T) {
 			}
 		}
 	}
-	if largest != RoutedReplyBytes || largest <= MaxRequestBytes(modules) {
+	if largest != ingress.DataTransferWireBytes || MaxRequestBytes(modules) != ingress.DataTransferWireBytes {
 		t.Fatalf("send bound %d, request bound %d", largest, MaxRequestBytes(modules))
 	}
 }

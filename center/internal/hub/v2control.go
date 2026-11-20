@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"math"
 	"time"
 
 	"github.com/ArcForges/Cloud/center/internal/platform"
@@ -15,7 +14,10 @@ import (
 const (
 	v2ControlRequestKind        byte = 7
 	v2ControlResultKind         byte = 8
+	v2DataRequestKind           byte = 9
+	v2DataResultKind            byte = 10
 	v2ControlCapability              = "center-control-v2"
+	v2StreamDataCapability           = "center-stream-data-v2"
 	v2ControlRequestDomain           = "ArcForges relay-control-request v2\n"
 	v2ControlResultDomain            = "ArcForges relay-control-result v2\n"
 	v2ControlIDSize                  = len(platform.ID{})
@@ -25,6 +27,8 @@ const (
 	v2ControlResultLengthOffset      = v2ControlIDSize + sha256.Size
 	v2ControlResultDigestOffset      = v2ControlResultLengthOffset + 4
 	v2ControlResultFixed             = v2ControlResultDigestOffset + sha256.Size
+	v2DataMaxBody                    = 2 << 20
+	v2DataMaxFrame                   = v2DataMaxBody + 512
 )
 
 type v2ControlSelector byte
@@ -43,12 +47,70 @@ const (
 	v2ControlInspectRun
 	v2ControlGetBudget
 	v2ControlSetPolicy
+	v2ControlWatchOutput
+	v2ControlWatchEvents
+	v2ControlWatchUsage
+	v2DataBeginImport
+	v2DataWriteImport
+	v2DataCommitImport
+	v2DataBeginExport
+	v2DataReadExport
+	v2DataInspectTransfer
+	v2DataCloseTransfer
 )
+
+func (s v2ControlSelector) known() bool {
+	return s >= v2ControlGetOperation && s <= v2DataCloseTransfer
+}
+
+func (s v2ControlSelector) watch() bool {
+	return s >= v2ControlWatchOutput && s <= v2ControlWatchUsage
+}
+
+func (s v2ControlSelector) data() bool {
+	return s >= v2DataBeginImport && s <= v2DataCloseTransfer
+}
+
+func (s v2ControlSelector) requestKind() byte {
+	if s.data() {
+		return v2DataRequestKind
+	}
+	return v2ControlRequestKind
+}
+
+func (s v2ControlSelector) resultKind() byte {
+	if s.data() {
+		return v2DataResultKind
+	}
+	return v2ControlResultKind
+}
+
+func (s v2ControlSelector) requestLimit(ordinaryLimit int) int {
+	if s == v2DataWriteImport {
+		return v2DataMaxFrame
+	}
+	return ordinaryLimit
+}
+
+func (s v2ControlSelector) resultLimit(ordinaryLimit int) int {
+	if s == v2DataReadExport {
+		return v2DataMaxFrame
+	}
+	return ordinaryLimit
+}
+
+func (s v2ControlSelector) validResultBody(body []byte) bool {
+	if !s.watch() {
+		return len(body) != 0
+	}
+	return len(body) == 1 && body[0] == 0 || len(body) > 1 && body[0] == 1
+}
 
 func (s v2ControlSelector) requiresCommandID() bool {
 	switch s {
 	case v2ControlGetOperation, v2ControlRevokeRemoteGrant, v2ControlCreateSandbox, v2ControlConfigureSandbox,
-		v2ControlStartRun, v2ControlStopRun, v2ControlSetPolicy:
+		v2ControlStartRun, v2ControlStopRun, v2ControlSetPolicy, v2DataBeginImport, v2DataWriteImport,
+		v2DataCommitImport, v2DataBeginExport, v2DataCloseTransfer:
 		return true
 	default:
 		return false
@@ -93,6 +155,7 @@ type v2SignedControlRequest struct {
 
 type v2SignedControlResult struct {
 	v2ControlResult
+	Kind         byte
 	BodySHA256   [sha256.Size]byte
 	SigningInput []byte
 	Signature    [v2SignatureSize]byte
@@ -100,7 +163,7 @@ type v2SignedControlResult struct {
 
 func (r v2ControlRequest) validMetadata(now time.Time) bool {
 	zero := platform.ID{}
-	return r.Selector >= v2ControlGetOperation && r.Selector <= v2ControlSetPolicy &&
+	return r.Selector.known() &&
 		r.Selector.requiresCommandID() == (r.CommandID != zero) &&
 		r.CallID != zero && r.AccountID != zero && r.ActorID != zero && r.NodeID != zero &&
 		r.EnrollmentID != zero && r.ProtocolEpoch != zero && r.ConnectionID != zero &&
@@ -125,7 +188,7 @@ func validV2ControlKID(kid string) bool {
 func encodeV2ControlRequest(seq uint64, request v2ControlRequest, maxFrameBytes int, now time.Time,
 	sign func([]byte) ([]byte, error)) ([]byte, [sha256.Size]byte, error) {
 	if seq == 0 || sign == nil || !request.validMetadata(now) ||
-		!v2ControlFrameFits(maxFrameBytes, v2ControlRequestFixed+len(request.KID), len(request.Body)) {
+		!v2ControlFrameFits(request.Selector.requestLimit(maxFrameBytes), v2ControlRequestFixed+len(request.KID), len(request.Body)) {
 		return nil, [sha256.Size]byte{}, errFrame
 	}
 	body := bytes.Clone(request.Body)
@@ -147,7 +210,7 @@ func encodeV2ControlRequest(seq uint64, request v2ControlRequest, maxFrameBytes 
 	metadata = binary.BigEndian.AppendUint32(metadata, uint32(len(body)))
 	input := v2ControlSigningInput(v2ControlRequestDomain, metadata)
 	binding := sha256.Sum256(input)
-	frame, err := encodeV2SignedControlFrame(v2ControlRequestKind, seq, metadata, body, input, sign)
+	frame, err := encodeV2SignedControlFrame(request.Selector.requestKind(), seq, metadata, body, input, sign)
 	if err != nil {
 		return nil, [sha256.Size]byte{}, err
 	}
@@ -155,7 +218,11 @@ func encodeV2ControlRequest(seq uint64, request v2ControlRequest, maxFrameBytes 
 }
 
 func decodeV2ControlRequest(frame []byte, expectedSequence uint64, maxFrameBytes int, now time.Time) (v2SignedControlRequest, error) {
-	payload, ok := v2ControlPayload(frame, v2ControlRequestKind, expectedSequence, maxFrameBytes, v2ControlRequestFixed+1)
+	if len(frame) < v2HeaderBytes+v2ControlIDSize+1 {
+		return v2SignedControlRequest{}, errFrame
+	}
+	selector := v2ControlSelector(frame[v2HeaderBytes+v2ControlIDSize])
+	payload, ok := v2ControlPayload(frame, selector.requestKind(), expectedSequence, selector.requestLimit(maxFrameBytes), v2ControlRequestFixed+1)
 	if !ok {
 		return v2SignedControlRequest{}, errFrame
 	}
@@ -169,7 +236,7 @@ func decodeV2ControlRequest(frame []byte, expectedSequence uint64, maxFrameBytes
 	if !ok {
 		return v2SignedControlRequest{}, errFrame
 	}
-	request := v2ControlRequest{Selector: v2ControlSelector(metadata[v2ControlIDSize]),
+	request := v2ControlRequest{Selector: selector,
 		KID: string(metadata[v2ControlRequestKIDOffset+1 : metadataLen-4])}
 	copy(request.CallID[:], metadata[:v2ControlIDSize])
 	offset := v2ControlIDSize + 1
@@ -182,7 +249,7 @@ func decodeV2ControlRequest(frame []byte, expectedSequence uint64, maxFrameBytes
 	request.HubFence = int64(binary.BigEndian.Uint64(metadata[offset+8:]))
 	request.DeadlineUnixMillis = int64(binary.BigEndian.Uint64(metadata[offset+16:]))
 	copy(request.AudienceSHA256[:], metadata[offset+24:offset+24+sha256.Size])
-	if !request.validMetadata(now) {
+	if !request.validMetadata(now) || len(body) > v2DataMaxBody {
 		return v2SignedControlRequest{}, errFrame
 	}
 	digest := sha256.Sum256(body)
@@ -195,10 +262,10 @@ func decodeV2ControlRequest(frame []byte, expectedSequence uint64, maxFrameBytes
 		SigningInput: input, Signature: [v2SignatureSize]byte(signature)}, nil
 }
 
-func encodeV2ControlResult(seq uint64, result v2ControlResult, maxFrameBytes int,
+func encodeV2ControlResult(seq uint64, selector v2ControlSelector, result v2ControlResult, maxFrameBytes int,
 	sign func([]byte) ([]byte, error)) ([]byte, error) {
-	if seq == 0 || sign == nil || result.CallID == (platform.ID{}) ||
-		!v2ControlFrameFits(maxFrameBytes, v2ControlResultFixed, len(result.Body)) {
+	if seq == 0 || sign == nil || result.CallID == (platform.ID{}) || !selector.known() || !selector.validResultBody(result.Body) ||
+		!v2ControlFrameFits(selector.resultLimit(maxFrameBytes), v2ControlResultFixed, len(result.Body)) {
 		return nil, errFrame
 	}
 	body := bytes.Clone(result.Body)
@@ -208,12 +275,15 @@ func encodeV2ControlResult(seq uint64, result v2ControlResult, maxFrameBytes int
 	metadata = append(metadata, result.RequestBinding[:]...)
 	metadata = binary.BigEndian.AppendUint32(metadata, uint32(len(body)))
 	metadata = append(metadata, digest[:]...)
-	return encodeV2SignedControlFrame(v2ControlResultKind, seq, metadata, body,
+	return encodeV2SignedControlFrame(selector.resultKind(), seq, metadata, body,
 		v2ControlSigningInput(v2ControlResultDomain, metadata), sign)
 }
 
-func decodeV2ControlResult(frame []byte, expectedSequence uint64, maxFrameBytes int) (v2SignedControlResult, error) {
-	payload, ok := v2ControlPayload(frame, v2ControlResultKind, expectedSequence, maxFrameBytes, v2ControlResultFixed)
+func decodeV2ControlResult(frame []byte, kind byte, expectedSequence uint64, maxFrameBytes int) (v2SignedControlResult, error) {
+	if kind != v2ControlResultKind && kind != v2DataResultKind {
+		return v2SignedControlResult{}, errFrame
+	}
+	payload, ok := v2ControlPayload(frame, kind, expectedSequence, maxFrameBytes, v2ControlResultFixed)
 	if !ok {
 		return v2SignedControlResult{}, errFrame
 	}
@@ -221,7 +291,7 @@ func decodeV2ControlResult(frame []byte, expectedSequence uint64, maxFrameBytes 
 	body, signature, ok := splitV2ControlPayload(payload, v2ControlResultFixed,
 		binary.BigEndian.Uint32(metadata[v2ControlResultLengthOffset:]))
 	result := v2ControlResult{CallID: platform.ID(metadata[:v2ControlIDSize])}
-	if !ok || result.CallID == (platform.ID{}) {
+	if !ok || len(body) > v2DataMaxBody || result.CallID == (platform.ID{}) {
 		return v2SignedControlResult{}, errFrame
 	}
 	digest := sha256.Sum256(body)
@@ -230,13 +300,13 @@ func decodeV2ControlResult(frame []byte, expectedSequence uint64, maxFrameBytes 
 	}
 	copy(result.RequestBinding[:], metadata[v2ControlIDSize:v2ControlResultLengthOffset])
 	result.Body = bytes.Clone(body)
-	return v2SignedControlResult{v2ControlResult: result, BodySHA256: digest,
+	return v2SignedControlResult{v2ControlResult: result, Kind: kind, BodySHA256: digest,
 		SigningInput: v2ControlSigningInput(v2ControlResultDomain, metadata), Signature: [v2SignatureSize]byte(signature)}, nil
 }
 
 func v2ControlFrameFits(maxFrameBytes, metadataLen, bodyLen int) bool {
 	overhead := v2HeaderBytes + metadataLen + v2SignatureSize
-	return bodyLen > 0 && uint64(bodyLen) <= math.MaxUint32 && maxFrameBytes >= overhead && bodyLen <= maxFrameBytes-overhead
+	return bodyLen > 0 && bodyLen <= v2DataMaxBody && maxFrameBytes >= overhead && bodyLen <= maxFrameBytes-overhead
 }
 
 func v2ControlPayload(frame []byte, kind byte, expectedSequence uint64, maxFrameBytes, minimumMetadataLen int) ([]byte, bool) {

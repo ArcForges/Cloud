@@ -15,6 +15,7 @@ import (
 	"sort"
 
 	"github.com/ArcForges/Contracts/go/arcforges/hello/v1/hellov1connect"
+	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
 
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 )
@@ -306,15 +307,15 @@ func Table(modules []Module) (WorkerTable, error) {
 			if !ok {
 				return WorkerTable{}, fmt.Errorf("%w: the production method %s has no transport budget", ErrRegistration, policy.FullName)
 			}
-			if err := checkBudget(policy.FullName, budget); err != nil {
+			if err := checkBudget(policy, budget); err != nil {
 				return WorkerTable{}, err
 			}
 			if policy.Surface != module.Surface {
 				return WorkerTable{}, fmt.Errorf("%w: the policy %s is not in its module's surface", ErrRegistration, policy.FullName)
 			}
-			if policy.CarriesRemoteTarget && (policy.Surface != SurfaceNodes || policy.Authentication != ingress.Session || policy.Kind != ingress.Unary ||
-				policy.Scope != ingress.NoScope || !policy.ReadsRequestMeta()) {
-				return WorkerTable{}, fmt.Errorf("%w: remote target headers require a typed nodes surface unary (%s)", ErrRegistration, policy.FullName)
+			if policy.CarriesRemoteTarget && (policy.Surface != SurfaceNodes || policy.Authentication != ingress.Session ||
+				policy.Scope != ingress.NoScope || !policy.ReadsRequestMeta() || !matchesManagementTransport(policy.FullName, policy.Kind)) {
+				return WorkerTable{}, fmt.Errorf("%w: remote target headers require a declared typed nodes route (%s)", ErrRegistration, policy.FullName)
 			}
 			row := Row{
 				Path: policy.FullName, Kind: kindName(policy.Kind), Auth: authName(policy.Authentication),
@@ -392,12 +393,16 @@ func Table(modules []Module) (WorkerTable, error) {
 	}, nil
 }
 
-func checkBudget(name string, budget Budget) error {
-	const maxBytes = 1_048_576
+func checkBudget(policy ingress.Policy, budget Budget) error {
+	maxBytes := RoutedReplyBytes
+	if policy.FullName == sandboxv2connect.DataServiceReadExportProcedure && policy.CarriesRemoteTarget &&
+		policy.Kind == ingress.Unary && policy.Authentication == ingress.Session {
+		maxBytes = ingress.DataTransferWireBytes
+	}
 	if budget.MaxFrameBytes < 1 || budget.MaxFrameBytes > maxBytes || budget.MaxUnaryResponseBytes < 1 ||
 		budget.MaxUnaryResponseBytes > maxBytes || budget.MaxDurationMilliseconds < 1 ||
 		budget.MaxDurationMilliseconds > StreamLifetimeMilliseconds || budget.Instance == "" {
-		return fmt.Errorf("%w: the transport budget of %s is out of range", ErrRegistration, name)
+		return fmt.Errorf("%w: the transport budget of %s is out of range", ErrRegistration, policy.FullName)
 	}
 	return nil
 }

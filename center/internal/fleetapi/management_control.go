@@ -58,7 +58,7 @@ type controlResponse interface {
 	GetError() *foundationv1.ArcError
 }
 
-// V2ControlMethods handles only the declared CENTER-03 unary cohort. A
+// V2ControlMethods handles the declared unary V2 operations. A
 // generated request and response type are fixed before any caller data arrives.
 func (s *Server) V2ControlMethods(transport V2ControlTransport, replayWindow time.Duration) []connect.Method {
 	if replayWindow <= 0 {
@@ -67,7 +67,7 @@ func (s *Server) V2ControlMethods(transport V2ControlTransport, replayWindow tim
 	r := &managementRouter{Server: s, transport: transport, receipts: management.New(s.db),
 		replayWindow: min(replayWindow, config.MaxRoutedReplayWindow)}
 	m := routes.ManagementMethods()
-	return []connect.Method{
+	methods := []connect.Method{
 		controlMethod(r, m[0], v2.ValidateNodeServiceGetOperationRequest, v2.ValidateNodeServiceGetOperationResponse),
 		controlMethod(r, m[1], v2.ValidateNodeServiceListRemoteGrantsRequest, v2.ValidateNodeServiceListRemoteGrantsResponse),
 		controlMethod(r, m[2], v2.ValidateNodeServiceRevokeRemoteGrantRequest, v2.ValidateNodeServiceRevokeRemoteGrantResponse),
@@ -82,6 +82,7 @@ func (s *Server) V2ControlMethods(transport V2ControlTransport, replayWindow tim
 		controlMethod(r, m[11], v2.ValidateResourceServiceGetBudgetRequest, v2.ValidateResourceServiceGetBudgetResponse),
 		controlMethod(r, m[12], v2.ValidateResourceServiceSetPolicyRequest, v2.ValidateResourceServiceSetPolicyResponse),
 	}
+	return append(methods, managementDataMethods(r)...)
 }
 
 var errControlResult = errors.New("the node's typed control result was not valid for the selected operation")
@@ -103,7 +104,11 @@ func controlMethod[Q, R any, Request interface {
 				failure = arc.InvalidArgument("request", "typed_message_invalid")
 			default:
 				value, failure = r.route(ctx, call, selected, request, func(body []byte) (controlResponse, error) {
-					return decodeControlResponse(body, Response(new(R)), request.GetMeta().GetCorrelationId(), validResponse)
+					reply, err := decodeControlResponse(body, Response(new(R)), request.GetMeta().GetCorrelationId(), validResponse)
+					if err == nil && !matchesDataControlResponse(request, reply) {
+						err = errControlResult
+					}
+					return reply, err
 				})
 			}
 			if failure == nil {
@@ -177,14 +182,10 @@ func validTerminalStopNoEffect[Response controlResponse](reply Response, valid f
 	return valid(copy)
 }
 
-func (r *managementRouter) route(ctx context.Context, call *ingress.Call, selected routes.ManagementMethod, request controlRequest,
-	decodeResponse func([]byte) (controlResponse, error)) (controlResponse, error) {
-	if err := checkMeta(request.GetMeta()); err != nil {
-		return nil, err
-	}
+func (r *managementRouter) controlTarget(ctx context.Context, call *ingress.Call) (management.Authority, *platform.ID, error) {
 	target := call.RemoteTarget
 	if target == nil {
-		return nil, arc.InvalidArgument("target", "required")
+		return management.Authority{}, nil, arc.InvalidArgument("target", "required")
 	}
 	node, enrollment, grant := platform.ID(target.Node), platform.ID(target.Enrollment), platform.ID(target.Grant)
 	var protocol *platform.ID
@@ -202,15 +203,27 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 		return owner.String(), err == nil, err
 	}}
 	if _, err := r.access.AuthorizeSubject(ctx, call, subject); err != nil {
-		return nil, err
+		return management.Authority{}, nil, err
 	}
 	account, err := accountOf(call)
 	if err != nil {
-		return nil, err
+		return management.Authority{}, nil, err
 	}
 	// The actor is the validated session identity's user, never a header.
-	scope := management.Authority{Account: account.Caller.UserID, Actor: account.Caller.UserID, Node: node,
-		Enrollment: enrollment, Grant: grant, GrantRevision: target.GrantRevision}
+	return management.Authority{Account: account.Caller.UserID, Actor: account.Caller.UserID, Node: node,
+		Enrollment: enrollment, Grant: grant, GrantRevision: target.GrantRevision}, protocol, nil
+}
+
+func (r *managementRouter) route(ctx context.Context, call *ingress.Call, selected routes.ManagementMethod, request controlRequest,
+	decodeResponse func([]byte) (controlResponse, error)) (controlResponse, error) {
+	if err := checkMeta(request.GetMeta()); err != nil {
+		return nil, err
+	}
+	scope, protocol, err := r.controlTarget(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	node, enrollment, grant := scope.Node, scope.Enrollment, scope.Grant
 	switch typed := request.(type) {
 	case *v2.SandboxServiceCreateRequest:
 		if provision, ok := parseID(typed.GetProvisionGrantId()); !ok || provision != grant || typed.GetTemplateRevision().GetValue() < 1 {
@@ -221,7 +234,7 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 			return nil, arc.PermissionDenied("sandbox_repair_local_only")
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, routes.RoutedDeadline)
+	ctx, cancel := context.WithTimeout(ctx, routes.ManagementDeadline(selected))
 	defer cancel()
 	if protocol == nil {
 		return nil, r.admissionUnavailable(ctx, scope, selected, request, controlUpgradeRequired())
@@ -240,7 +253,7 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 	deadline, _ := ctx.Deadline()
 	routed := management.V2ControlCall{Selector: management.V2ControlSelector(selected.Selector),
 		ActorID: scope.Actor, OriginalOwnerEpoch: channel.NodeOwnerEpoch, GrantID: grant,
-		GrantRevision: target.GrantRevision, Deadline: deadline}
+		GrantRevision: scope.GrantRevision, Deadline: deadline}
 	// The Center and Node use the same correlation. The intent digest below
 	// removes that transport identity before serializing the typed request.
 	correlation, ok := textID(call.Correlation.CorrelationID)
@@ -254,7 +267,15 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 	}
 	lease := controlLease(channel)
 	if selected.Mutation {
-		return r.mutation(ctx, selected, scope, channel, lease, request, routed, decodeResponse)
+		reply, err := r.mutation(ctx, selected, scope, channel, lease, request, routed, decodeResponse)
+		if err == nil && dataControlMutation(selected.ReceiptMethod()) {
+			if failure := r.recheckDataRecipient(ctx, call); failure != nil {
+				// Delivery has already been claimed. Suppress the reply without
+				// changing what the durable receipt says about the effect.
+				return nil, controlUnknown("result_recipient_authority_unavailable")
+			}
+		}
+		return reply, err
 	}
 	if query, ok := request.(*v2.NodeServiceGetOperationRequest); ok {
 		return r.reconcile(ctx, scope, channel, lease, query, routed, decodeResponse)
@@ -264,6 +285,12 @@ func (r *managementRouter) route(ctx context.Context, call *ingress.Call, select
 		return nil, r.transportFailure(err, node)
 	}
 	reply, err := decodeResponse(body)
+	if err == nil && (selected.Path == sandboxv2connect.DataServiceReadExportProcedure ||
+		selected.Path == sandboxv2connect.DataServiceInspectTransferProcedure) {
+		if failure := r.recheckDataRecipient(ctx, call); failure != nil {
+			return nil, failure
+		}
+	}
 	return reply, r.transportFailure(err, node)
 }
 
@@ -365,6 +392,9 @@ func (r *managementRouter) mutation(ctx context.Context, selected routes.Managem
 		return nil, arc.InvalidArgument("owner_epoch", "required")
 	}
 	if epoch != channel.NodeOwnerEpoch {
+		if dataControlMutation(selected.ReceiptMethod()) {
+			return nil, r.admissionUnavailable(ctx, scope, selected, request, controlRetiredEpoch())
+		}
 		return nil, controlRetiredEpoch()
 	}
 	digest, err := controlIntent(scope, selected, request)
@@ -506,7 +536,8 @@ func (r *managementRouter) reconcile(ctx context.Context, scope management.Autho
 		return nil, r.transportFailure(err, scope.Node)
 	}
 	if reply.GetError() != nil {
-		return reply, nil // No Node receipt was proved, including retired epoch.
+		// No Node receipt was proved, including for a retired owner epoch.
+		return r.discloseDataReadback(ctx, identity, reply)
 	}
 	typed := reply.(*v2.NodeServiceGetOperationResponse)
 	observation, err := operationControlObservation(identity, typed, typed.GetValue().GetOperation())
@@ -514,7 +545,10 @@ func (r *managementRouter) reconcile(ctx context.Context, scope management.Autho
 		return nil, r.transportFailure(errControlResult, scope.Node)
 	}
 	if receipt.FinalAt != nil && (observation.State == management.StateAccepted || observation.State == management.StateUnknown ||
-		receipt.Effect == nil || *receipt.Effect != observation.Effect) {
+		receipt.Effect == nil || *receipt.Effect != observation.Effect ||
+		dataControlMutation(identity.Method) && !sameVerifiedEffect(management.Observation{
+			State: receipt.State, Effect: *receipt.Effect, ResultID: receipt.ResultID,
+		}, observation)) {
 		return nil, controlReadbackUnavailable()
 	}
 	if receipt.FinalAt == nil && receipt.MayHaveDelivered && observation.State != management.StateAccepted && observation.State != management.StateUnknown {
@@ -526,7 +560,7 @@ func (r *managementRouter) reconcile(ctx context.Context, scope management.Autho
 			}
 		}
 	}
-	return reply, nil
+	return r.discloseDataReadback(ctx, identity, reply)
 }
 
 func (r *managementRouter) observeReplay(ctx context.Context, scope management.Authority, channel management.V2ControlAuthority,
@@ -711,7 +745,7 @@ func directControlObservation(identity management.Identity, reply controlRespons
 	case *v2.ResourceServiceSetPolicyResponse:
 		return operationControlObservation(identity, reply, typed.GetValue().GetOperation())
 	default:
-		return management.Observation{}, errControlResult
+		return dataControlObservation(identity, reply)
 	}
 }
 
@@ -730,6 +764,10 @@ func operationControlObservation(identity management.Identity, reply controlResp
 		operation.GetMethod() != identity.Method {
 		return management.Observation{}, errControlResult
 	}
+	aggregate, hasAggregate := parseID(operation.GetAggregateId())
+	if dataControlMutation(identity.Method) && !hasAggregate {
+		return management.Observation{}, errControlResult
+	}
 	switch operation.GetState() {
 	case v2.OperationState_OPERATION_STATE_ACCEPTED:
 		return management.Observation{State: management.StateAccepted}, nil
@@ -746,7 +784,7 @@ func operationControlObservation(identity management.Identity, reply controlResp
 		}
 		var kind string
 		var aggregateID *platform.ID
-		if aggregate, valid := parseID(operation.GetAggregateId()); valid {
+		if hasAggregate {
 			aggregateID = &aggregate
 			kind = controlAggregateKind(identity.Method)
 		}
@@ -765,6 +803,9 @@ func controlAggregateKind(method string) string {
 	case "ResourceService.SetPolicy":
 		return "policy"
 	default:
+		if dataControlMutation(method) {
+			return "transfer"
+		}
 		return "operation"
 	}
 }

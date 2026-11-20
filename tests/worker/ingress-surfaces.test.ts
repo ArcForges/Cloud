@@ -32,6 +32,8 @@ import {
   rateLimitedReplyInstantOffsets,
   surfaceNames,
   surfaceRoutes,
+  watchNotActivatedReply,
+  watchNotActivatedReplyCorrelationOffsets,
 } from "../../worker/tables/center-tables.generated.ts";
 
 const grpcWeb = "application/grpc-web+proto";
@@ -198,10 +200,13 @@ test("a disabled surface is answered with the generated not_activated reply and 
   for (const flag of [undefined, "", "Identity", "identity "]) {
     const { env, seen, keys } = bindings({ FLAGSHIP_SURFACES: flag });
     for (const route of surfaceRoutes) {
-      // Each route is answered with its own surface's reply (state.reason names the surface: identity, or fleet for AF-CTR-04's
-      // node enrollment rows).
-      const offset = notActivatedReplyCorrelationOffsets[route.surface];
-      const template = decode(notActivatedReplies[route.surface]);
+      const typedWatch = route.kind === "serverStream" && route.remoteTarget === true;
+      const offsets = typedWatch
+        ? watchNotActivatedReplyCorrelationOffsets
+        : [notActivatedReplyCorrelationOffsets[route.surface]];
+      const template = decode(
+        typedWatch ? watchNotActivatedReply : notActivatedReplies[route.surface],
+      );
       const response = await routeRequest(
         call(route.path, { authorization: "Bearer afa1.not-checked-at-all" }),
         env,
@@ -209,19 +214,20 @@ test("a disabled surface is answered with the generated not_activated reply and 
       assert.equal(response.status, 200);
       assert.equal(response.headers.get("content-type"), grpcWeb);
       const body = new Uint8Array(await response.arrayBuffer());
-      // The template, byte for byte, except the 16 bytes of the correlation slot (E4-1).
+      // The template, byte for byte, with the same correlation ID in every slot (E4-1).
       assert.equal(body.length, template.length);
-      assert.deepEqual(body.subarray(0, offset), template.subarray(0, offset));
-      assert.deepEqual(
-        body.subarray(offset + replyCorrelationBytes),
-        template.subarray(offset + replyCorrelationBytes),
-      );
-      const id = slotId(body, offset);
+      const firstOffset = offsets[0];
+      assert(firstOffset !== undefined, "the refusal template must identify its correlation slot");
+      const id = slotId(body, firstOffset);
       assert(isCorrelationId(id), `the slot holds a canonical, non-nil correlation id: ${id}`);
-      assert.notDeepEqual(
-        body.subarray(offset, offset + replyCorrelationBytes),
-        template.subarray(offset, offset + replyCorrelationBytes),
-      );
+      let matched = 0;
+      for (const offset of offsets) {
+        assert.deepEqual(body.subarray(matched, offset), template.subarray(matched, offset));
+        assert.equal(slotId(body, offset), id);
+        matched = offset + replyCorrelationBytes;
+        assert.notDeepEqual(body.subarray(offset, matched), template.subarray(offset, matched));
+      }
+      assert.deepEqual(body.subarray(matched), template.subarray(matched));
       assert(!seenIds.has(id), "each call has its own correlation id");
       seenIds.add(id);
     }

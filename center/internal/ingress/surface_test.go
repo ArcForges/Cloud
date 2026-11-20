@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
+	sandboxv2 "github.com/ArcForges/Contracts/go/arcforges/sandbox/v2"
+	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
@@ -71,6 +73,47 @@ func TestADisabledSurfaceIsNotActivatedBeforeAnyCredential(t *testing.T) {
 		if len(r.outcomes) != 1 || r.outcomes[0].Domain != "not_activated" || r.outcomes[0].Correlation != "4bf92f35-77b3-4da6-a3ce-929d0e0e4736" {
 			t.Fatalf("outcome %+v", r.outcomes)
 		}
+	}
+}
+
+func TestDisabledTypedWatchesReturnTheirTerminalErrorFrame(t *testing.T) {
+	for path, frame := range map[string]interface {
+		proto.Message
+		GetMeta() *foundationv1.ResponseMeta
+		GetError() *foundationv1.ArcError
+	}{
+		sandboxv2connect.RunServiceWatchOutputProcedure:     &sandboxv2.RunServiceWatchOutputFrame{},
+		sandboxv2connect.NodeServiceWatchEventsProcedure:    &sandboxv2.NodeServiceWatchEventsFrame{},
+		sandboxv2connect.ResourceServiceWatchUsageProcedure: &sandboxv2.ResourceServiceWatchUsageFrame{},
+	} {
+		t.Run(path, func(t *testing.T) {
+			policy := must(t)(NewServerStream(path, Session, NoScope, DefaultMaxRequestBytes, true)).InSurface("nodes")
+			policy.CarriesRemoteTarget = true
+			registry, err := NewRegistry(policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := NewPipeline(Options{Routes: NewRoutes(registry, nil, nil)}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("a disabled watch reached its handler")
+			}))
+			request := httptest.NewRequest(http.MethodPost, path, nil)
+			request.Header.Set("Content-Type", "application/grpc-web+proto")
+			request.Header.Set("Traceparent", workerTrace)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			message, trailers := bytes.CutSuffix(response.Body.Bytes(), TrailerFrame(StatusOK, "", false))
+			payload, framed := ReadSingleMessage(message)
+			if response.Code != http.StatusOK || !trailers || !framed {
+				t.Fatal("the watch refusal was not a typed frame with an OK trailer")
+			}
+			if err := proto.Unmarshal(payload, frame); err != nil {
+				t.Fatal(err)
+			}
+			if frame.GetError().GetCode() != "not_activated" || !proto.Equal(frame.GetError().GetCorrelationId(), frame.GetMeta().GetCorrelationId()) ||
+				correlation.FormatID(frame.GetMeta().GetCorrelationId().GetValue()) != "4bf92f35-77b3-4da6-a3ce-929d0e0e4736" {
+				t.Fatal("the decoded watch frame lost the exact domain error and shared caller correlation")
+			}
+		})
 	}
 }
 

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
-	"connectrpc.com/connect/v2/connecthttp"
 	"github.com/ArcForges/Contracts/go/arcforges/hello/v1/hellov1connect"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -265,11 +264,7 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 			mux.Handle(row.Path, channelHandler)
 		}
 	}
-	// The read bound is the largest request bound of the registered methods without the five-byte frame header (the pipeline
-	// applies each method's own bound before any handler reads); the send bound is the largest reply budget without the header, so
-	// every reply a method's budget admits is sent (F8).
-	connecthttp.Mount(mux, dispatcher, connecthttp.WithReadMaxBytes(routes.MaxRequestBytes(modules)-ingress.HeaderLength),
-		connecthttp.WithSendMaxBytes(routes.MaxResponseBytes(modules)-ingress.HeaderLength))
+	mountPublicRPCs(mux, dispatcher, modules)
 	mux.HandleFunc(routes.HealthPath, center.serveHealth)
 	pipeline := ingress.NewPipeline(pipelineOptions, mux)
 	center.public = center.track(pipeline)
@@ -346,11 +341,13 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 			// FleetService's node registry (AF-CTR-05 E2a): RevokeNode revokes the node's device with the identity service's cascade.
 			// The routed task methods (E2b) route through the hub (hubRouter), with the routed mutations' replay window and the
 			// center's long-poll bound (PN-1).
+			longPolls := config.RoutedLongPolls(c.Config.MaxConnections)
 			registry := fleetServer.Registry(c.Hub, service.RevokeDevice).WithRouter(hubRouter{hub: c.Hub}, fleetapi.RoutedLimits{
-				ReplayWindow: c.Config.Identity.Policy.RoutedReplayWindow, LongPolls: config.RoutedLongPolls(c.Config.MaxConnections), Events: c.Metrics})
+				ReplayWindow: c.Config.Identity.Policy.RoutedReplayWindow, LongPolls: longPolls, Events: c.Metrics})
 			dispatcher.Register(registry.Methods()...)
 			dispatcher.Register(fleetServer.DeviceMethods(c.Hub, service.RevokeDevice)...)
 			dispatcher.Register(fleetServer.V2ControlMethods(c.Hub, c.Config.Identity.Policy.RoutedReplayWindow)...)
+			dispatcher.Register(fleetServer.V2WatchMethods(c.Hub, longPolls)...)
 		}
 	}
 	var mobile *mobileauth.Service
@@ -491,21 +488,29 @@ func checkIdentityComposition(modules []routes.Module) error {
 	if err := access.Check(append(slices.Clone(policies), upgrades...)); err != nil {
 		return err
 	}
-	served := map[string]bool{}
+	served := map[string]connect.StreamType{}
 	for _, method := range identityapi.New(nil, nil, nil, nil, nil).Methods() {
-		served[method.Spec.Procedure] = true
+		served[method.Spec.Procedure] = method.Spec.StreamType
 	}
 	fleetServer := fleetapi.New(nil, nil, nil, nil, nil)
 	for _, method := range slices.Concat(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods(),
-		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0)) {
-		served[method.Spec.Procedure] = true
+		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0), fleetServer.V2WatchMethods(nil, 1)) {
+		served[method.Spec.Procedure] = method.Spec.StreamType
 	}
 	if len(served) != len(policies) {
 		return errors.New("the identity surface serves other methods than it registers")
 	}
 	for _, policy := range policies {
-		if !served[policy.FullName] {
+		actual, found := served[policy.FullName]
+		if !found {
 			return errors.New("the identity surface registers a method it does not serve")
+		}
+		expected := connect.StreamTypeUnary
+		if policy.Kind == ingress.ServerStream {
+			expected = connect.StreamTypeServer
+		}
+		if actual != expected {
+			return errors.New("the identity surface serves a different stream shape than its policy")
 		}
 	}
 	return nil

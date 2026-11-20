@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
 )
 
 // Kind is the shape of a method.
@@ -47,8 +49,12 @@ const (
 	Workspace
 )
 
-// AbsoluteMaxRequestBytes bounds every declared request bound.
+// AbsoluteMaxRequestBytes bounds ordinary RPC requests.
 const AbsoluteMaxRequestBytes = 262_144
+
+// DataTransferWireBytes is the framed public limit for WriteImport requests
+// and ReadExport replies. A complete 1 MiB chunk fits with its envelope.
+const DataTransferWireBytes = 2_097_152
 
 // DefaultMaxRequestBytes is the request bound of a method that declares no other.
 const DefaultMaxRequestBytes = 4096
@@ -66,7 +72,7 @@ type Policy struct {
 	// body is not interpreted.
 	CarriesRequestMeta bool
 	// CarriesRemoteTarget requires the bounded target headers of a typed
-	// management unary. Only the declared routes may forward these headers.
+	// management operation. Only the declared routes may forward these headers.
 	CarriesRemoteTarget bool
 	// Surface names the switchable surface the method belongs to (AF-CTR-03; empty for the always-on Hello). A method of a disabled
 	// surface is answered with the domain refusal STATE/not_activated before any credential is read.
@@ -115,10 +121,15 @@ func NewServerStream(fullName string, authentication Authentication, scope Scope
 }
 
 func newPolicy(fullName string, kind Kind, authentication Authentication, scope Scope, maxRequestBytes int, carriesRequestMeta bool) (Policy, error) {
+	ceiling := AbsoluteMaxRequestBytes
+	if fullName == sandboxv2connect.DataServiceWriteImportProcedure && kind == Unary &&
+		authentication == Session && scope == NoScope && carriesRequestMeta {
+		ceiling = DataTransferWireBytes
+	}
 	switch {
 	case !IsValidName(fullName):
 		return Policy{}, fmt.Errorf("%w: the name is not /package.Service/Method", ErrInvalidPolicy)
-	case maxRequestBytes < 1 || maxRequestBytes > AbsoluteMaxRequestBytes:
+	case maxRequestBytes < 1 || maxRequestBytes > ceiling:
 		return Policy{}, fmt.Errorf("%w: the request bound of %s is out of range", ErrInvalidPolicy, fullName)
 	case authentication != Anonymous && authentication != Session:
 		return Policy{}, fmt.Errorf("%w: unknown authentication for %s", ErrInvalidPolicy, fullName)

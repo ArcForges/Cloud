@@ -74,6 +74,14 @@ func TestV2ControlChannelBindsClaimAndSignedResult(t *testing.T) {
 	call := management.V2ControlCall{Selector: 9, ActorID: node.user, OriginalOwnerEpoch: ownerEpoch,
 		CommandID: platform.NewID(), GrantID: platform.NewID(), GrantRevision: 17,
 		Deadline: time.Now().Add(8 * time.Second), Body: []byte{0x0a, 0x02, 0x0a, 0x00}}
+	withoutStreamData := call
+	withoutStreamData.Selector = 18
+	if _, err = h.center.Hub.CallV2(ctx, authority, withoutStreamData, func(context.Context, management.V2ControlAuthority) (bool, error) {
+		t.Error("a peer without the signed Data capability entered the delivery claim")
+		return false, nil
+	}); !errors.Is(err, management.ErrV2ControlUpgradeRequired) {
+		t.Fatalf("unnegotiated WriteImport: %v", err)
+	}
 	if _, err = h.center.Hub.CallV2(ctx, authority, call, nil); !errors.Is(err, management.ErrV2ControlUnavailable) {
 		t.Fatalf("mutation without a claim callback: %v", err)
 	}

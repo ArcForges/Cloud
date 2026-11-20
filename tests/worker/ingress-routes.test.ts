@@ -29,6 +29,12 @@ import {
 const root = path.resolve(import.meta.dirname, "../..");
 const namePattern =
   /^\/[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.[A-Z][A-Za-z0-9]*\/[A-Z][A-Za-z0-9]*$/u;
+const watchPaths = [
+  "/arcforges.sandbox.v2.RunService/WatchOutput",
+  "/arcforges.sandbox.v2.NodeService/WatchEvents",
+  "/arcforges.sandbox.v2.ResourceService/WatchUsage",
+];
+const dataService = "/arcforges.sandbox.v2.DataService/";
 
 test("production serves exactly the anonymous Hello method and the health route", () => {
   assert.deepEqual(
@@ -46,11 +52,14 @@ test("production serves exactly the anonymous Hello method and the health route"
 });
 
 test("every route is a well-formed method path with sane bounds, and none is an internal path", () => {
-  for (const route of [...productionRoutes, ...proofRoutes]) {
+  for (const route of [...productionRoutes, ...proofRoutes, ...surfaceRoutes]) {
     assert.match(route.path, namePattern);
     assert.doesNotMatch(route.path, /internal/iu);
-    assert.ok(route.maxRequestBytes >= 1 && route.maxRequestBytes <= 262_144, route.path);
-    assert.ok(route.maxFrameBytes >= 1 && route.maxFrameBytes <= 1_048_576, route.path);
+    const requestLimit = route.path === `${dataService}WriteImport` ? 2_097_152 : 262_144;
+    const replyLimit = route.path === `${dataService}ReadExport` ? 2_097_152 : 1_048_576;
+    assert.ok(route.maxRequestBytes >= 1 && route.maxRequestBytes <= requestLimit, route.path);
+    assert.ok(route.maxFrameBytes >= 1 && route.maxFrameBytes <= replyLimit, route.path);
+    assert.ok(route.maxUnaryResponseBytes <= replyLimit, route.path);
     assert.ok(route.maxDurationMs >= 1 && route.maxDurationMs <= streamLifetimeMs, route.path);
     if (route.auth === "anonymous") assert.equal(route.kind, "unary", "no anonymous stream");
   }
@@ -91,11 +100,37 @@ test("the edge credential check needs a whole Origin match and never reads a coo
 
 test("only fixed typed management routes forward normalized target selection headers", async () => {
   const selected = surfaceRoutes.filter((route) => route.remoteTarget);
-  assert.equal(selected.length, 13);
+  assert.equal(selected.length, 23);
   assert.ok(
     selected.every(
-      (route) => route.surface === "nodes" && route.auth === "session" && route.kind === "unary",
+      (route) =>
+        route.surface === "nodes" &&
+        route.auth === "session" &&
+        route.kind === (watchPaths.includes(route.path) ? "serverStream" : "unary"),
     ),
+  );
+  assert.deepEqual(
+    selected.filter((route) => route.kind === "serverStream").map((r) => r.path),
+    watchPaths,
+  );
+  assert.deepEqual(
+    selected
+      .filter((route) => route.path.startsWith(dataService))
+      .map((route) => [
+        route.path.slice(dataService.length),
+        route.maxRequestBytes,
+        route.maxUnaryResponseBytes,
+        route.maxDurationMs,
+      ]),
+    [
+      ["BeginImport", 253_952, 1_048_576, 30_000],
+      ["WriteImport", 2_097_152, 1_048_576, 30_000],
+      ["CommitImport", 253_952, 1_048_576, 30_000],
+      ["BeginExport", 253_952, 1_048_576, 30_000],
+      ["ReadExport", 253_952, 2_097_152, 30_000],
+      ["InspectTransfer", 253_952, 1_048_576, 10_000],
+      ["CloseTransfer", 253_952, 1_048_576, 30_000],
+    ],
   );
   const forwarded: Request[] = [];
   const env: IngressEnv = {
@@ -166,6 +201,56 @@ test("only fixed typed management routes forward normalized target selection hea
       null,
       "an unrelated route never forwards target selection",
     );
+
+  for (const path of watchPaths) await handleApiRequest(request(path), env);
+  assert.deepEqual(
+    forwarded.slice(2).map((call) => new URL(call.url).pathname),
+    watchPaths,
+  );
+  assert.ok(
+    forwarded.slice(2).every((call) => call.headers.get(remoteGrantHeader) === grant.toLowerCase()),
+  );
+});
+
+test("dark and edge-limited watches receive typed terminal errors without waking the Center", async () => {
+  const env: IngressEnv = {
+    SOURCE_REVISION: "worker-watch-fixture",
+    HELLO_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    IDENTITY_RATE_LIMITER: { limit: async () => ({ success: false }) },
+    CLOUD_CONTAINER: {
+      getByName: () => {
+        assert.fail("a refused watch must not wake the Center");
+      },
+    },
+  };
+  for (const path of watchPaths) {
+    for (const [surfaces, code] of [
+      ["", "not_activated"],
+      ["nodes", "rate_limited"],
+    ] as const) {
+      const request = new Request(`https://example.test/api${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/grpc-web+proto" },
+      });
+      const response = await handleApiRequest(request, { ...env, FLAGSHIP_SURFACES: surfaces });
+      const body = Buffer.from(await response.arrayBuffer());
+      assert.equal(body[0], 0);
+      const framedBytes = 5 + body.readUInt32BE(1);
+      const payload = body.subarray(5, framedBytes);
+      assert.equal(payload[0], 0x0a, "WatchFrame.ResponseMeta field 1");
+      const metaBytes = payload.readUInt8(1);
+      assert.equal(payload[metaBytes + 2], 0xa2, "WatchFrame error field 20");
+      assert.equal(payload[metaBytes + 3], 0x01);
+      assert.ok(payload.includes(code));
+      const correlation = payload.subarray(metaBytes - 14, metaBytes + 2);
+      assert.ok(correlation.some((byte) => byte !== 0));
+      assert.ok(
+        payload.subarray(metaBytes + 2).includes(correlation),
+        "both layers carry the same ID",
+      );
+      assert.equal(body[framedBytes], 0x80);
+    }
+  }
 });
 
 // The agreement of this table with the C# host's registrations is no longer a regex over C# sources: the table is generated

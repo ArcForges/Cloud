@@ -14,8 +14,8 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/platform"
 )
 
-// The private V2 channel carries only proved enrollment and connection lifecycle frames.
-// Each message has version, kind and a direction-local uint64 sequence before the payload.
+// Each private V2 channel message has version, kind and a direction-local
+// uint64 sequence before its enrollment, lifecycle or typed control payload.
 const (
 	v2Challenge byte = iota + 1
 	v2Hello
@@ -75,8 +75,13 @@ func (v *v2Codec) Decode(data []byte) (inbound, error) {
 			return inbound{}, errFrame
 		}
 		return inbound{kind: inboundClose, closeCode: binary.BigEndian.Uint32(body[:4])}, nil
-	case v2ControlResultKind:
-		result, err := decodeV2ControlResult(data, v.inboundSeq, v.maxFrameBytes)
+	case v2ControlResultKind, v2DataResultKind:
+		kind, limit := data[1], v.maxFrameBytes
+		if kind == v2DataResultKind {
+			// The live reader already enforced the exact pending selector's bound.
+			limit = v2DataMaxFrame
+		}
+		result, err := decodeV2ControlResult(data, kind, v.inboundSeq, limit)
 		if err != nil {
 			return inbound{}, err
 		}
