@@ -226,15 +226,31 @@ test("a local deploy without a candidate manifest may build the migrator from th
   });
 });
 
-test("a CI source check without a candidate manifest reads the tree, as the source job's check:physical does", () => {
+test("the CI source check reads the tree even when the Go candidate cache contains an older tool", () => {
   withoutCandidate((root) => {
-    const invocation = prepareInvocation(
-      ["check", "--base", "origin/main"],
-      { GITHUB_ACTIONS: "true" },
-      root,
+    const env = { GITHUB_ACTIONS: "true" };
+    const checkSource = () => {
+      const invocation = prepareInvocation(["check", "--base", "origin/main"], env, root);
+      assert.equal(invocation.command, "dotnet");
+      assert.deepEqual(invocation.args.slice(-4), ["migrate", "check", "--base", "origin/main"]);
+    };
+    checkSource();
+
+    const candidate = path.join(root, "artifacts", "candidate");
+    mkdirSync(candidate, { recursive: true });
+    const obsolete = "cached historical tool fixture";
+    writeFileSync(path.join(candidate, sealedToolName), obsolete);
+    writeFileSync(
+      path.join(candidate, "manifest.json"),
+      JSON.stringify({ schema: 2, runtime: "go", files: {} }),
     );
-    assert.equal(invocation.command, "dotnet");
-    assert.deepEqual(invocation.args.slice(-4), ["migrate", "check", "--base", "origin/main"]);
+    checkSource();
+    assert.throws(
+      () => prepareInvocation(["deploy", "--target", "proof"], env, root),
+      /historical schema-1 candidate/u,
+    );
+    assert.deepEqual(extractedDirectories(root), []);
+    assert.equal(readFileSync(path.join(candidate, sealedToolName), "utf8"), obsolete);
   });
 });
 

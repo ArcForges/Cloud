@@ -47,17 +47,17 @@ export function sealedInvocation(
 export const sourceCheckCommand = "check";
 
 /**
- * The migrator to run: the sealed archive when a candidate is present (checked and extracted), else the tool project. Under GitHub Actions
- * the migrator never falls back to a build from source (AGENTS.md; CLOUD.84 S41(1), S45(3)): without the candidate manifest every command
- * refuses, except the read-only source check. Only a local run may build the migrator from the tree.
+ * The read-only check validates the current source tree. Other commands use the checked sealed archive when a candidate is present.
+ * Without a candidate, these other commands may build from source only in local development (CLOUD.84 S41(1), S45(3)).
  */
 export function prepareInvocation(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
   root: string,
 ): Invocation {
+  if (argv[0] === sourceCheckCommand) return developmentInvocation(argv, env);
   if (!existsSync(candidateManifestPath(root))) {
-    if (env.GITHUB_ACTIONS === "true" && argv[0] !== sourceCheckCommand)
+    if (env.GITHUB_ACTIONS === "true")
       throw new Error(
         "the candidate manifest is absent in GitHub Actions; nothing is built or run",
       );
