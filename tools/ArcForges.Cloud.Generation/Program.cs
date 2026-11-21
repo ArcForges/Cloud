@@ -5,7 +5,6 @@
 // `probe <baseUrl> <true|false>` prints one JSON line on success (the Worker boundary is true only for the Worker's /api base).
 using System.Collections;
 using System.Text;
-using System.Text.Json;
 using ArcForges.Cloud.Tools.Generation.Migrations;
 
 namespace ArcForges.Cloud.Tools.Generation;
@@ -30,10 +29,7 @@ public static class Program
         {
             try
             {
-                using var identity = JsonDocument.Parse(ContractsIdentity.Read(typeof(ArcForges.Cloud.HelloEndpoint).Assembly));
-                var publishedClient = identity.RootElement.GetProperty("version").GetString()
-                    ?? throw new InvalidOperationException("The restored Contracts source identity has no version.");
-                Console.WriteLine(HelloProbe.RunAsync(args[1], worker, publishedClient, CancellationToken.None).GetAwaiter().GetResult());
+                Console.WriteLine(HelloProbe.RunAsync(args[1], worker, CancellationToken.None).GetAwaiter().GetResult());
                 return 0;
             }
             catch (Exception error)
