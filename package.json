@@ -44,7 +44,6 @@
     "check:plans": "npm run check:legacy-cloud-history",
     "check:physical": "node eng/verification/physical-schema.ts --check && python eng/verification/check_legacy_cloud_history.py --migrations-only",
     "test:harness:ai": "node eng/verification/harness-proof.ts ai-binding",
-    "test:harness:executor": "node eng/verification/harness-proof.ts executor-crash",
     "test:harness:capacity": "node eng/verification/harness-proof.ts container-capacity",
     "test:d1:local": "node eng/verification/d1-physical-local.ts",
     "test:d1:receipts:local": "node eng/verification/d1-receipts-local.ts",

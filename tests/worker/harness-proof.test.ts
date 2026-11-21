@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Offline tests of the pure helpers of the HAR.40 local proof drivers. The drivers themselves (the fixture AI proof, the dotnet crash run and
-// the live capacity probe) are local opt-in and never run in CI; these tests pin the rules that decide whether a proof may claim a pass:
-// the CI refusal, observations never counting as passes, the probe URL bounds and the parsing of the test summary.
+// Offline tests for the HAR.40 AI binding and capacity drivers. They pin the accepted proof names, CI refusal, evidence
+// status and probe URL bounds.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   assertLocalOptIn,
@@ -17,7 +17,6 @@ import {
   launchTarget,
   validProbeUrl,
 } from "../../eng/verification/harness-proof-capacity.ts";
-import { executorChecks, parseSummary } from "../../eng/verification/harness-proof-executor.ts";
 
 test("the proof drivers refuse to run under CI and run locally", () => {
   assert.throws(() => assertLocalOptIn({ CI: "true" }), /never run under CI/u);
@@ -96,26 +95,15 @@ test("the live probe accepts only an https origin with no query, fragment or use
   assert.throws(() => validProbeUrl("https://user:secret@proof.arcforges.com"), /no query/u);
 });
 
-test("the dotnet summary is parsed and any failure, empty run or non-zero exit fails the proof", () => {
-  const output = [
-    "Test run summary: Passed!",
-    "  total: 58",
-    "  failed: 0",
-    "  succeeded: 58",
-    "  skipped: 0",
-  ].join("\n");
-  assert.deepEqual(parseSummary(output), { total: 58, failed: 0, succeeded: 58 });
-  assert.equal(parseSummary("no summary here"), null);
-  assert.equal(summarise(executorChecks({ exitCode: 0, output })), "passed");
-  assert.equal(
-    summarise(executorChecks({ exitCode: 2, output: output.replace("failed: 0", "failed: 1") })),
-    "failed",
-  );
-  assert.equal(summarise(executorChecks({ exitCode: 0, output: "" })), "failed");
-  assert.equal(
-    summarise(executorChecks({ exitCode: 0, output: "  total: 0\n  failed: 0\n  succeeded: 0" })),
-    "failed",
-  );
+test("npm exposes the current local AI binding and capacity proofs", () => {
+  const { scripts } = JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+  ) as { scripts: Record<string, string> };
+  const proofs = Object.entries(scripts).filter(([name]) => name.startsWith("test:harness:"));
+  assert.deepEqual(Object.fromEntries(proofs), {
+    "test:harness:ai": "node eng/verification/harness-proof.ts ai-binding",
+    "test:harness:capacity": "node eng/verification/harness-proof.ts container-capacity",
+  });
 });
 
 test("percentiles use the nearest rank of a sorted sample", () => {
