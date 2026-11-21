@@ -4,8 +4,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { pathToFileURL } from "node:url";
 import {
+  type bridgeIdentity,
   bridgeSource,
   collectBridgeFacts,
   securityBridgeDockerfile,
@@ -115,7 +115,7 @@ test("the actual Git source object has the pinned tree and archive", () => {
   assert.equal(facts.sourceIsAncestor, true);
 });
 
-test("identity uses the old source axes and actual run inputs without changing GITHUB_SHA", async (t) => {
+test("identity uses the old source axes and actual run inputs without changing GITHUB_SHA", (t) => {
   const scratch = scratchDirectory("ctr06-source-identity-", t);
   const tar = path.join(scratch, "source.tar");
   writeFileSync(
@@ -156,11 +156,26 @@ test("identity uses the old source axes and actual run inputs without changing G
     ),
   );
   execFileSync("tar", ["-xf", producerTar, "-C", historicalProducer]);
-  const module: typeof import("../../tooling/ctr06-security-bridge-source.ts") = await import(
-    pathToFileURL(path.join(historicalProducer, historicalModule)).href
-  );
   const producer = validateBridgeProducer(fixtureEnv, fixtureEvent, fixtureFacts);
-  const identity = module.bridgeIdentity(scratch, producer);
+  const runner = path.join(historicalProducer, "probe.mjs");
+  writeFileSync(
+    runner,
+    `import { bridgeIdentity } from "./tooling/ctr06-security-bridge-source.ts";
+const [source, producer] = process.argv.slice(2);
+process.stdout.write(JSON.stringify(bridgeIdentity(source, JSON.parse(producer))));
+`,
+  );
+  const readIdentity = () =>
+    JSON.parse(
+      execFileSync(process.execPath, [runner, scratch, JSON.stringify(producer)], {
+        cwd: historicalProducer,
+        env: childEnvironment(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 10_000,
+      }),
+    ) as ReturnType<typeof bridgeIdentity>;
+  const identity = readIdentity();
   assert.deepEqual(identity.artifact, { id: "Cloud", version: "0.1.0-ci.42.2" });
   assert.equal(identity.build.sourceCommit, bridgeSource.commit);
   assert.equal(identity.build.buildId, "123456.2");
@@ -182,7 +197,7 @@ test("identity uses the old source axes and actual run inputs without changing G
     properties,
     readFileSync(properties, "utf8").replace("1.0.0-ci.287.1", "1.0.0-ci.450.1"),
   );
-  assert.throws(() => module.bridgeIdentity(scratch, producer));
+  assert.throws(readIdentity);
 });
 
 test("bridge children retain Windows cache location but not owner credentials or legacy compiler selectors", () => {
