@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import {
   type CenterRunner,
   centerEntrypoint,
@@ -640,7 +641,7 @@ mock.module(project, { namedExports: { verifyCandidate: async () => {
       [
         "--experimental-test-module-mocks",
         "--import",
-        preload,
+        pathToFileURL(preload).href,
         path.join(repository, "tooling/postgres-deploy.ts"),
         "migrate",
         "--target",
@@ -655,6 +656,111 @@ mock.module(project, { namedExports: { verifyCandidate: async () => {
     assert.equal(existsSync(path.join(directory, "candidate-touched")), false);
     assert.equal(existsSync(path.join(directory, "child-touched")), false);
     assert.equal(existsSync(path.join(directory, "artifacts")), false);
+  }
+});
+
+test("the production deploy CLI requires its own D1 absence receipt before promotion", async (t) => {
+  const directory = scratchDirectory("production-migration-gate-", t);
+  const repository = path.resolve(import.meta.dirname, "../..");
+  const artifacts = path.join(directory, "artifacts");
+  const migrations = path.join(directory, "center/internal/schema/migrations");
+  const revision = "a".repeat(40);
+  mkdirSync(path.join(artifacts, "candidate"), { recursive: true });
+  mkdirSync(migrations, { recursive: true });
+  await writeFile(path.join(migrations, "0001_fixture.sql"), "-- inventory fixture");
+  await writeFile(
+    path.join(artifacts, "candidate/wrangler.json"),
+    JSON.stringify({
+      workers_dev: false,
+      preview_urls: false,
+      vars: { ARCFORGES_HELLO_RUNTIME: "go", ARCFORGES_CENTER_MODE: "official-hosted" },
+    }),
+  );
+  const preload = path.join(directory, "preload.mjs");
+  await writeFile(
+    preload,
+    `
+import assert from "node:assert/strict";
+import path from "node:path";
+import { mock } from "node:test";
+import { pathToFileURL } from "node:url";
+const directory = process.env.FIXTURE_DIRECTORY;
+const revision = process.env.FIXTURE_REVISION;
+const url = (file) => pathToFileURL(path.join(process.env.FIXTURE_REPOSITORY, file)).href;
+const unexpected = () => { throw new Error("unexpected external effect"); };
+globalThis.fetch = unexpected;
+const child = await import("node:child_process");
+mock.module("node:child_process", { namedExports: { ...child,
+  exec: unexpected, execFile: unexpected, execFileSync: unexpected,
+  execSync: unexpected, fork: unexpected, spawn: unexpected, spawnSync: unexpected,
+} });
+const processURL = url("tooling/process.ts");
+const io = await import(processURL);
+mock.module(processURL, { namedExports: { ...io, root: directory,
+  candidateDir: path.join(directory, "artifacts/candidate"),
+  run: async (command, args, capture) => {
+    assert.deepEqual([command, args, capture],
+      ["gh", ["api", "repos/ArcForges/Cloud/git/ref/heads/main", "--jq", ".object.sha"], true],
+      "unexpected external effect");
+    return revision;
+  },
+} });
+// Inject the release authority and sealed candidate only in this offline child.
+mock.module(url("tooling/ctr06-security-bridge-gate.ts"), { namedExports: {
+  requireSecurityBridgeSuccessor() {},
+} });
+const projectURL = url("tooling/project.ts");
+const project = await import(projectURL);
+mock.module(projectURL, { namedExports: { ...project, verifyCandidate: async () => ({
+  revision, dirty: false, image: "fixture:sealed", imageId: "fixture-image",
+}) } });
+`,
+  );
+  const valid = { target: "production", revision, status: "not-applicable" };
+  const receipt = path.join(artifacts, "migration-gate-production.json");
+  const cases: [object | undefined, RegExp][] = [
+    [undefined, /the migration step did not run; nothing is promoted/u],
+    [{ ...valid, target: "proof" }, /the gate record is for another target/u],
+    [{ ...valid, revision: "b".repeat(40) }, /the gate record is for another revision/u],
+    [{ ...valid, status: "passed" }, /the current candidate has no D1 absence receipt/u],
+    [valid, /the PostgreSQL migration step did not run; nothing is promoted/u],
+  ];
+  for (const [record, refusal] of cases) {
+    if (record) await writeFile(receipt, JSON.stringify(record));
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--experimental-test-module-mocks",
+        "--import",
+        pathToFileURL(preload).href,
+        path.join(repository, "tooling/cloudflare.ts"),
+        "deploy",
+      ],
+      {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 15000,
+        windowsHide: true,
+        env: {
+          SystemRoot: process.env.SystemRoot,
+          WINDIR: process.env.WINDIR,
+          FIXTURE_DIRECTORY: directory,
+          FIXTURE_REPOSITORY: repository,
+          FIXTURE_REVISION: revision,
+          GITHUB_REPOSITORY: "ArcForges/Cloud",
+          GITHUB_REF: "refs/heads/main",
+          GITHUB_EVENT_NAME: "push",
+          CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
+          CLOUDFLARE_API_TOKEN: "synthetic-fixture-token",
+        },
+      },
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, refusal);
+    assert.doesNotMatch(result.stderr, /unexpected external effect|synthetic-fixture-token/u);
+    assert.equal(existsSync(path.join(artifacts, "deploy.wrangler.json")), false);
+    assert.equal(existsSync(path.join(artifacts, "deployment.json")), false);
   }
 });
 
@@ -803,7 +909,7 @@ console.error("unexpected synthetic docker call"); process.exit(42);
       [
         "--experimental-test-module-mocks",
         "--import",
-        preload,
+        pathToFileURL(preload).href,
         path.join(historical, "tooling", "postgres-deploy.ts"),
         "migrate",
         "--target",

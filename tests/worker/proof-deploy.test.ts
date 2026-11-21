@@ -39,6 +39,67 @@ const wrangler = JSON.parse(
 const digest = `registry.example/arcforges-cloud@sha256:${"a".repeat(64)}`;
 const account = "0".repeat(32);
 
+test("both Cloud promotions require the sealed candidate's migration gates", () => {
+  const source = readFileSync(
+    path.resolve(import.meta.dirname, "../../.github/workflows/ci.yml"),
+    "utf8",
+  ).replaceAll("\r\n", "\n");
+  const [header, jobs] = source.split("\njobs:\n");
+  assert.ok(header && jobs);
+  assert.match(header, /^permissions:\n {2}contents: read\n\n/mu);
+  const rows = new Map(
+    [
+      ...jobs.matchAll(
+        /^ {2}([a-z][a-z0-9-]*):\n([\s\S]*?)(?=^ {2}[a-z][a-z0-9-]*:\n|(?![\s\S]))/gmu,
+      ),
+    ].map(([, name, body]) => [name, body]),
+  );
+  const protectedJobs = new Set(["deploy", "proof-access", "deploy-proof"]);
+  for (const job of protectedJobs) {
+    const body = rows.get(job);
+    assert.ok(body, `missing job ${job}`);
+    const [admission] = body.split("\n    steps:\n");
+    assert.ok(admission);
+    assert.match(admission, /^ {4}environment: cloudflare$/mu);
+    assert.match(admission, /github\.ref == 'refs\/heads\/main'/u);
+    assert.doesNotMatch(admission, /pull_request/u);
+  }
+  for (const [name, body] of rows) {
+    assert.ok(body);
+    if (name && !protectedJobs.has(name))
+      assert.doesNotMatch(body, /\bsecrets\.|CLOUDFLARE_API_TOKEN|migrations\/deploy\.ts/u, name);
+  }
+
+  const targets = [
+    ["deploy", "production", "production", "npm run deploy"],
+    ["deploy-proof", "proof", "acceptance", "npm run deploy:proof"],
+  ] as const;
+  for (const [job, d1Target, postgresTarget, promotion] of targets) {
+    const body = rows.get(job);
+    assert.ok(body);
+    // These promotions remain disabled until the reviewed phase-2 decision.
+    assert.match(body, /^ {4}if: >-\n {6}false && !cancelled\(\)/mu);
+    const steps = body.split("\n    steps:\n")[1]?.split(/\n(?= {6}- )/u);
+    assert.ok(steps);
+    const index = (command: string) =>
+      steps.findIndex((step) =>
+        step
+          .split("\n")
+          .some((line) => line.trim() === `run: ${command}` || line.trim() === `- run: ${command}`),
+      );
+    const d1 = index(`node eng/migrations/deploy.ts deploy --target ${d1Target}`);
+    const postgres = index(`node tooling/postgres-deploy.ts migrate --target ${postgresTarget}`);
+    const promote = index(promotion);
+    assert.ok(
+      d1 >= 0 && d1 < postgres && postgres < promote,
+      `${job}: both gates before promotion`,
+    );
+    for (const step of steps.slice(d1, promote + 1))
+      assert.doesNotMatch(step, /(?:^|\n)\s*(?:continue-on-error|if):/u, `${job}: no gate bypass`);
+  }
+  assert.equal([...jobs.matchAll(/eng\/migrations\/deploy\.ts/gu)].length, 2);
+});
+
 test("the checked-in proof environment is the isolated acceptance center", () => {
   const proof = wrangler.env.proof;
   assert.equal(wrangler.name, "arcforges-cloud");
