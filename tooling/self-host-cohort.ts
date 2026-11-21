@@ -17,9 +17,9 @@ import {
 import { devNull, tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { pathToFileURL } from "node:url";
 import { profileBundleAssetName, verifyProfileBundle } from "../eng/verification/proof-deploy.ts";
 import { gitEnvironment } from "./process.ts";
+import type { Candidate } from "./project.ts";
 import { digest, git, hash, object, parseDocument, text } from "./provenance.ts";
 import { requireDashboardBundle } from "./self-host-static-origin.ts";
 
@@ -283,9 +283,23 @@ async function verifyCloudCandidate(
       source,
       "Verifier checkout differs from the producer",
     );
-    const stock = (await import(
-      pathToFileURL(path.join(verifier, "tooling/project.ts")).href
-    )) as typeof import("./project.ts");
+    // Run the producer's literal entry point in the verified clone. Pass paths as data.
+    const stock = (command: "toolchain" | "candidate", input: string) =>
+      execFileSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          `import { verifyCandidate, verifyToolchain } from "./tooling/project.ts";
+const [command, input] = process.argv.slice(1);
+if (command === "toolchain") await verifyToolchain(process.version, input);
+if (command === "candidate") process.stdout.write(JSON.stringify(await verifyCandidate(input)));`,
+          "--",
+          command,
+          input,
+        ],
+        { cwd: verifier, encoding: "utf8", timeout: 300000, windowsHide: true },
+      );
     const npmCli = path.resolve(
       path.dirname(process.execPath),
       process.platform === "win32"
@@ -299,9 +313,9 @@ async function verifyCloudCandidate(
         timeout: 120000,
         windowsHide: true,
       }).trim();
-    await stock.verifyToolchain(process.version, npm("--version"));
+    stock("toolchain", npm("--version"));
     npm("ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund");
-    const result = await stock.verifyCandidate(path.resolve(candidateDirectory));
+    const result = parseDocument(stock("candidate", path.resolve(candidateDirectory))) as Candidate;
     assert.deepEqual(checkout(verifier, source.repo), source, "Verifier source changed");
     return result;
   } finally {
