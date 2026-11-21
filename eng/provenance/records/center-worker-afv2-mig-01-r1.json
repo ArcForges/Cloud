@@ -3,7 +3,7 @@
   "id": "center-worker-afv2-mig-01-r1",
   "kind": "generated",
   "sourceRepository": "https://github.com/ArcForges/Cloud",
-  "sourceCommit": "819344b5ee92b8a3fb2b7b315ff2d4d541922f74",
+  "sourceCommit": "684381a07aeebf22b1cad2de5fb4a44de2ed0907",
   "sourcePaths": [
     ".node-version",
     "LICENSE",
@@ -75,7 +75,7 @@
       "package": "arcforges-cloud-worker",
       "kind": "worker-bundle",
       "profile": "eng/provenance/artifact-profiles/cloud-release-r150.json",
-      "sha256": "95b803281b34c2edf81d9a35a5dbbc9ba4fab6118f7f17ab46c2dd544199ba28"
+      "sha256": "44be3ce49c4f3b9c9f4100b12ec0e60fde2a095a4633b8cf83008c2fa523b701"
     }
   ],
   "disposition": "Rewrite",
@@ -160,7 +160,7 @@
     "inputs": [
       {
         "repository": "https://github.com/ArcForges/Cloud",
-        "commit": "819344b5ee92b8a3fb2b7b315ff2d4d541922f74",
+        "commit": "684381a07aeebf22b1cad2de5fb4a44de2ed0907",
         "paths": [
           ".node-version",
           "LICENSE",
@@ -246,7 +246,7 @@
     "reviewedOn": "2026-11-21",
     "decision": "approved",
     "rationale": "MIG-01 binds the measured Go-only source and Worker closure and preserves the frozen historical profile.",
-    "baselineCommit": "819344b5ee92b8a3fb2b7b315ff2d4d541922f74",
+    "baselineCommit": "684381a07aeebf22b1cad2de5fb4a44de2ed0907",
     "reconciliation": false
   },
   "supersedes": "center-worker-afv2-host-03-r2"
