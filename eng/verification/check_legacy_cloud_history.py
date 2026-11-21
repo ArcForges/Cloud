@@ -22,7 +22,11 @@ SOURCE_SHA256 = "536d12a42b9141cd3a61f3c3c5796095948b16c21a1b557d28f9e056896761d
 D1_MIGRATIONS = "src/ArcForges.Cloud.Storage.D1/Migrations"
 PROOF_MIGRATIONS = "worker/proof-migrations"
 D1_PLAN_TREES = ("storage/plans", "src/ArcForges.Cloud.Storage.D1/Physical/manifest")
-D1_PLAN_OUTPUTS = ("worker/storage/plans.generated.ts", "src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs")
+D1_PLAN_OUTPUT = "worker/storage/plans.generated.ts"
+D1_REFERENCES = {
+    "plan": "src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs",
+    "physical": "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs",
+}
 RESOLVER_VECTORS = "center/internal/entitlement/testdata/csharp-resolver-vectors.json"
 ARCHIVES = {
     "d1Migrations": (
@@ -32,6 +36,10 @@ ARCHIVES = {
     "proofMigrations": (
         (PROOF_MIGRATIONS,),
         "305d240ff067b6031b5d57dc4c30a92d9a23429437419ccaef46214d9edf08ae",
+    ),
+    "d1References": (
+        tuple(D1_REFERENCES.values()),
+        "1d6a6f490cf5c6c486314f967d3b1269b527a0b05993f61343b64a3b2a2d0c96",
     ),
     "generation": (
         ("tools/ArcForges.Cloud.Generation", "storage/plans",
@@ -97,7 +105,7 @@ def check_retained(root: Path, archive: tarfile.TarFile) -> dict[str, int]:
     """Verify immutable histories, retired generator inputs and outputs, and Go parity data."""
     retained = {directory: check_retained_tree(root, archive, directory)
                 for directory in (D1_MIGRATIONS, PROOF_MIGRATIONS, *D1_PLAN_TREES)}
-    for name in (*D1_PLAN_OUTPUTS, RESOLVER_VECTORS):
+    for name in (D1_PLAN_OUTPUT, RESOLVER_VECTORS):
         check_retained_file(root, archive, name)
         retained[name] = 1
     return retained
@@ -112,11 +120,23 @@ def check_retained_file(root: Path, archive: tarfile.TarFile, name: str) -> None
         raise ValueError("retained historical file differs: " + name)
 
 
-def attest(root: Path, *, migrations_only: bool = False) -> dict[str, object]:
+def check_source(root: Path) -> None:
     if Path(os.fsdecode(local_git(root, "rev-parse", "--show-toplevel").strip())).resolve() != root:
         raise ValueError("Cloud Git root differs")
     if local_git(root, "rev-parse", "--verify", f"{COMMIT}^{{tree}}").decode("ascii").strip() != TREE:
         raise ValueError("reviewed Cloud tree differs")
+
+
+def read_d1_reference(root: Path, kind: str) -> bytes:
+    check_source(root)
+    paths, expected = ARCHIVES["d1References"]
+    data = check_archive(root, expected, paths)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+        return archive_file(archive, D1_REFERENCES[kind])
+
+
+def attest(root: Path, *, migrations_only: bool = False) -> dict[str, object]:
+    check_source(root)
     retained = {}
     if not migrations_only:
         source = check_archive(root, SOURCE_SHA256)
@@ -142,10 +162,16 @@ def attest(root: Path, *, migrations_only: bool = False) -> dict[str, object]:
 
 if __name__ == "__main__":
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument("--migrations-only", action="store_true",
-                        help="Verify only the reviewed D1 and proof migration inventories.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--migrations-only", action="store_true",
+                      help="Verify only the reviewed D1 and proof migration inventories.")
+    mode.add_argument("--d1-reference", choices=D1_REFERENCES,
+                      help="Read one reviewed generated D1 reference as raw bytes.")
     args = parser.parse_args()
     try:
-        print(json.dumps(attest(ROOT, migrations_only=args.migrations_only), indent=2))
+        if args.d1_reference:
+            sys.stdout.buffer.write(read_d1_reference(ROOT, args.d1_reference))
+        else:
+            print(json.dumps(attest(ROOT, migrations_only=args.migrations_only), indent=2))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError, tarfile.TarError) as error:
         sys.exit(f"Legacy Cloud history check failed: {error}")

@@ -4,12 +4,13 @@
 // This tool validates it, expands it to physical columns, emits the baseline D1 migrations and the C# column maps,
 // and proves that the numbered migrations applied to an empty database equal the manifest (drift check).
 //
-//   node eng/verification/physical-schema.ts --check        validate, check the generated C# and the migration drift
+//   node eng/verification/physical-schema.ts --check        validate against the archived C# reference and check migration drift
 //   node eng/verification/physical-schema.ts --emit-baseline   write the baseline migrations (once, before they are locked)
 //   node eng/verification/physical-schema.ts                regenerate PhysicalSchema.g.cs
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,15 @@ export const manifestDirectory = path.join(storageRoot, "Physical/manifest");
 export const migrationsDirectory = path.join(storageRoot, "Migrations");
 export const generatedCSharp = path.join(storageRoot, "Physical/PhysicalSchema.g.cs");
 export const ownersFile = path.join(repositoryRoot, "storage/plans/owners.json");
+
+/** Read a reviewed generator output without relying on a legacy C# source checkout. */
+export function readD1Reference(kind: "plan" | "physical"): string {
+  return execFileSync(
+    "python",
+    ["-E", "-s", "eng/verification/check_legacy_cloud_history.py", "--d1-reference", kind],
+    { cwd: repositoryRoot, encoding: "utf8", maxBuffer: 256 * 1024, timeout: 30_000 },
+  );
+}
 
 export type ColumnType =
   | "id"
@@ -1219,11 +1229,8 @@ function main(argv: string[]): void {
   const generated = emitCSharp(schema, lock);
   if (argv.includes("--check")) {
     const problems: string[] = [];
-    const current = existsSync(generatedCSharp) ? readFileSync(generatedCSharp, "utf8") : "";
-    if (current.replaceAll("\r\n", "\n") !== generated)
-      problems.push(
-        `${path.relative(repositoryRoot, generatedCSharp)} is stale; run node eng/verification/physical-schema.ts`,
-      );
+    if (readD1Reference("physical") !== generated)
+      problems.push("D1 physical schema differs from the reviewed PhysicalSchema.g.cs.");
     problems.push(...driftProblems(schema));
     if (problems.length > 0) {
       for (const problem of problems) process.stderr.write(`${problem}\n`);
