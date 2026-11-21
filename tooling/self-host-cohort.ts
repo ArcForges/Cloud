@@ -20,6 +20,7 @@ import { pathToFileURL } from "node:url";
 import { profileBundleAssetName, verifyProfileBundle } from "../eng/verification/proof-deploy.ts";
 import { gitEnvironment } from "./process.ts";
 import { digest, git, hash, object, parseDocument, text } from "./provenance.ts";
+import { requireDashboardBundle } from "./self-host-static-origin.ts";
 
 const repositories = ["ArcForges/Cloud", "ArcForges/Web"] as const;
 type Repository = (typeof repositories)[number];
@@ -387,7 +388,7 @@ function validatePayload(entries: Entries, envelope: Envelope) {
     "Center differs from the verified image",
   );
   assert.deepEqual(object(metadata.postgres, "major schema"), postgres);
-  verifyProfileBundle(member(entries, profileName), web.profileSha256);
+  requireDashboardBundle(verifyProfileBundle(member(entries, profileName), web.profileSha256));
   return { profileName, profileSha256: web.profileSha256 };
 }
 

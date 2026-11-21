@@ -201,6 +201,15 @@ function routeFragment(bundle: VerifiedBundle, site: string, dashboard: boolean)
   return routes.join("\n");
 }
 
+export function requireDashboardBundle(bundle: VerifiedBundle): void {
+  assert(
+    bundle.files.some((entry) =>
+      /^_framework\/arcforges-dashboard-activity\.[a-z0-9]{10}\.js$/u.test(entry.path),
+    ),
+    "The verified profile archive does not contain the compiled Dashboard lifecycle module.",
+  );
+}
+
 function releaseEntries(bundle: VerifiedBundle, release: string, settings?: Buffer): BundleEntry[] {
   const publicEntries = bundle.files.filter((entry) => entry.path !== "_headers");
   if (process.platform === "win32") {
@@ -222,12 +231,7 @@ function releaseEntries(bundle: VerifiedBundle, release: string, settings?: Buff
     ...publicEntries.map((entry) => ({ path: `site/${entry.path}`, bytes: entry.bytes })),
   ];
   if (settings !== undefined) {
-    assert(
-      publicEntries.some((entry) =>
-        /^_framework\/arcforges-dashboard-activity\.[a-z0-9]{10}\.js$/u.test(entry.path),
-      ),
-      "The verified profile archive does not contain the compiled Dashboard lifecycle module.",
-    );
+    requireDashboardBundle(bundle);
     entries.push({ path: `site/${dashboardSettingsFile}`, bytes: settings });
   }
   return entries;
