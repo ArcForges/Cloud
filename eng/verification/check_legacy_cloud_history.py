@@ -29,6 +29,8 @@ D1_REFERENCES = {
     "plan": "src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs",
     "physical": "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs",
 }
+IDENTITY_TRANSCRIPT = "tests/ArcForges.Cloud.Tests/Identity/Vectors/identity-store-transcript.json"
+IDENTITY_TRANSCRIPT_SHA256 = "461ac27d1015144e310fc6a06c90613002c77d84d867ca2732d4d6aa4cc5f736"
 RESOLVER_VECTORS = "center/internal/entitlement/testdata/csharp-resolver-vectors.json"
 ARCHIVES = {
     "d1Migrations": (
@@ -144,6 +146,11 @@ def check_source(root: Path) -> None:
 
 def read_d1_reference(root: Path, kind: str) -> bytes:
     check_source(root)
+    if kind == "identity-transcript":
+        transcript = local_git(root, "cat-file", "blob", f"{COMMIT}:{IDENTITY_TRANSCRIPT}")
+        if len(transcript) != 424_353 or digest(transcript) != IDENTITY_TRANSCRIPT_SHA256:
+            raise ValueError("reviewed D1 identity transcript differs")
+        return transcript
     paths, expected = ARCHIVES["d1References"]
     data = check_archive(root, expected, paths)
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
@@ -209,8 +216,8 @@ if __name__ == "__main__":
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--migrations-only", action="store_true",
                       help="Verify the reviewed D1 and proof migrations and archived D1 migration tooling.")
-    mode.add_argument("--d1-reference", choices=D1_REFERENCES,
-                      help="Read one reviewed generated D1 reference as raw bytes.")
+    mode.add_argument("--d1-reference", choices=(*D1_REFERENCES, "identity-transcript"),
+                      help="Read one reviewed D1 reference as raw bytes.")
     mode.add_argument("--managed-layout", action="store_true",
                       help="Read the reviewed legacy solution, projects and module declarations.")
     mode.add_argument("--managed-sources", action="store_true",
