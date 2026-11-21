@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
 
@@ -102,6 +103,8 @@ type Rotation struct {
 	Logging    migrate.Logging `json:"logging"`
 	Probe      Probe           `json:"probe"`
 	RuntimeURL string          `json:"-"`
+
+	contractedHistory bool
 }
 
 // Probe is what the new credential proved through the pooled endpoint and, for CONNECT, through one unpooled connection.
@@ -175,6 +178,10 @@ func Rotate(ctx context.Context, conn *pgx.Conn, options Options) (Rotation, err
 		}
 		if !ready {
 			return errors.New("the database is not migrated or the runtime role does not exist; run arcforges-center migrate first")
+		}
+		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM platform.schema_migration WHERE version >= $1)",
+			schema.ContractionVersion).Scan(&rotation.contractedHistory); err != nil {
+			return migrate.Sanitize("identify the runtime migration reader", err)
 		}
 		if err := migrate.RequirePlainRole(ctx, tx, options.Group, false); err != nil {
 			return err
@@ -482,13 +489,20 @@ func probe(ctx context.Context, rotation Rotation, options Options) (Probe, erro
 	defer func() { _ = conn.Close(context.Background()) }()
 	var user, database string
 	var versions int
-	if err = conn.QueryRow(ctx, "SELECT current_user, current_database(), (SELECT count(*) FROM platform.schema_migration)").Scan(&user, &database, &versions); err != nil {
+	history := "platform.schema_migration"
+	if rotation.contractedHistory {
+		history = "platform.runtime_schema_history"
+	}
+	if err = conn.QueryRow(ctx, "SELECT current_user, current_database(), (SELECT count(*) FROM "+history+")").Scan(&user, &database, &versions); err != nil {
 		return Probe{}, migrate.Sanitize("read through the pooled endpoint", err)
 	}
 	result.ConnectedAsLogin = user == rotation.LoginRole && database == rotation.Database
 	result.ReadsGrantedTable = versions > 0
 	result.CannotCreate = refused(ctx, conn, "CREATE TABLE platform.runtime_probe (x int)")
 	result.CannotReadUngranted = refused(ctx, conn, "SELECT count(*) FROM platform.runtime_credential")
+	if rotation.contractedHistory {
+		result.CannotReadUngranted = result.CannotReadUngranted && refused(ctx, conn, "SELECT count(*) FROM platform.schema_migration")
+	}
 	result.CannotCreateTemporary = refused(ctx, conn, "CREATE TEMPORARY TABLE runtime_probe (x int)")
 	if !result.ConnectsUnpooled || !result.ConnectedAsLogin || !result.ReadsGrantedTable || !result.CannotCreate || !result.CannotReadUngranted ||
 		!result.CannotCreateTemporary {
