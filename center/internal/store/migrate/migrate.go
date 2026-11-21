@@ -53,6 +53,7 @@ const (
 	StatePending       = "pending"       // migrations of this build are not applied yet
 	StateCurrent       = "current"       // every migration of this build is applied, nothing else is
 	StateRefused       = "refused"       // the database record differs from the build; nothing is applied
+	StateMaintenance   = "maintenance"   // contraction may be committed or confirmed follow-up is incomplete
 )
 
 var namePattern = regexp.MustCompile(`^([0-9]{4})_[a-z0-9_]+\.sql$`)
@@ -566,21 +567,35 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 		}
 		return result, ErrRefused
 	}
+	contractionCommitted := false
 	for _, migration := range comparison.Pending {
 		step, err := applyOne(ctx, conn, migration, options)
 		if err != nil {
+			if errors.Is(err, ErrContractionOutcomeUnknown) {
+				result.State = StateMaintenance
+			}
 			options.Logger.Error("migration failed", "migration", migration.Name, "error", err.Error())
 			return result, err
 		}
 		options.Logger.Info("migration applied", "migration", migration.Name, "sha256", migration.SHA256, "durationMs", step.DurationMS)
 		result.Ran = append(result.Ran, step)
+		contractionCommitted = contractionCommitted || isContraction(migration)
 	}
 	if applied, _, err = ReadApplied(ctx, conn); err != nil {
-		return result, Sanitize("read platform.schema_migration", err)
+		err = Sanitize("read platform.schema_migration", err)
+		if contractionCommitted {
+			result.State, result.Version = StateMaintenance, schema.ContractionVersion
+			err = fmt.Errorf("%w: %w", ErrContractionFollowupRequired, err)
+		}
+		return result, err
 	}
 	result.describe(build, applied, true)
 	if options.RuntimeRole != "" && options.localRestore == nil {
 		if err = reconcile(ctx, conn, options); err != nil {
+			if contractionCommitted {
+				result.State = StateMaintenance
+				err = fmt.Errorf("%w: %w", ErrContractionFollowupRequired, err)
+			}
 			return result, err
 		}
 		result.Grants = "reconciled"
@@ -651,6 +666,7 @@ func bootstrap(ctx context.Context, conn *pgx.Conn) error {
 
 func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options Options) (Step, error) {
 	started := time.Now()
+	bodyCompleted := false
 	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
 		settings := fmt.Sprintf("SET LOCAL statement_timeout = %d; SET LOCAL lock_timeout = %d",
 			options.StatementTimeout.Milliseconds(), options.LockWait.Milliseconds())
@@ -702,9 +718,13 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 		}
 		_, err := tx.Exec(ctx, "INSERT INTO platform.schema_migration (version, name, sha256, duration_ms, runner) VALUES ($1, $2, $3, $4, $5)",
 			migration.Version, migration.Name, migration.SHA256, time.Since(started).Milliseconds(), runnerName(options.Runner))
+		bodyCompleted = err == nil
 		return err
 	})
 	if err != nil {
+		if contractionCommitUnknown(migration, bodyCompleted, err) {
+			return Step{}, ErrContractionOutcomeUnknown
+		}
 		if errors.Is(err, ErrCTR06RetirementUnproven) || errors.Is(err, ErrManagementTransitionRequired) ||
 			errors.Is(err, ErrLifecycleTransitionRequired) || errors.Is(err, ErrContractionRequired) {
 			return Step{}, err

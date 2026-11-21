@@ -60,7 +60,11 @@ func contractionCommand(args []string, lookup func(string) (string, bool), stdou
 	options := migrate.Options{Runner: revision(), RuntimeRole: source.RuntimeRole, LockTimeout: source.LockTimeout}
 	result, err := migrate.ApplyContraction(ctx, conn, build, options, source, witness, values["--archive"], values["--metadata"])
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "contraction refused:", err)
+		if result.State == migrate.StateMaintenance {
+			_, _ = fmt.Fprintln(stderr, err)
+		} else {
+			_, _ = fmt.Fprintln(stderr, "contraction refused:", err)
+		}
 		return exitFailure
 	}
 	if json.NewEncoder(stdout).Encode(result) != nil {

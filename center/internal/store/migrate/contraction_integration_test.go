@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -294,6 +295,43 @@ func TestContractionSQLFaultKeepsRollbackCheckpoint(t *testing.T) {
 		if info, err := os.Stat(path); err != nil || info.Size() == 0 {
 			t.Fatal("the verified rollback backup was lost after the SQL fault")
 		}
+	}
+}
+
+func TestContractionCommitClassification(t *testing.T) {
+	migration := Migration{Version: schema.ContractionVersion, Name: contractionName}
+	if contractionCommitUnknown(migration, false, io.EOF) ||
+		contractionCommitUnknown(migration, true, pgx.ErrTxCommitRollback) ||
+		contractionCommitUnknown(migration, true, nil) ||
+		contractionCommitUnknown(Migration{Version: 16}, true, io.EOF) {
+		t.Fatal("known outcomes or earlier migration behavior changed")
+	}
+	if !contractionCommitUnknown(migration, true, io.EOF) {
+		t.Fatal("a lost contraction COMMIT response was treated as a known rollback")
+	}
+}
+
+func TestContractionReportsCommittedSchemaWhenGrantReconcileFails(t *testing.T) {
+	ctx := t.Context()
+	url, name := pgtest.Database(t)
+	owner := pgtest.Connect(t, url)
+	group := name + "_runtime"
+	build := centerBuild(t)
+	_, grants := schema.AtVersion(schema.ContractionVersion)
+	grants = append(grants, schema.Grant{Schema: "platform", Table: "missing_grant_target", Privileges: []schema.Privilege{schema.Select}})
+	result, err := Apply(ctx, owner, build, Options{Runner: "isolated-contraction-grant-fault", RuntimeRole: group, Grants: grants})
+	if !errors.Is(err, ErrContractionFollowupRequired) || result.State != StateMaintenance ||
+		result.Version != schema.ContractionVersion || len(result.Ran) != schema.ContractionVersion ||
+		result.Ran[len(result.Ran)-1].Version != schema.ContractionVersion {
+		t.Fatalf("a committed contraction with failed grants was treated as a rollback: %v", err)
+	}
+	status, err := Inspect(ctx, owner, build)
+	if err != nil || status.State != StateCurrent || status.Version != schema.ContractionVersion {
+		t.Fatalf("committed contraction could not be independently inspected: %v", err)
+	}
+	recovered, err := Apply(ctx, owner, build, Options{Runner: "recover-isolated-verified-grants", RuntimeRole: group})
+	if err != nil || recovered.State != StateCurrent || len(recovered.Ran) != 0 || recovered.Grants != "reconciled" {
+		t.Fatalf("known commit could not complete its grants without applying a second time: %v", err)
 	}
 }
 

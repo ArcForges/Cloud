@@ -16,6 +16,14 @@ import (
 // the current database cannot prove its contraction admission.
 var ErrContractionRequired = errors.New("schema contraction requires a verified backup, isolated restore, and drained predecessor")
 
+// ErrContractionOutcomeUnknown requires inspecting the actual migration record
+// before retrying after an unconfirmed COMMIT.
+var ErrContractionOutcomeUnknown = errors.New("schema contraction commit was not confirmed; keep the database in maintenance and inspect its migration status")
+
+// ErrContractionFollowupRequired reports a committed contraction with an
+// incomplete post-commit check or grant reconciliation.
+var ErrContractionFollowupRequired = errors.New("schema contraction committed; keep the database in maintenance until status and runtime grants are confirmed")
+
 const contractionName = "0017_retire_legacy_routing.sql"
 
 type contractionAdmission struct {
@@ -25,6 +33,10 @@ type contractionAdmission struct {
 
 func isContraction(migration Migration) bool {
 	return migration.Version == schema.ContractionVersion && migration.Name == contractionName
+}
+
+func contractionCommitUnknown(migration Migration, bodyCompleted bool, err error) bool {
+	return isContraction(migration) && bodyCompleted && err != nil && !errors.Is(err, pgx.ErrTxCommitRollback)
 }
 
 func requireContractionReady(ctx context.Context, q Querier) error {
