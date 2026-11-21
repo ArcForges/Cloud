@@ -17,9 +17,11 @@ trees identified by the verified producer inputs. For Cloud, obtain the
 original sealed candidate directory and the Go executable extracted from that
 candidate's image. The assembler uses the stock verifier from a private copy
 of the exact producer commit and checks the executable against the verified
-image receipt. Service definitions and notices come from the producer's Git
-tree. Keep the input candidate and its sealed manifest available for
-provenance review.
+image receipt. Use the pinned Node.js distribution and an existing npm cache
+containing the producer's locked dependencies. The assembler restores those
+dependencies offline with lifecycle scripts disabled. Service definitions and
+notices come from the producer's Git tree. Keep the input candidate and its
+sealed manifest available for provenance review.
 
 For Web, verify the GitHub Actions artifact against its approved workflow run,
 producer commit and raw ZIP SHA-256. Extract the single published

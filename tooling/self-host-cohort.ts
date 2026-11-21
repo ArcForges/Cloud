@@ -286,6 +286,21 @@ async function verifyCloudCandidate(
     const stock = (await import(
       pathToFileURL(path.join(verifier, "tooling/project.ts")).href
     )) as typeof import("./project.ts");
+    const npmCli = path.resolve(
+      path.dirname(process.execPath),
+      process.platform === "win32"
+        ? "node_modules/npm/bin/npm-cli.js"
+        : "../lib/node_modules/npm/bin/npm-cli.js",
+    );
+    const npm = (...args: string[]) =>
+      execFileSync(process.execPath, [npmCli, ...args], {
+        cwd: verifier,
+        encoding: "utf8",
+        timeout: 120000,
+        windowsHide: true,
+      }).trim();
+    await stock.verifyToolchain(process.version, npm("--version"));
+    npm("ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund");
     const result = await stock.verifyCandidate(path.resolve(candidateDirectory));
     assert.deepEqual(checkout(verifier, source.repo), source, "Verifier source changed");
     return result;
