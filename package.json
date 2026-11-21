@@ -38,8 +38,6 @@
     "access:proof": "node eng/verification/proof-cloudflare.ts access",
     "observe:proof": "node eng/verification/proof-cloudflare.ts observe",
     "operator:proof": "node eng/verification/proof-operator.ts",
-    "test:foundation:local": "node eng/verification/foundation-local.ts",
-    "test:foundation:live": "node eng/verification/foundation-live.ts",
     "check:dependencies": "node tooling/dependency-policy.ts",
     "check:plans": "npm run check:legacy-cloud-history",
     "check:physical": "node eng/verification/physical-schema.ts --check && python eng/verification/check_legacy_cloud_history.py --migrations-only",
