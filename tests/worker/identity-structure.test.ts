@@ -3,14 +3,24 @@
 // seat or shared-editor concept (WO-05); (2) no capability treats an authentication identity as a user (BR-04); (3) workspace
 // ownership is the direct owner_user_id relation and nothing rewrites it (WO-01, WO-02). Each scan is proven on fixtures that break
 // its rule, so it cannot pass vacuously, and every exception is an exact, reasoned allowlist entry: a new hit fails.
-// The generated public contracts are scanned by the C# test tests/ArcForges.Cloud.Tests/Generation/IdentityContractStructureTests.cs,
-// against the NuGet ArcForges.Contracts.PublicApi types (CLOUD.84 S33(3)(c)); the npm proto package is no longer read here.
+// Cloud 9b8796eac760982d9814f371b820b736ddd945c4 preserves IdentityContractStructureTests.cs and its NuGet public contract scan
+// (CLOUD.84 S33(3)(c)). The live route scan reads the generated Go registration table and the Go access operation IDs.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { openIdentityD1 } from "./support/identity-support.ts";
 import { plans } from "../../worker/storage/plans.generated.ts";
+import {
+  apexRoutes,
+  healthRoute,
+  nativeRoutes,
+  paddleWebhookRoute,
+  pageRoutes,
+  productionRoutes,
+  surfaceRoutes,
+  upgradeRoutes,
+} from "../../worker/tables/center-tables.generated.ts";
 import { repositoryRoot } from "./support/sqlite-d1.ts";
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -232,29 +242,29 @@ function literals(text: string): string[] {
     .filter((value) => operationShape.test(value));
 }
 
-/**
- * The identity and workspace modules' own type and member names, and every operation-shaped string literal of the C# host and modules
- * (method paths, policy keys, event types, operation names). Other code is not about identity: it uses "role" and "member" in their
- * language and compiler senses (a statement role, an enum member).
- */
-function sourceIdentifiers(): string[] {
-  const list: string[] = [];
-  for (const file of listFiles(path.join(repositoryRoot, "src"), /\.cs$/u)) {
-    if (file.endsWith(".g.cs")) continue;
-    const raw = readFileSync(file, "utf8");
-    const text = raw.replace(/\/\/[^\n]*/gu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
-    list.push(...literals(text));
-    if (
-      /Modules\.(Identity|Workspace|Devices)[\\/]/u.test(file) ||
-      /Modules[\\/]ArcForges\.Cloud\.Modules\.(Identity|Workspace|Devices)[\\/]/u.test(file) ||
-      /ArcForges\.Cloud\.Modules\.(Identity|Workspace|Devices)/u.test(file)
-    )
-      for (const word of text
-        .replace(/"(?:[^"\\]|\\.)*"/gu, '""')
-        .match(/[A-Za-z_][A-Za-z0-9_]*/gu) ?? [])
-        list.push(word);
-  }
-  return list;
+/** Public path names come from Go registrations. The Go table parity test checks this generated output against those registrations. */
+function centerRouteIdentifiers(): string[] {
+  return [
+    healthRoute,
+    ...productionRoutes,
+    ...surfaceRoutes,
+    ...pageRoutes,
+    ...nativeRoutes,
+    ...apexRoutes,
+    ...upgradeRoutes,
+    ...(paddleWebhookRoute ? [paddleWebhookRoute] : []),
+  ].map((route) => route.path);
+}
+
+/** The access table also declares literal policy IDs, including the receipt names used for account and Commerce operations. */
+function centerOperationIdentifiers(): string[] {
+  const source = readFileSync(path.join(repositoryRoot, "center/internal/access/access.go"), "utf8")
+    .replace(/\/\/[^\n]*/gu, "")
+    .replace(/\/\*[\s\S]*?\*\//gu, "");
+  return Array.from(
+    source.matchAll(/\bID:\s*"([A-Za-z][A-Za-z0-9_.-]*)"/gu),
+    (match) => match[1] ?? "",
+  );
 }
 
 function workerIdentifiers(): string[] {
@@ -287,6 +297,8 @@ test("the vocabulary scan flags each excluded concept and each spelling of it, a
     "TeamWorkspace",
     "OrganisationId",
     "isCollaborator",
+    "/arcforges.sandbox.v2.SandboxService/InviteCollaborator",
+    "workspace.addMember",
   ])
     assert.notDeepEqual(violations(identifier), [], identifier);
   for (const identifier of [
@@ -325,12 +337,27 @@ test("the physical schema, the locked migrations and the named plans carry no me
   assert.deepEqual(scan("plan", planIdentifiers()), []);
 });
 
-test("the operations the Cloud host, its modules and its Worker declare name no membership, role, invitation, seat or shared-editor concept", () => {
-  const source = sourceIdentifiers();
-  assert.ok(source.length > 100, "the scan reads the C# sources");
-  assert.deepEqual(scan("source", source), []);
+test("the Go Center routes and operations and the Worker name no membership, role, invitation, seat or shared-editor concept", () => {
+  const routes = new Set(centerRouteIdentifiers());
+  assert.ok(routes.size > 80, "the scan reads the generated Go route registrations");
+  for (const route of [
+    "/arcforges.hello.v1.HelloService/SayHello",
+    "/arcforges.publicapi.v1.IdentityService/GetProfile",
+    "/arcforges.sandbox.v2.RunService/Start",
+    "/session/v1/web/bootstrap",
+    "/fleet/v2/node",
+    "/commerce/v1/paddle/webhook",
+  ])
+    assert.ok(routes.has(route), route);
+  assert.deepEqual(scan("center-route", routes), []);
+  const operations = new Set(centerOperationIdentifiers());
+  assert.ok(operations.size > 30, "the scan reads the Go access operation declarations");
+  for (const operation of ["identity.getProfile", "commerce.createCheckoutAttempt"])
+    assert.ok(operations.has(operation), operation);
+  assert.deepEqual(scan("center-operation", operations), []);
   const worker = workerIdentifiers();
   assert.ok(worker.length > 10, "the scan reads the Worker sources");
+  assert.ok(worker.includes("harness.wake"), "the scan includes handwritten Worker operations");
   assert.deepEqual(scan("worker", worker), []);
 });
 
