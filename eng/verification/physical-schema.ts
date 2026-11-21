@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The checked-in physical manifest (Design D1 profile section 2) is the executable form of the Cloud data model:
 // one JSON file per owner under src/ArcForges.Cloud.Storage.D1/Physical/manifest plus the closed enum registry.
-// This tool validates it, expands it to physical columns, emits the baseline D1 migrations and the C# column maps,
-// and proves that the numbered migrations applied to an empty database equal the manifest (drift check).
+// This tool validates the manifest and compares it with the archived C# reference and the numbered migrations.
 //
-//   node eng/verification/physical-schema.ts --check        validate against the archived C# reference and check migration drift
-//   node eng/verification/physical-schema.ts --emit-baseline   write the baseline migrations (once, before they are locked)
-//   node eng/verification/physical-schema.ts                regenerate PhysicalSchema.g.cs
+//   node eng/verification/physical-schema.ts --check      compare the archive and the migrated in-memory schema
+//   node eng/verification/physical-schema.ts --validate   validate a partial manifest
+//   node eng/verification/physical-schema.ts --enums      list the manifest enums
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -20,7 +19,6 @@ export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.met
 export const storageRoot = path.join(repositoryRoot, "src/ArcForges.Cloud.Storage.D1");
 export const manifestDirectory = path.join(storageRoot, "Physical/manifest");
 export const migrationsDirectory = path.join(storageRoot, "Migrations");
-export const generatedCSharp = path.join(storageRoot, "Physical/PhysicalSchema.g.cs");
 export const ownersFile = path.join(repositoryRoot, "storage/plans/owners.json");
 
 /** Read a reviewed generator output without relying on a legacy C# source checkout. */
@@ -1201,6 +1199,14 @@ export function emitBaseline(
 }
 
 function main(argv: string[]): void {
+  const modes = ["--check", "--validate", "--enums"];
+  if (argv.length === 0 || argv.some((mode) => !modes.includes(mode))) {
+    process.stderr.write(
+      "Usage: node eng/verification/physical-schema.ts --check|--validate|--enums\n",
+    );
+    process.exitCode = 2;
+    return;
+  }
   if (argv.includes("--validate") || argv.includes("--enums")) {
     // Authoring aid: tolerate foreign keys to owners whose manifest is not written yet.
     const partial = loadManifest(manifestDirectory, true);
@@ -1221,28 +1227,19 @@ function main(argv: string[]): void {
   }
   const schema = loadManifest();
   const lock = lockIdentity(readLock(migrationsDirectory));
-  if (argv.includes("--emit-baseline")) {
-    for (const entry of emitBaseline(schema))
-      writeFileSync(path.join(migrationsDirectory, entry.file), entry.text);
-    return;
-  }
   const generated = emitCSharp(schema, lock);
-  if (argv.includes("--check")) {
-    const problems: string[] = [];
-    if (readD1Reference("physical") !== generated)
-      problems.push("D1 physical schema differs from the reviewed PhysicalSchema.g.cs.");
-    problems.push(...driftProblems(schema));
-    if (problems.length > 0) {
-      for (const problem of problems) process.stderr.write(`${problem}\n`);
-      process.exitCode = 1;
-      return;
-    }
-    process.stdout.write(
-      `physical schema ok: ${schema.tables.length} tables, ${schema.enums.length} enums, ${schemaHash(schema).slice(0, 12)}\n`,
-    );
+  const problems: string[] = [];
+  if (readD1Reference("physical") !== generated)
+    problems.push("D1 physical schema differs from the reviewed PhysicalSchema.g.cs.");
+  problems.push(...driftProblems(schema));
+  if (problems.length > 0) {
+    for (const problem of problems) process.stderr.write(`${problem}\n`);
+    process.exitCode = 1;
     return;
   }
-  writeFileSync(generatedCSharp, generated);
+  process.stdout.write(
+    `physical schema ok: ${schema.tables.length} tables, ${schema.enums.length} enums, ${schemaHash(schema).slice(0, 12)}\n`,
+  );
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
