@@ -105,6 +105,17 @@ test("only the explicit official Go candidate and matching target/schema/credent
     evaluateFixtureTarget(evidence, preview, recorded.sha, schemaVersion),
     /preview URLs/u,
   );
+  const oldBinding = { ...configuration, d1_databases: [{ binding: "DB" }] };
+  await assert.rejects(
+    evaluateFixtureTarget(evidence, oldBinding, recorded.sha, schemaVersion),
+    /still declares a D1 binding/u,
+  );
+  evidence.d1.status = "passed";
+  await assert.rejects(
+    evaluateFixtureTarget(evidence, configuration, recorded.sha, schemaVersion),
+    /no D1 absence receipt/u,
+  );
+  evidence.d1.status = "not-applicable";
   await assert.rejects(
     evaluateFixtureTarget(evidence, configuration, "0".repeat(40), schemaVersion),
     /another revision/u,

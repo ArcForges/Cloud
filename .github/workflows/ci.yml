@@ -75,6 +75,21 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version-file: .python-version
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.4"
+          cache-dependency-path: |
+            center/go.sum
+            center/tools/go.sum
+      # The native production server is checked on both hosts. Linux also runs race, fuzz and PostgreSQL checks.
+      - name: Select the pinned Linux cgo toolchain
+        if: runner.os == 'Linux'
+        run: python eng/native_toolchain.py install
+      - name: Verify native tool selection guards
+        run: python -m unittest discover -s tests/tooling -p test_native_toolchain.py
+      - name: Verify the Go center
+        run: python eng/center.py check
+      # Managed verification and evaluated licence evidence continue to use the pinned SDK.
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
@@ -100,20 +115,6 @@ jobs:
         run: |
           dotnet restore Cloud.slnx --locked-mode
           dotnet build Cloud.slnx -c Release --no-restore
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.4"
-          cache-dependency-path: |
-            center/go.sum
-            center/tools/go.sum
-      # The same entry point as both verification legs: the race detector and fuzzing on Linux, the native build on both.
-      - name: Select the pinned Linux cgo toolchain
-        if: runner.os == 'Linux'
-        run: python eng/native_toolchain.py install
-      - name: Verify native tool selection guards
-        run: python -m unittest discover -s tests/tooling -p test_native_toolchain.py
-      - name: Verify the Go center
-        run: python eng/center.py check
       - run: node tooling/project.ts licence-evaluated
       - name: Retain evaluated licence and source provenance
         if: always()
@@ -261,6 +262,7 @@ jobs:
 
   candidate:
     name: Native AOT image and Worker build
+    # Keep the historical job name used by the sealed proof candidate lookup. Current images serve the Go center.
     # Phase 1 suppresses the ordinary main-push delivery candidate. PR/dispatch validation remains as before.
     # Owner PRs build it in the local hook; proof dispatch never builds a candidate.
     needs: [source, quality]
@@ -278,13 +280,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # CLOUD.84 S41(3): the candidate publishes the Hello probe and the migrator with the SDK of global.json; the deploy jobs have no .NET step.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version-file: .python-version
-      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          global-json-file: global.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
@@ -784,15 +782,9 @@ jobs:
         run: |
           python eng/verification/ctr06_bridge_bundle.py verify windows "$GITHUB_WORKSPACE/artifacts/ctr06-windows/arcforges-ctr06-bridge-8e5-windows-amd64.zip"
           node tooling/project.ts verify-bridge-asset windows
-      # CLOUD.70: the one gated D1 migration step, before anything is pushed or promoted. It holds the migrator
-      # lease and fence, applies only what the release manifest names, prints receipts and the compatibility
-      # record (never a secret) and refuses a build the schema horizons exclude. A failure fails this job here,
-      # so the promotion step below never runs; tooling/cloudflare.ts also refuses without the step's record.
-      - name: Migrate the D1 database (gated)
+      # Require the current sealed Go candidate to have no D1 binding before any stateful migration.
+      - name: Verify the retired D1 binding (gated)
         run: node eng/migrations/deploy.ts deploy --target production
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # AF-CTR-02: the sealed image's own center executable migrates the production PostgreSQL database with the migration role's
       # direct connection and reconciles the runtime role's grants, before anything is pushed or promoted. It prints the database,
       # roles, versions and checksums, never a credential; npm run deploy refuses without its passed record for this candidate.
@@ -974,13 +966,9 @@ jobs:
           PROOF_GATE_CANDIDATE_ATTEMPT: ${{ needs.proof-gate.outputs.candidate-attempt }}
           PROOF_GATE_ARTIFACT_ID: ${{ needs.proof-gate.outputs.artifact-id }}
           PROOF_GATE_ARTIFACT_DIGEST: ${{ needs.proof-gate.outputs.artifact-digest }}
-      # CLOUD.70: the same gated D1 migration step against the retained proof D1 database (still bound, no longer used by the
-      # acceptance center; AF-CTR-09 inspects and keeps it), before the Worker or image is promoted.
-      - name: Migrate the proof D1 database (gated)
+      # The historical proof D1 database remains in custody. Verify the sealed Go proof does not attach it.
+      - name: Verify the retired proof D1 binding (gated)
         run: node eng/migrations/deploy.ts deploy --target proof
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # AF-CTR-02: the acceptance center's own PostgreSQL database (arcforges_acceptance, created idempotently through the
       # migration role's direct connection) is migrated with its own runtime role before the acceptance Worker is promoted.
       - name: Migrate the acceptance PostgreSQL database (gated)

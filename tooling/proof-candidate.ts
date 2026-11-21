@@ -9,17 +9,33 @@ import {
 } from "./sensitive-process.ts";
 import { wrangler } from "./process.ts";
 
+export const goCandidateFiles = [
+  "build-identity.json",
+  "docker-image.tar",
+  "image-provenance.json",
+  "legal-notices.json",
+  "proof-worker-meta.json",
+  "proof-worker.js",
+  "worker-meta.json",
+  "worker.js",
+  "wrangler.json",
+] as const;
+
 export interface ProofCandidate {
+  schema: 2;
+  runtime: "go";
   revision: string;
   dirty: false;
   version: string;
   image: string;
   imageId: string;
+  workerConfigSha256: string;
 }
 
 type SensitiveRunner = typeof runSensitive;
 const commitPattern = /^[0-9a-f]{40}$/u;
 const imageIdPattern = /^sha256:[0-9a-f]{64}$/u;
+const fileDigestPattern = /^[0-9a-f]{64}$/u;
 const candidateImagePattern = /^arcforges-cloud:[a-z0-9.-]+$/u;
 const versionPattern = /^0\.1\.0-(ci\.[0-9]+\.[0-9]+|local\.[0-9]+)$/u;
 
@@ -28,6 +44,8 @@ function verifiedCandidate(value: unknown): ProofCandidate {
     throw new Error("The sealed proof candidate metadata is invalid.");
   const c = value as Record<string, unknown>;
   if (
+    c.schema !== 2 ||
+    c.runtime !== "go" ||
     typeof c.revision !== "string" ||
     !commitPattern.test(c.revision) ||
     c.dirty !== false ||
@@ -35,15 +53,20 @@ function verifiedCandidate(value: unknown): ProofCandidate {
     !candidateImagePattern.test(c.image) ||
     typeof c.imageId !== "string" ||
     !imageIdPattern.test(c.imageId) ||
+    typeof c.workerConfigSha256 !== "string" ||
+    !fileDigestPattern.test(c.workerConfigSha256) ||
     typeof c.version !== "string" ||
     !versionPattern.test(c.version)
   )
     throw new Error("The sealed proof candidate metadata is invalid.");
   return {
+    schema: c.schema,
+    runtime: c.runtime,
     revision: c.revision,
     dirty: false,
     image: c.image,
     imageId: c.imageId,
+    workerConfigSha256: c.workerConfigSha256,
     version: c.version,
   };
 }
@@ -82,7 +105,12 @@ function proofCandidateEnvironment(environment: NodeJS.ProcessEnv): NodeJS.Proce
 export async function prepareProofCandidate(
   account: string,
   gate: (revision: string) => Promise<void>,
-  options: { environment?: NodeJS.ProcessEnv; run?: SensitiveRunner } = {},
+  options: {
+    environment?: NodeJS.ProcessEnv;
+    run?: SensitiveRunner;
+    verifyConfig?: (candidate: ProofCandidate) => Promise<void>;
+    prepareResources?: () => Promise<void>;
+  } = {},
 ): Promise<{ candidate: ProofCandidate; imageDigest: string }> {
   const env = options.environment ?? process.env;
   const runner = options.run ?? runSensitive;
@@ -107,6 +135,7 @@ export async function prepareProofCandidate(
   );
   if (candidate.revision !== verifyEnv.GITHUB_SHA)
     throw new Error("The sealed proof candidate revision does not match the dispatch.");
+  await options.verifyConfig?.(candidate);
   const head = await safeRun(
     "head",
     "gh",
@@ -128,6 +157,7 @@ export async function prepareProofCandidate(
   } catch {
     throw new Error("The acceptance PostgreSQL gate could not be verified.");
   }
+  await options.prepareResources?.();
   const dockerEnv = proofProcessEnvironment(env);
   await safeRun(
     "image",
@@ -186,10 +216,13 @@ async function verifyInChild(): Promise<void> {
     const c = await verifyCandidate();
     process.stdout.write(
       JSON.stringify({
+        schema: c.schema,
+        runtime: c.runtime,
         revision: c.revision,
         dirty: c.dirty,
         image: c.image,
         imageId: c.imageId,
+        workerConfigSha256: c.files["wrangler.json"],
         version: c.version,
       }),
     );
@@ -203,4 +236,4 @@ if (
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) &&
   process.argv[2] === "verify"
 )
-  await verifyInChild();
+  void verifyInChild();

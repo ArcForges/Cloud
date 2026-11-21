@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Identity } from "./build-identity.ts";
 import { root, run } from "./process.ts";
-import { extractSealedTool } from "./sealed-tool.ts";
 
-// The Hello protocol probe is the NuGet Contracts generated client, built and run from tools/ArcForges.Cloud.Generation (CLOUD.84
-// S33(3)(b)). The candidate job publishes that tool self-contained for linux-x64, not single-file (S38(2)), and seals it as one archive in
-// the candidate manifest (tooling/sealed-tool.ts); the probe is its `probe` command.
+// The independent development consumer exercises the published NuGet Hello client against a local Go Center or Worker.
 export const probeProject = path.join(
   root,
-  "tools",
-  "ArcForges.Cloud.Generation",
-  "ArcForges.Cloud.Generation.csproj",
+  "tests",
+  "ArcForges.Cloud.Consumer",
+  "ArcForges.Cloud.Consumer.csproj",
 );
 export interface ProbeResult {
   transport: "binary gRPC-Web";
@@ -87,24 +83,18 @@ export async function waitForHealth(
 export interface ProbeInvocation {
   command: string;
   args: string[];
-  /** The extracted sealed tool, removed after the run; absent for a local dotnet run. */
-  directory?: string;
 }
 
 /**
- * Runs the Hello protocol assertions against a base URL. CI runs only the sealed tool of the candidate: its digest is checked against the
- * candidate manifest before it is extracted and run, and a missing manifest, a missing archive or a different digest refuses (CLOUD.84
- * S45(3)); nothing is built from source. Local runs build and run the same project with dotnet run. The probe prints one JSON line on
- * success and exits non-zero on any failed assertion.
+ * Builds and runs the independent Hello consumer for an explicit development check.
+ * Candidate CI uses the Go Center checks. The development consumer reports one JSON line on success.
  */
 export function probeInvocation(
   args: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
-  repositoryRoot: string = root,
 ): ProbeInvocation {
   if (env.CI === "true" || env.GITHUB_ACTIONS === "true") {
-    const sealed = extractSealedTool(repositoryRoot);
-    return { command: sealed.executable, args: [...args], directory: sealed.directory };
+    throw new Error("The independent Hello consumer runs locally. CI uses the Go Center checks.");
   }
   return {
     command: "dotnet",
@@ -114,12 +104,7 @@ export function probeInvocation(
 
 export async function runProbe(baseUrl: string, worker: boolean): Promise<ProbeResult> {
   const invocation = probeInvocation(["probe", baseUrl, String(worker)]);
-  let output: string;
-  try {
-    output = await run(invocation.command, invocation.args, true);
-  } finally {
-    if (invocation.directory) await rm(invocation.directory, { recursive: true, force: true });
-  }
+  const output = await run(invocation.command, invocation.args, true);
   const line = output.split(/\r?\n/u).filter(Boolean).at(-1) ?? "";
   const result = JSON.parse(line) as ProbeResult;
   assert.equal(result.workerBoundary, worker, "The probe reports a different Worker boundary");

@@ -11,10 +11,9 @@ using static ArcForges.Cloud.Tests.Reduction.MigrationTestSupport;
 namespace ArcForges.Cloud.Tests.Reduction;
 
 /// <summary>
-/// CLOUD.84 U10: one-for-one C# replacement of tests/worker/d1-migration-deploy.test.ts (16 test blocks). The deployment decisions run in
-/// ArcForges.Cloud.Storage.D1.Deploy and the step runs through MigrateCommand.DeployAsync, against the SQLite batch oracle behind a fake
-/// Cloudflare endpoint (the same oracle backs both). SQLite is not D1 and a fake endpoint is not Cloudflare: the proof-environment run is a
-/// separate, recorded live check.
+/// Historical D1 guard fixture coverage and the current Go deployment's D1-absence and PostgreSQL gate wiring.
+/// The pre-cutover proof D1 REST/catalog, provider failure and build exclusion checks remain at Cloud
+/// 9b8796eac760982d9814f371b820b736ddd945c4.
 /// </summary>
 public sealed class DeployTests
 {
@@ -60,50 +59,6 @@ public sealed class DeployTests
         Assert.Equal(code, refusal.Code);
     }
 
-    /// <summary>A fake Cloudflare: the database lookup and the D1 query endpoint, the latter backed by the SQLite batch oracle.</summary>
-    private sealed class FakeCloudflare(SqliteBatchOracle client, string databaseName = "arcforges-proof-business", string? failBatchWith = null) : HttpMessageHandler
-    {
-        public List<(string Url, string? Authorization)> Requests { get; } = [];
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var url = request.RequestUri!.ToString();
-            Requests.Add((url, request.Headers.Authorization?.ToString()));
-            if (url.Contains("/d1/database?", StringComparison.Ordinal))
-                return ScriptedHandler.Json($$"""{"success": true, "result": [{"uuid": "{{DatabaseId}}", "name": "{{databaseName}}"}]}""");
-            Assert.EndsWith($"/d1/database/{DatabaseId}/query", url, StringComparison.Ordinal);
-            if (failBatchWith is not null)
-                return ScriptedHandler.Json(new JsonObject { ["success"] = false, ["errors"] = new JsonArray(new JsonObject { ["message"] = failBatchWith }) }.ToJsonString(), 500);
-            var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!;
-            var statements = body["batch"]!.AsArray().Select(item => new MigrationStatement(
-                item!["sql"]!.GetValue<string>(),
-                item["params"]!.AsArray().Select(value => value is null ? null : value.GetValueKind() == JsonValueKind.Number ? (object)value.GetValue<long>() : value.GetValue<string>()).ToList())).ToList();
-            try
-            {
-                var results = await client.BatchAsync(statements, cancellationToken);
-                var array = new JsonArray();
-                foreach (var result in results)
-                {
-                    var rows = new JsonArray();
-                    foreach (var row in result.Rows)
-                    {
-                        var cells = new JsonObject();
-                        for (var index = 0; index < row.Count; index++) cells[$"c{index}"] = row[index] is null ? null : JsonValue.Create(row[index]);
-                        rows.Add((JsonNode)cells);
-                    }
-
-                    array.Add((JsonNode)new JsonObject { ["results"] = rows, ["meta"] = new JsonObject { ["changes"] = result.Changes } });
-                }
-
-                return ScriptedHandler.Json(new JsonObject { ["success"] = true, ["result"] = array }.ToJsonString());
-            }
-            catch (MigrationClientException error)
-            {
-                return ScriptedHandler.Json(new JsonObject { ["success"] = false, ["errors"] = new JsonArray(new JsonObject { ["message"] = error.Message }) }.ToJsonString(), 400);
-            }
-        }
-    }
-
     /// <summary>A staged root: a copy of the migrations, the candidate manifest and the deployment configuration.</summary>
     private static string Stage(string? manifestMigrations = null)
     {
@@ -141,15 +96,31 @@ public sealed class DeployTests
     }
 
     [Fact]
-    public void ProductionDeclaresNoBusinessDatabaseAndProofNamesItsReservedOneFromWranglerJson()
+    public void CurrentProductionAndProofBothOmitD1BindingsInWranglerJson()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepositoryRoot, "wrangler.json")));
         var config = document.RootElement;
         Assert.Null(DeployGate.DatabaseNameFor(MigrationFiles.DeclaredDatabases(config, "production"), "production"));
-        Assert.Equal("arcforges-proof-business", DeployGate.DatabaseNameFor(MigrationFiles.DeclaredDatabases(config, "proof"), "proof"));
+        Assert.Null(DeployGate.DatabaseNameFor(MigrationFiles.DeclaredDatabases(config, "proof"), "proof"));
         AssertRefusal("ambiguous-database", () => DeployGate.DatabaseNameFor(
             [new D1Binding("DB", "a"), new D1Binding("DB", "b")], "production"));
         AssertRefusal("ambiguous-database", () => DeployGate.DatabaseNameFor([new D1Binding("OTHER", "a")], "production"));
+    }
+
+    [Fact]
+    public void HistoricalProofSelectsItsReservedD1BindingAndNamesTheRunner()
+    {
+        // This fixture represents the proof declaration at 9b8796e, with no provider lookup.
+        using var legacy = JsonDocument.Parse("""
+            { "env": { "proof": { "d1_databases": [{ "binding": "DB", "database_name": "arcforges-proof-business" }] } } }
+            """);
+        Assert.Null(DeployGate.DatabaseNameFor(MigrationFiles.DeclaredDatabases(legacy.RootElement, "production"), "production"));
+        Assert.Equal("arcforges-proof-business",
+            DeployGate.DatabaseNameFor(MigrationFiles.DeclaredDatabases(legacy.RootElement, "proof"), "proof"));
+        var env = Env();
+        Assert.Equal("gh-42-1-deploy-proof", DeployGate.RunnerIdentity(env));
+        env["GITHUB_RUN_ATTEMPT"] = "2";
+        Assert.Equal("gh-42-2-deploy-proof", DeployGate.RunnerIdentity(env));
     }
 
     [Fact]
@@ -190,6 +161,14 @@ public sealed class DeployTests
         Assert.Equal(1, report.After.SchemaVersion);
         Assert.Equal(new[] { chain[2].File, chain[3].File, chain[4].File }, report.After.Pending.ToArray());
         Assert.True(report.Compatibility.CanWrite);
+        var formatted = DeployGate.FormatReport(report);
+        using var output = JsonDocument.Parse(formatted);
+        var fields = output.RootElement;
+        Assert.Equal("passed", fields.GetProperty("status").GetString());
+        Assert.Equal(report.Run.Fence, fields.GetProperty("fence").GetInt64());
+        Assert.Contains(fields.GetProperty("receipts").EnumerateArray(), entry => entry.GetProperty("file").GetString() == chain[1].File);
+        Assert.True(fields.GetProperty("compatibility").GetProperty("canWrite").GetBoolean());
+        Assert.DoesNotContain(Token, formatted, StringComparison.Ordinal);
         // A second deployment of the same release has nothing to do.
         var again = await DeployGate.RunGateAsync(Gate(client, null, time));
         Assert.True(again.Run.AlreadyCurrent);
@@ -246,28 +225,23 @@ public sealed class DeployTests
     }
 
     [Fact]
-    public async Task TheProofStepMigratesTheRealCatalogThroughTheRestClientPrintsReceiptsAndTheCompatibilityRecordAndNoSecret()
+    public async Task TheProofD1AbsenceFixtureRecordsNotApplicableWithoutProviderCalls()
     {
-        using var client = new SqliteBatchOracle();
-        var fake = new FakeCloudflare(client);
         var root = Stage();
         try
         {
-            var (code, output) = await Deploy("proof", root, Env(), fake);
+            var handler = new ScriptedHandler((request, body) =>
+            {
+                Assert.Fail("current proof declares no D1 database");
+                return Task.FromResult(ScriptedHandler.Json("{}"));
+            });
+            var (code, output) = await Deploy("proof", root, Env(), handler);
             Assert.Equal(0, code);
-            Assert.Matches("\"status\": \"passed\"", output);
-            Assert.Matches("\"fence\": 1", output);
-            Assert.Contains("\"receipts\"", output, StringComparison.Ordinal);
-            Assert.Contains("\"compatibility\"", output, StringComparison.Ordinal);
-            var last = Baseline()[^1].File;
-            Assert.Contains(last, output, StringComparison.Ordinal);
+            Assert.Empty(handler.Bodies);
+            Assert.Contains("not applicable", output, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"receipts\"", output, StringComparison.Ordinal);
             Assert.DoesNotContain(Token, output, StringComparison.Ordinal);
-            Assert.All(fake.Requests, entry => Assert.Equal($"Bearer {Token}", entry.Authorization));
-            Assert.DoesNotContain(fake.Requests, entry => entry.Url.Contains(Token, StringComparison.Ordinal));
-            Assert.Equal("passed", DeployGateRecord(root, "proof").Status);
-            // The runner identity names the run, and its lease was released at the end.
-            Assert.Null(client.Query("SELECT lease_holder FROM platform_schema_state")[0][0]);
-            Assert.Equal("gh-42-1-deploy-proof", client.Query("SELECT runner FROM platform_migration_receipt ORDER BY sequence LIMIT 1")[0][0]);
+            Assert.Equal("not-applicable", DeployGateRecord(root, "proof").Status);
         }
         finally
         {
@@ -282,48 +256,42 @@ public sealed class DeployTests
     }
 
     [Fact]
-    public async Task AFailingMigrationStepStopsPromotionWithExitCode1ARefusedGateRecordAndNoPromotionWithoutAPassedRecord()
+    public void TheGoD1AbsenceReceiptRequiresTheExactCleanCandidateAndEmptyD1Configuration()
     {
-        using var client = new SqliteBatchOracle();
-        var fake = new FakeCloudflare(client, failBatchWith: $"permission denied for {Token}");
-        var root = Stage();
-        try
-        {
-            var (code, output) = await Deploy("proof", root, Env(), fake);
-            Assert.Equal(1, code);
-            Assert.Contains("REFUSED", output, StringComparison.Ordinal);
-            Assert.Contains("Nothing is promoted", output, StringComparison.Ordinal);
-            Assert.DoesNotContain(Token, output, StringComparison.Ordinal);
-            Assert.Equal("refused", DeployGateRecord(root, "proof").Status);
-            AssertRefusal("gate-failed", () => DeployGate.RequireGatePassed(new GateRecord("proof", Revision, "refused", "failed"), "proof", Revision));
-            // A missing record, a record of another revision and a record of another target never allow promotion.
-            AssertRefusal("gate-missing", () => DeployGate.RequireGatePassed(null, "proof", Revision));
-            AssertRefusal("gate-mismatch", () => DeployGate.RequireGatePassed(new GateRecord("proof", "f".PadRight(40, 'f'), "passed", string.Empty), "proof", Revision));
-            AssertRefusal("gate-mismatch", () => DeployGate.RequireGatePassed(new GateRecord("proof", Revision, "passed", string.Empty), "production", Revision));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        var gate = File.ReadAllText(Path.Combine(RepositoryRoot, "eng", "migrations", "deploy.ts"));
+        var verified = gate.IndexOf("const candidate = await verifyCandidate();", StringComparison.Ordinal);
+        var revision = gate.IndexOf("assert.equal(candidate.revision, process.env.GITHUB_SHA);", StringComparison.Ordinal);
+        var clean = gate.IndexOf("assert.equal(candidate.dirty, false);", StringComparison.Ordinal);
+        var receipt = gate.IndexOf("await writeJson(", StringComparison.Ordinal);
+        Assert.True(verified >= 0 && verified < revision && revision < clean && clean < receipt);
+        Assert.Contains("revision: candidate.revision", gate[receipt..], StringComparison.Ordinal);
+        Assert.Contains("status: \"not-applicable\"", gate[receipt..], StringComparison.Ordinal);
+
+        var candidate = File.ReadAllText(Path.Combine(RepositoryRoot, "tooling", "project.ts"));
+        Assert.Contains("assertNoD1Binding(config);", candidate, StringComparison.Ordinal);
+        Assert.Contains("assertNoD1Binding(config.env?.proof);", candidate, StringComparison.Ordinal);
+        var production = File.ReadAllText(Path.Combine(RepositoryRoot, "tooling", "cloudflare.ts"));
+        Assert.Contains("assert.equal(record.target, target", production, StringComparison.Ordinal);
+        Assert.Contains("assert.equal(record.revision, revision", production, StringComparison.Ordinal);
+        Assert.Contains("assert.equal(record.status, \"not-applicable\"", production, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ABuildExcludedOrAContractWithoutConsentFailsTheStepAndStopsPromotion()
+    public void ProductionAndProofRequirePostgresAfterD1AbsenceBeforePromotion()
     {
-        using var client = new SqliteBatchOracle();
-        // The database is past the cutover of a later catalog; this release's catalog is the real baseline.
-        await MigrationEngine.ApplyPendingAsync(Options(client, Chain(), "earlier", new TestClock(), stopAfter: 3));
-        var root = Stage();
-        try
+        var workflow = File.ReadAllText(Path.Combine(RepositoryRoot, ".github", "workflows", "ci.yml"));
+        var jobs = Jobs(workflow);
+        foreach (var (job, d1Target, postgresTarget, promotion) in new[]
         {
-            var (code, output) = await Deploy("proof", root, Env(), new FakeCloudflare(client));
-            Assert.Equal(1, code);
-            Assert.Contains("REFUSED", output, StringComparison.Ordinal);
-            AssertRefusal("gate-failed", () => DeployGate.RequireGatePassed(new GateRecord("proof", Revision, DeployGateRecord(root, "proof").Status, string.Empty), "proof", Revision));
-        }
-        finally
+            ("deploy", "production", "production", "npm run deploy\n"),
+            ("deploy-proof", "proof", "acceptance", "npm run deploy:proof\n"),
+        })
         {
-            Directory.Delete(root, recursive: true);
+            var body = jobs[job];
+            var d1 = body.IndexOf($"run: node eng/migrations/deploy.ts deploy --target {d1Target}", StringComparison.Ordinal);
+            var postgres = body.IndexOf($"run: node tooling/postgres-deploy.ts migrate --target {postgresTarget}", StringComparison.Ordinal);
+            var publish = body.IndexOf($"run: {promotion}", StringComparison.Ordinal);
+            Assert.True(d1 >= 0 && d1 < postgres && postgres < publish, $"{job}: D1 absence and PostgreSQL gates precede promotion");
         }
     }
 
@@ -344,8 +312,12 @@ public sealed class DeployTests
             Assert.Empty(handler.Bodies);
             Assert.Matches("not applicable", output);
             Assert.Equal("not-applicable", DeployGateRecord(root, "production").Status);
-            AssertRefusal("gate-failed", () => DeployGate.RequireGatePassed(new GateRecord("production", Revision, "refused", string.Empty), "production", Revision));
-            DeployGate.RequireGatePassed(new GateRecord("production", Revision, "not-applicable", string.Empty), "production", Revision);
+            var receipt = new GateRecord("production", Revision, "not-applicable", string.Empty);
+            DeployGate.RequireGatePassed(receipt, "production", Revision);
+            AssertRefusal("gate-failed", () => DeployGate.RequireGatePassed(receipt with { Status = "refused" }, "production", Revision));
+            AssertRefusal("gate-missing", () => DeployGate.RequireGatePassed(null, "production", Revision));
+            AssertRefusal("gate-mismatch", () => DeployGate.RequireGatePassed(receipt with { Target = "proof" }, "production", Revision));
+            AssertRefusal("gate-mismatch", () => DeployGate.RequireGatePassed(receipt with { Revision = new string('f', 40) }, "production", Revision));
         }
         finally
         {

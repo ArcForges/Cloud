@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   axes,
   candidateEnvironment,
-  contractsIdentityRecord,
   expectedIdentity,
   imageBuildVariables,
   resolveAxes,
@@ -143,7 +143,15 @@ test("rehashed identity and runtime health cannot substitute any source, axis or
       : "0.1.0-local.1";
   const expected = expectedIdentity(version);
   verifyIdentity(expected, version);
-  verifyHealthIdentity({ artifact: expected.artifact, build: expected.build }, expected);
+  const health = {
+    artifact: expected.artifact,
+    build: expected.build,
+    runtime: "go",
+    nativeAot: false,
+  };
+  verifyHealthIdentity(health, expected);
+  assert.throws(() => verifyHealthIdentity({ ...health, runtime: "csharp" }, expected));
+  assert.throws(() => verifyHealthIdentity({ ...health, nativeAot: true }, expected));
   for (const field of [
     "sourceCommit",
     "dirty",
@@ -159,7 +167,10 @@ test("rehashed identity and runtime health cannot substitute any source, axis or
     });
     assert.throws(() => verifyIdentity(changed, version));
     assert.throws(() =>
-      verifyHealthIdentity({ artifact: changed.artifact, build: changed.build }, expected),
+      verifyHealthIdentity(
+        { ...health, artifact: changed.artifact, build: changed.build },
+        expected,
+      ),
     );
   }
   const changed = structuredClone(expected);
@@ -181,7 +192,7 @@ test("deployment retry retains the original candidate attempt without accepting 
   assert.equal(env.GITHUB_RUN_ATTEMPT, "2");
 });
 
-test("the current Contracts receipt shape resolves through the Hello schema source entry", () => {
+test("the historical Contracts receipt shape resolves through the Hello schema source entry", () => {
   const f = fixture();
   const hello = "public/proto/arcforges/hello/v1/hello.proto";
   const receipt = (sources: Record<string, string>, extra: Record<string, unknown> = {}) =>
@@ -228,12 +239,153 @@ test("the current Contracts receipt shape resolves through the Hello schema sour
   }
 });
 
-test("the Contracts identity is the committed record, pinned to the restored NuGet version (CLOUD.84 S33(3)(a))", () => {
-  const record = JSON.parse(
-    readFileSync(new URL(`../../${contractsIdentityRecord}`, import.meta.url), "utf8"),
-  ) as { repository?: unknown; version?: unknown };
-  const pins = readFileSync(new URL("../../Directory.Packages.props", import.meta.url), "utf8");
-  const pinned = /Include="ArcForges\.Contracts\.PublicApi" Version="([^"]+)"/u.exec(pins)?.[1];
-  assert.equal(record.repository, "https://github.com/ArcForges/Contracts");
-  assert.equal(record.version, pinned);
+test("the historical NuGet source still resolves only against its original package pin", () => {
+  const f = fixture();
+  const source = "packages/contracts/source.json";
+  f.catalog.axes.ContractSet = { kind: "contracts", sources: [source] };
+  f.sources[source] = JSON.stringify({
+    schema: "arcforges.hello.v1",
+    version: "1.0.0-ci.287.1",
+    dirty: false,
+    descriptorSha256: "a".repeat(64),
+  });
+  f.sources["Directory.Packages.props"] =
+    '<PackageVersion Include="ArcForges.Contracts.PublicApi" Version="1.0.0-ci.287.1" />';
+  assert.deepEqual(resolveAxes(f.catalog, f.read).ContractSet, {
+    status: "present",
+    values: [
+      {
+        subject: "arcforges.hello",
+        version: "1",
+        source: { path: source, sha256: createHash("sha256").update(f.read(source)).digest("hex") },
+        descriptorSha256: "a".repeat(64),
+      },
+    ],
+  });
+  f.sources["Directory.Packages.props"] = f
+    .read("Directory.Packages.props")
+    .replace("287.1", "481.1");
+  assert.throws(() => resolveAxes(f.catalog, f.read));
+});
+
+function goFixture() {
+  const f = fixture();
+  const source = "center/dependencies.json";
+  f.catalog.axes.ContractSet = { kind: "contracts", sources: [source] };
+  f.catalog.axes.PackageVersion = { kind: "packages", sources: [source, "PackageVersion.json"] };
+  const contracts = {
+    path: "github.com/ArcForges/Contracts/go",
+    repository: "https://github.com/ArcForges/Contracts",
+    commit: "a".repeat(40),
+    version: "v1.0.0-ci.481.1",
+    sum: `h1:${"a".repeat(43)}=`,
+    goModSum: `h1:${"b".repeat(43)}=`,
+  };
+  const inputs = {
+    "go.mod": `module github.com/ArcForges/Cloud/center\n\nrequire ${contracts.path} ${contracts.version}\n`,
+    "go.sum": `${contracts.path} ${contracts.version} ${contracts.sum}\n${contracts.path} ${contracts.version}/go.mod ${contracts.goModSum}\n`,
+  };
+  const runtimeModules = [contracts];
+  const record = () => {
+    for (const [name, value] of Object.entries(inputs)) f.sources[`center/${name}`] = value;
+    f.sources[source] = JSON.stringify({
+      schemaVersion: 1,
+      inputs: Object.fromEntries(
+        Object.entries(inputs).map(([name, value]) => [
+          name,
+          createHash("sha256").update(value).digest("hex"),
+        ]),
+      ),
+      runtimeModules,
+    });
+  };
+  record();
+  return { ...f, source, contracts, inputs, runtimeModules, record };
+}
+
+test("Go ContractSet identifies the exact published module without claiming a descriptor hash", () => {
+  const f = goFixture();
+  const identity = resolveAxes(f.catalog, f.read);
+  const expectedValue = {
+    subject: `pkg:go/${f.contracts.path}`,
+    version: "1.0.0-ci.481.1",
+    source: { path: f.source, sha256: createHash("sha256").update(f.read(f.source)).digest("hex") },
+  };
+  assert.deepEqual(identity.ContractSet, {
+    status: "present",
+    values: [{ ...expectedValue, goModule: f.contracts }],
+  });
+  assert.deepEqual((identity.PackageVersion as { values: unknown[] }).values[0], expectedValue);
+});
+
+test("the production candidate uses the Go and Worker lock inputs", () => {
+  const version =
+    process.env.GITHUB_ACTIONS === "true"
+      ? `0.1.0-ci.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}`
+      : "0.1.0-local.1";
+  const identity = expectedIdentity(version);
+  const contract = identity.axes.ContractSet as {
+    values: { source: { path: string }; descriptorSha256?: string }[];
+  };
+  const packages = identity.axes.PackageVersion as { values: { subject: string }[] };
+  assert.equal(contract.values.length, 1);
+  assert.equal(contract.values[0]?.source.path, "center/dependencies.json");
+  assert.equal(contract.values[0]?.descriptorSha256, undefined);
+  assert(packages.values.some((value) => value.subject.startsWith("pkg:go/")));
+  assert(packages.values.some((value) => value.subject.startsWith("pkg:npm/")));
+  assert(!packages.values.some((value) => value.subject.startsWith("pkg:nuget/")));
+});
+
+test("Go source identity refuses input drift, missing or changed checksum, pin, or producer", () => {
+  const f = goFixture();
+  f.sources["center/go.mod"] = `${f.read("center/go.mod")}\n`;
+  assert.throws(() => resolveAxes(f.catalog, f.read), /module file differs/);
+  f.record();
+  f.sources["center/go.sum"] = `${f.read("center/go.sum")}\n`;
+  assert.throws(() => resolveAxes(f.catalog, f.read), /sum file differs/);
+
+  const cases = [
+    {
+      change: (x: ReturnType<typeof goFixture>) => {
+        x.inputs["go.sum"] = x.inputs["go.sum"].split("\n")[0] ?? "";
+      },
+      problem: /metadata hash is missing/,
+    },
+    {
+      change: (x: ReturnType<typeof goFixture>) => {
+        x.contracts.sum = `h1:${"z".repeat(43)}=`;
+      },
+      problem: /archive hash is missing/,
+    },
+    {
+      change: (x: ReturnType<typeof goFixture>) => {
+        x.inputs["go.mod"] = x.inputs["go.mod"].replace("481.1", "480.1");
+      },
+      problem: /pin differs/,
+    },
+    {
+      change: (x: ReturnType<typeof goFixture>) => {
+        x.contracts.repository = "https://github.com/other/Contracts";
+      },
+      problem: /github\.com\/ArcForges\/Contracts/,
+    },
+    {
+      change: (x: ReturnType<typeof goFixture>) => {
+        x.contracts.commit = "invalid";
+      },
+      problem: /invalid/,
+    },
+    {
+      change: (x: ReturnType<typeof goFixture>) => {
+        x.runtimeModules.push(x.contracts);
+      },
+      problem: /Duplicate Go runtime module/,
+    },
+  ];
+  for (const { change, problem } of cases) {
+    const fixture = goFixture();
+    change(fixture);
+    fixture.record();
+    assert.throws(() => resolveAxes(fixture.catalog, fixture.read), problem);
+  }
 });

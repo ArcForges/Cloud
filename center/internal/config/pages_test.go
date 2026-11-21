@@ -4,18 +4,19 @@ package config
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
 // TestThePagesSurfaceNeedsTheIdentitySurface (PLT-12): FLAGSHIP_SURFACES-style lists name pages only with identity; a self-hosted
 // default enables both, and loses both when identity cannot be a relying party.
 func TestThePagesSurfaceNeedsTheIdentitySurface(t *testing.T) {
-	if got := KnownSurfaces(); len(got) != 8 || got[0] != SurfaceIdentity || got[1] != SurfacePages || got[2] != SurfaceOperations || got[3] != SurfaceFleet ||
-		got[4] != SurfaceMobile || got[5] != SurfaceRelay || got[6] != SurfaceNodes || got[7] != SurfaceCommerce {
+	if got := KnownSurfaces(); len(got) != 7 || got[0] != SurfaceIdentity || got[1] != SurfacePages || got[2] != SurfaceOperations || got[3] != SurfaceFleet ||
+		got[4] != SurfaceRelay || got[5] != SurfaceNodes || got[6] != SurfaceCommerce {
 		t.Fatalf("known surfaces %v", got)
 	}
-	if got := DefaultSelfHostedSurfaces(); len(got) != 6 || got[0] != SurfaceIdentity || got[1] != SurfacePages || got[2] != SurfaceFleet || got[3] != SurfaceMobile ||
-		got[4] != SurfaceRelay || got[5] != SurfaceNodes {
+	if got := DefaultSelfHostedSurfaces(); len(got) != 5 || got[0] != SurfaceIdentity || got[1] != SurfacePages || got[2] != SurfaceFleet ||
+		got[3] != SurfaceRelay || got[4] != SurfaceNodes {
 		t.Fatalf("the self-hosted default surfaces %v", got)
 	}
 	hosted := func(surfaces string) map[string]string {
@@ -45,6 +46,24 @@ func TestThePagesSurfaceNeedsTheIdentitySurface(t *testing.T) {
 	self[EnvPublicBaseURL] = "https://192.0.2.10:8443"
 	if loaded, err = Load(environment(self)); err != nil || loaded.Identity.Enabled(SurfaceIdentity) || loaded.Identity.Enabled(SurfacePages) || loaded.Identity.Disabled == "" {
 		t.Fatalf("self-hosted on an address: %v %q %v", loaded.Identity.Surfaces, loaded.Identity.Disabled, err)
+	}
+}
+
+func TestRetiredMobileConfigurationFailsClosed(t *testing.T) {
+	for _, mode := range []Mode{SelfHosted, OfficialHosted} {
+		for variable, value := range map[string]string{
+			EnvSurfaces:                              "identity,pages,mobile,fleet",
+			"ARCFORGES_CENTER_ANDROID_APP":           "[]",
+			"ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT": "com.arcforges.android.debug",
+		} {
+			t.Run(string(mode)+"/"+variable, func(t *testing.T) {
+				values := withIdentity(mode, map[string]string{EnvClientIPHeader: ClientIPHeader, variable: value})
+				_, err := Load(environment(values))
+				if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), variable) || !strings.Contains(err.Error(), "retired") {
+					t.Fatalf("expected an explicit refusal for %s, got %v", variable, err)
+				}
+			})
+		}
 	}
 }
 

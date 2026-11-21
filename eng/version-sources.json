@@ -8,12 +8,12 @@
     },
     "ContractSet": {
       "kind": "contracts",
-      "sources": ["packages/contracts/source.json"]
+      "sources": ["center/dependencies.json"]
     },
     "CapabilityVersion": {
       "kind": "declarations",
       "absence": "not-produced",
-      "reason": "Hello is not a production capability descriptor.",
+      "reason": "The Go candidate has no separately versioned capability descriptor.",
       "producer": "WP09 and the product capability owner"
     },
     "NativeFormatVersion": {
@@ -24,8 +24,8 @@
     "StorageSchemaVersion": {
       "kind": "migrations",
       "absence": "not-produced",
-      "reason": "No application migration set is implemented.",
-      "producer": "WP07 and the Cloud persistence owner"
+      "reason": "The build companion does not attest the applied PostgreSQL schema. The Go migration chain tracks schema admission separately.",
+      "producer": "Cloud PostgreSQL migration tooling"
     },
     "NativeAbiVersion": {
       "kind": "native-abi",
@@ -46,7 +46,7 @@
     },
     "PackageVersion": {
       "kind": "packages",
-      "sources": ["src/ArcForges.Cloud/packages.lock.json", "package-lock.json"]
+      "sources": ["center/dependencies.json", "package-lock.json"]
     }
   }
 }

@@ -18,7 +18,7 @@ public sealed class ProductionBundleMarkersTests
         "var a = 1;\n" + string.Join("\n", Pages.Select(path => $"route(\"{path}\");")) + "\n" + string.Join("\n", extra) + "\nexport { CloudContainer };\n";
 
     [Fact]
-    public void TheGeneratedTableListsTheFourteenWebBrowserSessionRoutesAndTheTwoNativeMobileRoutes()
+    public void TheGeneratedTableListsExactlyTheFourteenWebBrowserSessionRoutes()
     {
         // AFV2-ID-01 adds two recovery and five account lifecycle routes to the original seven browser routes.
         var browserRoutes = new[]
@@ -38,10 +38,7 @@ public sealed class ProductionBundleMarkersTests
             "/session/v1/web/step-up/begin",
             "/session/v1/web/step-up/complete",
         };
-        // AF-CTR-04 part M: the mobile surface's native begin and token rows lie below the session prefix too (dark in production).
-        Assert.Equal(16, Pages.Count);
-        Assert.Equal(browserRoutes.Order(StringComparer.Ordinal), Pages.Where(path => path.StartsWith("/session/v1/web/", StringComparison.Ordinal)).Order(StringComparer.Ordinal));
-        Assert.Equal(new[] { "/session/v1/mobile/begin", "/session/v1/mobile/token" }, Pages.Where(path => !path.StartsWith("/session/v1/web/", StringComparison.Ordinal)).Order(StringComparer.Ordinal));
+        Assert.Equal(browserRoutes.Order(StringComparer.Ordinal), Pages.Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -53,6 +50,8 @@ public sealed class ProductionBundleMarkersTests
     [InlineData("/session/v1/logout")]
     [InlineData("/session/v1/web/")]
     [InlineData("/session/v1/web/bootstrap/extra")]
+    [InlineData("/session/v1/mobile/begin")]
+    [InlineData("/session/v1/mobile/token")]
     [InlineData("/session/v1/")]
     public void ARouteBelowTheSessionPrefixThatTheTableDoesNotListFails(string route) =>
         Assert.Contains(ProductionBundleMarkers.Violations(Bundle($"fetch(\"{route}\");"), Pages), violation => violation.Contains(route, StringComparison.Ordinal));

@@ -29,7 +29,7 @@ import {
   verifySecurityBridgeImageFiles,
 } from "./ctr06-security-bridge-legal.ts";
 import { root } from "./process.ts";
-import { releaseProfile } from "./release-provenance.ts";
+import { releaseProfile, verifySecurityBridgeProducer } from "./release-provenance.ts";
 import type { WorkerConfig } from "./project.ts";
 
 export const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -290,7 +290,8 @@ export async function buildSecurityBridge(
   );
   assert(path.isAbsolute(source) && path.isAbsolute(goArchive));
   const input = actualBridgeProducer(root, source);
-  // The checked-in active admission must bind this exact bootstrap producer closure.
+  // The archive audit cannot attest code being executed from this checkout.
+  verifySecurityBridgeProducer(root);
   releaseProfile(root);
   assert.equal(process.version, "v26.13.1", "Select the pinned Node release");
   const output = outputDirectory(outputName);

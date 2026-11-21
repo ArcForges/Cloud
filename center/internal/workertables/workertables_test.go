@@ -225,10 +225,14 @@ func TestTheSurfaceRepliesAreTheCentersRefusals(t *testing.T) {
 			t.Fatal("the template marker does not round trip")
 		}
 	}
-	if !strings.Contains(generated, "export const surfaceNames: readonly Surface[] = [\n  \"identity\",\n  \"pages\",\n  \"operations\",\n  \"fleet\",\n  \"mobile\",\n  \"relay\",\n  \"nodes\",\n  \"commerce\",\n];") ||
+	if !strings.Contains(generated, "export const surfaceNames: readonly Surface[] = [\n  \"identity\",\n  \"pages\",\n  \"operations\",\n  \"fleet\",\n  \"relay\",\n  \"nodes\",\n  \"commerce\",\n];") ||
 		!strings.Contains(generated, `export const clientIpHeader = "x-arcforges-client-ip";`) ||
-		!strings.Contains(generated, "export type Surface =\n  \"identity\" | \"pages\" | \"operations\" | \"fleet\" | \"mobile\" | \"relay\" | \"nodes\" | \"commerce\";") {
+		!strings.Contains(generated, "export type Surface =\n  \"identity\" | \"pages\" | \"operations\" | \"fleet\" | \"relay\" | \"nodes\" | \"commerce\";") {
 		t.Fatal("the surface constants changed")
+	}
+	if !strings.Contains(generated, "export const nativeRoutes: readonly NativeRoute[] = [];") ||
+		!strings.Contains(generated, "export const apexRoutes: readonly ApexRoute[] = [];") {
+		t.Fatal("the retired native and apex tables are not empty")
 	}
 }
 

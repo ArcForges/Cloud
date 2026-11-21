@@ -10,8 +10,11 @@
 // checks are provider metadata receipts, not runtime tests.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ProofCandidate } from "../../tooling/proof-candidate.ts";
+import { parseDocument } from "../../tooling/provenance.ts";
 import { centerSurfaces } from "../../worker/ingress/routes.ts";
 import { centerResources, provisionCenter } from "./center-provision.ts";
 import {
@@ -21,7 +24,6 @@ import {
   proofBootstrapFromEnvironment,
   profileBundlePin,
   proofAssetsDirName,
-  proofDatabaseName,
   proofHostname,
   proofQueueNames,
   proofWorkerName,
@@ -31,6 +33,7 @@ import {
   verifyProfileBundle,
   verifySiteArchive,
   type CandidateConfig,
+  type ProofBootstrap,
 } from "./proof-deploy.ts";
 
 const productionWorker = "arcforges-cloud";
@@ -170,7 +173,6 @@ export async function probeAccess(api: CloudflareApi): Promise<Check[]> {
   checks.push(
     await listCheck(api, "Workers Scripts read", api.accountPath("/workers/scripts"), true),
   );
-  checks.push(await listCheck(api, "D1 read", api.accountPath("/d1/database?per_page=5"), true));
   checks.push(await listCheck(api, "R2 read", api.accountPath("/r2/buckets"), true));
   checks.push(await listCheck(api, "Queues read", api.accountPath("/queues?per_page=5"), true));
   const zoneId = await findZoneId(api);
@@ -200,47 +202,14 @@ export async function probeAccess(api: CloudflareApi): Promise<Check[]> {
 }
 
 export interface Provisioned {
-  d1DatabaseId: string;
   actions: string[];
 }
 
-async function ensureD1(api: CloudflareApi, actions: string[]): Promise<string> {
-  const find = async () => {
-    const reply = await api.request(
-      "GET",
-      api.accountPath(`/d1/database?name=${encodeURIComponent(proofDatabaseName)}&per_page=100`),
-    );
-    assert(reply.success, `D1 list failed (${describe(reply)})`);
-    const found = (reply.result as { uuid?: string; name?: string }[]).find(
-      (entry) => entry.name === proofDatabaseName,
-    );
-    return found?.uuid;
-  };
-  let id = await find();
-  if (id === undefined) {
-    const created = await api.request("POST", api.accountPath("/d1/database"), {
-      name: proofDatabaseName,
-    });
-    // Whatever the create answered, the listing decides (a lost reply may hide a success).
-    id = await find();
-    assert(id !== undefined, `D1 create failed (${describe(created)})`);
-    actions.push(`D1 ${proofDatabaseName}: created`);
-  } else actions.push(`D1 ${proofDatabaseName}: exists`);
-  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
-  return id;
-}
-
 /**
- * Idempotent provisioning of the acceptance environment: the retained proof D1 database (still bound; the gated C# migration
- * step keeps it current until AF-CTR-09 inspects and keeps it) and the center's own acceptance resources (center-provision.ts).
- * The C# proof's R2 bucket and queues are retained as they are and no longer bound; nothing else is touched here (the deployment
- * detaches the proof script's consumers of the two retired queues, prepareProofScript).
+ * Idempotent provisioning of the Go Center's acceptance resources. Historical proof storage stays in provider custody.
  */
 export async function provision(api: CloudflareApi): Promise<Provisioned> {
-  const actions: string[] = [];
-  const d1DatabaseId = await ensureD1(api, actions);
-  actions.push(...(await provisionCenter(api, "acceptance")));
-  return { d1DatabaseId, actions };
+  return { actions: await provisionCenter(api, "acceptance") };
 }
 
 /** What the deployment found and changed on the proof script before uploading the acceptance bundle. */
@@ -946,11 +915,44 @@ export async function verifyAndStageProofAssets(
   };
 }
 
-async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<void> {
-  const { candidateDir, readJson, root, wrangler, writeJson } =
-    await import("../../tooling/process.ts");
-  const { readGate, requirePostgresGate, slotLabel, withRuntimeCredential } =
-    await import("../../tooling/postgres-deploy.ts");
+const preflightKeyBinding = `ARCFORGES_CENTER_KEY_PROOF_${"0".repeat(32)}`;
+
+export function verifyProofConfiguration(
+  bytes: Buffer,
+  candidate: ProofCandidate,
+  account: string,
+  bootstrap: ProofBootstrap | undefined,
+) {
+  assert.equal(
+    createHash("sha256").update(bytes).digest("hex"),
+    candidate.workerConfigSha256,
+    "The sealed proof Worker configuration changed after candidate verification.",
+  );
+  const config = parseDocument(bytes) as CandidateConfig;
+  const options = {
+    account,
+    revision: candidate.revision,
+    main: sealedProofBundle,
+    buildIdentity: (config as { vars?: { BUILD_IDENTITY?: string } }).vars?.BUILD_IDENTITY,
+    bootstrap,
+  };
+  buildProofConfig(config, {
+    ...options,
+    imageDigest: `registry.cloudflare.com/${account}/arcforges-cloud@sha256:${"0".repeat(64)}`,
+    proofCommandKeyBinding: preflightKeyBinding,
+  });
+  return { config, options };
+}
+
+async function deploy(account: string, makeProvider: () => CloudflareApi): Promise<void> {
+  const { candidateDir, root, wrangler, writeJson } = await import("../../tooling/process.ts");
+  const {
+    readGate,
+    promotionRuntimeRole,
+    sourceMigrationVersion,
+    slotLabel,
+    withRuntimeCredential,
+  } = await import("../../tooling/postgres-deploy.ts");
   const { withNeonRuntimeSecret } = await import("../../tooling/neon-runtime.ts");
   const {
     protectedProofRuntimeRunner,
@@ -966,33 +968,55 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
   // AF-CTR-03 A2: the owner bootstrap of this dispatch (none after the owner exists); an invalid one stops the deployment before
   // anything is pushed.
   const bootstrap = proofBootstrapFromEnvironment(process.env);
-  const { candidate, imageDigest } = await prepareProofCandidate(api.account, async (revision) =>
-    requirePostgresGate(await readGate("acceptance"), "acceptance", revision),
+  const expectedSchema = await sourceMigrationVersion();
+  const resources: string[] = [];
+  let verifiedConfig: ReturnType<typeof verifyProofConfiguration> | undefined;
+  let runtimeRole: string | undefined;
+  let provider: CloudflareApi | undefined;
+  const { candidate, imageDigest } = await prepareProofCandidate(
+    account,
+    async (revision) => {
+      runtimeRole = promotionRuntimeRole(
+        await readGate("acceptance"),
+        "acceptance",
+        revision,
+        expectedSchema,
+      );
+    },
+    {
+      verifyConfig: async (candidate) => {
+        const bytes = await readFile(path.join(candidateDir, "wrangler.json"));
+        verifiedConfig = verifyProofConfiguration(bytes, candidate, account, bootstrap);
+      },
+      prepareResources: async () => {
+        const api = makeProvider();
+        provider = api;
+        report("Access", await probeAccess(api));
+        await checkProofDomainFree(api);
+        resources.push(...(await provision(api)).actions);
+        for (const entry of resources) console.log(`  ${entry}`);
+      },
+    },
   );
-
-  await checkProofDomainFree(api);
-  const postgresGate = await readGate("acceptance");
-  requirePostgresGate(postgresGate, "acceptance", candidate.revision);
-  assert(
-    typeof postgresGate?.runtimeRole === "string",
-    "The acceptance runtime generation floor is missing.",
+  assert(verifiedConfig && provider && runtimeRole, "The proof deployment was not prepared.");
+  const api = provider;
+  const admittedRuntimeRole = runtimeRole;
+  assert.equal(
+    promotionRuntimeRole(
+      await readGate("acceptance"),
+      "acceptance",
+      candidate.revision,
+      expectedSchema,
+    ),
+    admittedRuntimeRole,
+    "The acceptance runtime generation floor changed during preparation.",
   );
-  const candidateConfig = await readJson<CandidateConfig>(path.join(candidateDir, "wrangler.json"));
-  const configOptions = {
-    account: api.account,
-    imageDigest,
-    revision: candidate.revision,
-    databaseId: provisioned.d1DatabaseId,
-    // The proof runs the candidate's sealed bundle; no deployment rebuilds it.
-    main: sealedProofBundle,
-    buildIdentity: (candidateConfig as { vars?: { BUILD_IDENTITY?: string } }).vars?.BUILD_IDENTITY,
-    migrationsDir: "../worker/proof-migrations",
-    bootstrap,
-  };
+  const candidateConfig = verifiedConfig.config;
+  const configOptions = { ...verifiedConfig.options, imageDigest };
   // Refuse an invalid candidate and unknown or mixed live versions before registering a key. This temporary config names no secret.
   const preflightConfig = buildProofConfig(candidateConfig, {
     ...configOptions,
-    proofCommandKeyBinding: `ARCFORGES_CENTER_KEY_PROOF_${"0".repeat(32)}`,
+    proofCommandKeyBinding: preflightKeyBinding,
   });
   const configFile = path.join(root, "artifacts", "proof.wrangler.json");
   await writeJson(configFile, preflightConfig);
@@ -1063,7 +1087,7 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
         },
         {
           liveSlots: proofSlots,
-          runtimeRole: postgresGate.runtimeRole,
+          runtimeRole: admittedRuntimeRole,
           runner: protectedProofRuntimeRunner,
         },
       );
@@ -1095,12 +1119,11 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
           // The independently produced PostgreSQL gate retains the server's logging settings.
           logging: "see postgres-gate-acceptance.json",
         },
-        retainedD1DatabaseId: provisioned.d1DatabaseId,
         // The retired C# proof queues stay, unconsumed, until AF-CTR-09.
         retiredQueueConsumers: preflight.retiredConsumers,
         cronSchedules: preflight.cronSchedules,
         migrationTag: preflight.migrationTag,
-        resources: provisioned.actions,
+        resources,
         centerResources: centerResources.acceptance,
         receipts: receipts.map((check) => ({ name: check.name, ok: check.ok })),
         deployedAt: new Date().toISOString(),
@@ -1127,6 +1150,10 @@ async function deploy(api: CloudflareApi, provisioned: Provisioned): Promise<voi
 
 export async function main(action: string): Promise<void> {
   const { account, token } = requireContext(process.env, action);
+  if (action === "deploy") {
+    await deploy(account, () => new CloudflareApi(account, token));
+    return;
+  }
   const api = new CloudflareApi(account, token);
   if (action === "observe") {
     // Read-only: nothing is provisioned, deployed or changed, and no request reaches the deployed service.
@@ -1137,8 +1164,6 @@ export async function main(action: string): Promise<void> {
   if (action === "access") return;
   const provisioned = await provision(api);
   for (const entry of provisioned.actions) console.log(`  ${entry}`);
-  if (action === "provision") return;
-  await deploy(api, provisioned);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))

@@ -20,7 +20,10 @@ import {
   releaseDownloadArguments,
   requireContext,
   verifyAndStageProofAssets,
+  verifyProofConfiguration,
 } from "../../eng/verification/proof-cloudflare.ts";
+import { prepareProofCandidate } from "../../tooling/proof-candidate.ts";
+import { promotionRuntimeRole, sourceMigrationVersion } from "../../tooling/postgres-deploy.ts";
 import {
   profileBundleAssetName,
   profileBundlePin,
@@ -199,7 +202,7 @@ function fakeCloudflare(overrides: Partial<State> = {}) {
 }
 
 test("access probes name each capability and never print a token", async () => {
-  const { api } = fakeCloudflare();
+  const { api, state } = fakeCloudflare();
   const checks = await probeAccess(api);
   assert(
     checks.every((check) => check.ok),
@@ -207,13 +210,14 @@ test("access probes name each capability and never print a token", async () => {
   );
   assert.deepEqual(
     checks.filter((check) => check.required).map((check) => check.name),
-    ["Workers Scripts read", "D1 read", "R2 read", "Queues read", "Zone read (arcforges.com)"],
+    ["Workers Scripts read", "R2 read", "Queues read", "Zone read (arcforges.com)"],
   );
+  assert(!state.calls.some((call) => call.includes("/d1/")));
   const denied = fakeCloudflare({ denied: new Set(["/d1/", "/queues"]) });
   const failed = await probeAccess(denied.api);
   assert.deepEqual(
     failed.filter((check) => !check.ok && check.required).map((check) => check.name),
-    ["D1 read", "Queues read"],
+    ["Queues read"],
   );
   assert(
     JSON.stringify(failed).includes("10000 Authentication error [redacted]"),
@@ -225,17 +229,17 @@ test("access probes name each capability and never print a token", async () => {
 test("provisioning creates exactly the reserved resources once and is idempotent", async () => {
   const { api, state } = fakeCloudflare();
   const first = await provision(api);
-  assert.equal(first.d1DatabaseId, d1Id);
-  // AF-CTR-02: the retained proof D1 database and the center's acceptance bucket (with its lifecycle rules) and queues.
+  // The current acceptance resources are the center's bucket and queues.
   const lifecycle = "lifecycle support-bundles-30-days, abort-incomplete-uploads";
   assert.deepEqual(first.actions, [
-    "D1 arcforges-proof-business: created",
     "R2 arcforges-acceptance-center: created",
     `R2 arcforges-acceptance-center: ${lifecycle}`,
     "Queue arcforges-acceptance-center-events: created",
     "Queue arcforges-acceptance-center-events-dlq: created",
   ]);
-  assert.equal(state.calls.filter((call) => call.startsWith("POST")).length, 4);
+  assert.equal(state.calls.filter((call) => call.startsWith("POST")).length, 3);
+  assert(!state.calls.some((call) => call.includes("/d1/")));
+  assert.deepEqual(state.d1, []);
   assert.deepEqual(
     (state.lifecycles.get("arcforges-acceptance-center") as { id: string }[]).map(
       (rule) => rule.id,
@@ -246,14 +250,17 @@ test("provisioning creates exactly the reserved resources once and is idempotent
   const second = await provision(api);
   assert.deepEqual(
     second.actions.map((entry) => entry.split(": ")[1]),
-    ["exists", "exists", lifecycle, "exists", "exists"],
+    ["exists", lifecycle, "exists", "exists"],
   );
   assert.equal(state.calls.filter((call) => call.startsWith("POST")).length, 0);
-  // Resources of other names are never mistaken for the reserved ones.
-  const other = fakeCloudflare({
-    d1: [{ uuid: "22222222-2222-4222-8222-222222222222", name: "arcforges-proof-business-x" }],
-  });
-  assert.equal((await provision(other.api)).d1DatabaseId, d1Id);
+  const historical = [
+    { uuid: d1Id, name: "arcforges-proof-business" },
+    { uuid: "22222222-2222-4222-8222-222222222222", name: "arcforges-proof-business-x" },
+  ];
+  const retained = fakeCloudflare({ d1: structuredClone(historical), denied: new Set(["/d1/"]) });
+  await provision(retained.api);
+  assert.deepEqual(retained.state.d1, historical);
+  assert(!retained.state.calls.some((call) => call.includes("/d1/")));
   // A refused create is an error naming the cause.
   const refused = fakeCloudflare({ denied: new Set(["/r2/"]) });
   await assert.rejects(provision(refused.api), /R2 create failed/u);
@@ -613,6 +620,129 @@ test("the deployment prepares the proof script before the credential rotation an
   assert(prepared < deploy.indexOf('"deploy",'));
   for (const field of ["retiredQueueConsumers:", "cronSchedules:", "migrationTag:"])
     assert(deploy.slice(deploy.indexOf("proof-deployment.json")).includes(field), field);
+});
+
+test("proof deploy routes directly to the candidate gate before provider access or provisioning", () => {
+  const source = readFileSync(
+    path.resolve(import.meta.dirname, "../../eng/verification/proof-cloudflare.ts"),
+    "utf8",
+  );
+  const main = source.slice(source.indexOf("export async function main("));
+  const deploy = source.slice(
+    source.indexOf("async function deploy("),
+    source.indexOf("export async function main("),
+  );
+  const deployCall = "await deploy(account, () => new CloudflareApi(account, token))";
+  assert(main.indexOf(deployCall) >= 0);
+  assert(main.indexOf(deployCall) < main.indexOf("const api = new CloudflareApi(account, token)"));
+  assert(main.indexOf(deployCall) < main.indexOf("await probeAccess(api)"));
+  const candidate = deploy.indexOf("await prepareProofCandidate(");
+  const postgres = deploy.indexOf('await readGate("acceptance")');
+  const runtimeRole = deploy.indexOf("runtimeRole = promotionRuntimeRole(");
+  const config = deploy.indexOf("verifiedConfig = verifyProofConfiguration(");
+  const provider = deploy.indexOf("const api = makeProvider()");
+  const access = deploy.indexOf("await probeAccess(api)");
+  const domain = deploy.indexOf("await checkProofDomainFree(api)");
+  const provisioning = deploy.indexOf("await provision(api)");
+  assert(
+    candidate >= 0 &&
+      candidate < runtimeRole &&
+      runtimeRole < postgres &&
+      postgres < config &&
+      config < provider &&
+      provider < access &&
+      access < domain &&
+      domain < provisioning,
+  );
+  assert.doesNotMatch(deploy, /databaseId:|migrationsDir:|retainedD1DatabaseId:/u);
+});
+
+test("invalid sealed proof configuration or PostgreSQL admission causes no resource or image effects", async () => {
+  const revision = "a".repeat(40);
+  const schema = await sourceMigrationVersion();
+  const source = readFileSync(path.resolve(import.meta.dirname, "../../wrangler.json"));
+  const unsafe = JSON.parse(source.toString("utf8"));
+  unsafe.env.proof.preview_urls = true;
+  const malformed = Buffer.from(JSON.stringify(unsafe));
+  const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+  const environment = {
+    GITHUB_ACTIONS: "true",
+    GITHUB_REPOSITORY: "ArcForges/Cloud",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_EVENT_PATH: "/fixture/event.json",
+    GITHUB_SHA: revision,
+    GITHUB_RUN_ID: "99",
+    GITHUB_RUN_NUMBER: "100",
+    GITHUB_RUN_ATTEMPT: "1",
+    ARCFORGES_CANDIDATE_RUN_ID: "98",
+    ARCFORGES_CANDIDATE_RUN_NUMBER: "99",
+    ARCFORGES_CANDIDATE_RUN_ATTEMPT: "1",
+    GH_TOKEN: "synthetic-github",
+    CLOUDFLARE_API_TOKEN: "synthetic-provider",
+  };
+  for (const [bytes, configDigest, version, runtimeRole, error, expected] of [
+    [malformed, hash(source), schema, "arcforges_runtime", /configuration changed/u, ["candidate"]],
+    [malformed, hash(malformed), schema, "arcforges_runtime", /Preview URLs/u, ["candidate"]],
+    [
+      source,
+      hash(source),
+      schema - 1,
+      "arcforges_runtime",
+      /PostgreSQL gate/u,
+      ["candidate", "head", "postgres"],
+    ],
+    [
+      source,
+      hash(source),
+      schema,
+      "invalid role",
+      /PostgreSQL gate/u,
+      ["candidate", "head", "postgres"],
+    ],
+  ] as const) {
+    const events: string[] = [];
+    await assert.rejects(
+      prepareProofCandidate(
+        account,
+        async (checkedRevision) => {
+          events.push("postgres");
+          promotionRuntimeRole(
+            { revision, target: "acceptance", status: "passed", version, runtimeRole },
+            "acceptance",
+            checkedRevision,
+            schema,
+          );
+        },
+        {
+          environment,
+          verifyConfig: async (candidate) => {
+            verifyProofConfiguration(bytes, candidate, account, undefined);
+          },
+          prepareResources: async () => {
+            events.push("provider");
+          },
+          run: async (stage) => {
+            events.push(stage);
+            if (stage === "candidate")
+              return {
+                schema: 2,
+                runtime: "go",
+                revision,
+                dirty: false,
+                version: "0.1.0-ci.99.1",
+                image: "arcforges-cloud:ci.99.1",
+                imageId: `sha256:${"b".repeat(64)}`,
+                workerConfigSha256: configDigest,
+              };
+            if (stage === "head") return { sha: revision };
+            throw new Error("unexpected image or provider operation");
+          },
+        },
+      ),
+      error,
+    );
+    assert.deepEqual(events, expected);
+  }
 });
 
 test("both deployments record the configured surfaces the deployed version starts the center with, and the local checks compare them", () => {

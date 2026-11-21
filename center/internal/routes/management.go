@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ArcForges/Contracts/go/arcforges/management/v2/managementv2connect"
 	"github.com/ArcForges/Contracts/go/arcforges/sandbox/v2/sandboxv2connect"
 
 	"github.com/ArcForges/Cloud/center/internal/ingress"
@@ -50,9 +51,11 @@ func ManagementDeadline(method ManagementMethod) time.Duration {
 		sandboxv2connect.DataServiceReadExportProcedure, sandboxv2connect.DataServiceCloseTransferProcedure:
 		return ManagementDataDeadline
 	default:
-		return RoutedDeadline
+		return managementDeadline
 	}
 }
+
+const managementDeadline = 10 * time.Second
 
 // ManagementDataDeadline bounds each transfer phase that may perform I/O.
 const ManagementDataDeadline = 30 * time.Second
@@ -99,3 +102,62 @@ func ManagementMethods() []ManagementMethod {
 // ManagementRequestBytes includes the unary frame header. It also fits the
 // private channel body bound with room for its signed context.
 const ManagementRequestBytes = 253_952
+
+// RoutedReplyBytes is the 1 MiB framed reply limit for ordinary routed operations.
+// DataService.ReadExport has its own transfer bound.
+const RoutedReplyBytes = 1_048_576
+
+// ListDevicesReplyBytes bounds 200 entries with a retained name, exact IDs and
+// the closed V2 profile capability set, including framed responses.
+const ListDevicesReplyBytes = 131_072
+
+func addManagementRoutes(module *Module) error {
+	for _, path := range []string{
+		managementv2connect.DeviceServiceListProcedure,
+		managementv2connect.DeviceServiceInspectProcedure,
+		managementv2connect.DeviceServiceRevokeProcedure,
+	} {
+		policy, err := ingress.NewUnary(path, ingress.Session, ingress.NoScope, ingress.DefaultMaxRequestBytes, true)
+		if err != nil {
+			return err
+		}
+		replyBytes := 65_536
+		if path == managementv2connect.DeviceServiceListProcedure {
+			replyBytes = ListDevicesReplyBytes
+		}
+		addManagementRoute(module, policy, managementDeadline, replyBytes)
+	}
+	for _, method := range append(ManagementMethods(), ManagementDataMethods()...) {
+		requestBytes, replyBytes := ManagementRequestBytes, RoutedReplyBytes
+		switch method.Path {
+		case sandboxv2connect.DataServiceWriteImportProcedure:
+			requestBytes = ingress.DataTransferWireBytes
+		case sandboxv2connect.DataServiceReadExportProcedure:
+			replyBytes = ingress.DataTransferWireBytes
+		}
+		policy, err := ingress.NewUnary(method.Path, ingress.Session, ingress.NoScope, requestBytes, true)
+		if err != nil {
+			return err
+		}
+		policy.CarriesRemoteTarget = true
+		addManagementRoute(module, policy, ManagementDeadline(method), replyBytes)
+	}
+	for _, method := range ManagementWatchMethods() {
+		policy, err := ingress.NewServerStream(method.Path, ingress.Session, ingress.NoScope, ingress.DefaultMaxRequestBytes, true)
+		if err != nil {
+			return err
+		}
+		policy.CarriesRemoteTarget = true
+		addManagementRoute(module, policy, ManagementDeadline(method), RoutedReplyBytes)
+	}
+	return nil
+}
+
+func addManagementRoute(module *Module, policy ingress.Policy, deadline time.Duration, replyBytes int) {
+	policy = policy.InSurface(SurfaceNodes).WithDeadline(deadline)
+	module.Policies = append(module.Policies, policy)
+	module.Budgets[policy.FullName] = Budget{
+		MaxFrameBytes: replyBytes, MaxUnaryResponseBytes: replyBytes,
+		MaxDurationMilliseconds: int(deadline.Milliseconds()), Instance: HealthInstance,
+	}
+}

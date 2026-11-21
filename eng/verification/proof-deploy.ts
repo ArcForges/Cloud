@@ -64,7 +64,6 @@ interface ProofEnvironment {
   assets?: Record<string, unknown>;
   containers: { image: string; [key: string]: unknown }[];
   vars: Record<string, string>;
-  d1_databases: { database_id?: string; [key: string]: unknown }[];
   [key: string]: unknown;
 }
 export interface CandidateConfig {
@@ -147,11 +146,12 @@ export function buildProofConfig(
     account: string;
     imageDigest: string;
     revision: string;
+    /** Historical input. Current Go proof configuration refuses it. */
     databaseId?: string;
     main: string;
     /** The candidate's compiled build identity (its top-level BUILD_IDENTITY), for the Worker's build header. */
     buildIdentity?: string;
-    /** Relative to the directory of the generated configuration file. */
+    /** Historical input. Current Go proof configuration refuses it. */
     migrationsDir?: string;
     /** The owner bootstrap of this dispatch; the checked-in configuration carries none, so only a dispatch can set it. */
     bootstrap?: ProofBootstrap;
@@ -172,6 +172,15 @@ export function buildProofConfig(
     "A pinned registry image digest is required.",
   );
   assert(candidate.env?.proof, "The candidate has no proof environment.");
+  assert(
+    !Object.hasOwn(candidate, "d1_databases") &&
+      !Object.hasOwn(candidate.env.proof, "d1_databases"),
+    "The Go proof candidate must not declare D1 bindings.",
+  );
+  assert(
+    !Object.hasOwn(options, "databaseId") && !Object.hasOwn(options, "migrationsDir"),
+    "The Go proof candidate does not accept D1 deployment overrides.",
+  );
   assert.equal(candidate.env.proof.name, proofWorkerName);
   // workers.dev and preview URLs stay disabled, and the only ingress is the dedicated custom domain;
   // the production route arcforges.com/api/* belongs to the production Worker alone.
@@ -179,11 +188,7 @@ export function buildProofConfig(
   assert.equal(candidate.env.proof.preview_urls, false, "Preview URLs must stay disabled.");
   assert.deepEqual(candidate.env.proof.routes, [{ pattern: proofHostname, custom_domain: true }]);
   // Only a sealed candidate bundle is published: the deploy uploads it with --no-bundle, so nothing is bundled or rebuilt.
-  assert.match(
-    options.main,
-    /^\.\/(?:candidate\/[a-z-]+\.js|ctr06-bridge\/proof-worker\.js)$/u,
-    "Only a sealed candidate bundle can be deployed.",
-  );
+  assert.equal(options.main, sealedProofBundle, "Only the sealed Go proof bundle can be deployed.");
   assert.equal(
     candidate.env.proof.main,
     proofSourceEntry,
@@ -244,15 +249,6 @@ export function buildProofConfig(
     proof.vars[bootstrapExpiresAtVariable] = bootstrap.expiresAt;
   }
   if (options.buildIdentity !== undefined) proof.vars.BUILD_IDENTITY = options.buildIdentity;
-  if (options.databaseId !== undefined) {
-    assert.match(
-      options.databaseId,
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
-    );
-    (proof.d1_databases[0] as { database_id?: string }).database_id = options.databaseId;
-  }
-  if (options.migrationsDir !== undefined)
-    (proof.d1_databases[0] as { migrations_dir?: string }).migrations_dir = options.migrationsDir;
   // Checked-in configuration never supplies the selected binding or a key. The protected deployment injects its public name only.
   for (const vars of [
     (candidate as { vars?: Record<string, string> }).vars,

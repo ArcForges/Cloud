@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "owner": "Cloud",
+  "axes": {
+    "AppVersion": {
+      "kind": "release",
+      "sources": ["assembly/release.json"]
+    },
+    "ContractSet": {
+      "kind": "contracts",
+      "sources": ["packages/contracts/source.json"]
+    },
+    "CapabilityVersion": {
+      "kind": "declarations",
+      "absence": "not-produced",
+      "reason": "Hello is not a production capability descriptor.",
+      "producer": "WP09 and the product capability owner"
+    },
+    "NativeFormatVersion": {
+      "kind": "declarations",
+      "absence": "not-applicable",
+      "reason": "This service does not own a portable product format."
+    },
+    "StorageSchemaVersion": {
+      "kind": "migrations",
+      "absence": "not-produced",
+      "reason": "No application migration set is implemented.",
+      "producer": "WP07 and the Cloud persistence owner"
+    },
+    "NativeAbiVersion": {
+      "kind": "native-abi",
+      "absence": "not-applicable",
+      "reason": "This application has no first-party C ABI boundary; third-party native packages remain dependency inventory."
+    },
+    "PolicySchemaVersion": {
+      "kind": "declarations",
+      "absence": "not-produced",
+      "reason": "MSBuild policy is not a signed application policy schema.",
+      "producer": "WP03/44"
+    },
+    "ExtensionProtocolVersion": {
+      "kind": "declarations",
+      "absence": "not-produced",
+      "reason": "No extension protocol is implemented.",
+      "producer": "WP03/41"
+    },
+    "PackageVersion": {
+      "kind": "packages",
+      "sources": ["src/ArcForges.Cloud/packages.lock.json", "package-lock.json"]
+    }
+  }
+}

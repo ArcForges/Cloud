@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// ARCFORGES_HELLO_RUNTIME=go selects the Go center (/app/arcforges-center) and passes it its explicit mode, public base URL and
+// ARCFORGES_HELLO_RUNTIME=go is required to start the Go center (/app/arcforges-center). The Worker passes its explicit mode, public base URL and
 // plan configuration, and the runtime role's pooled PostgreSQL URL of its store; the center refuses to start without a valid
 // mode and base URL. It also passes the enabled surfaces the Worker forwards (FLAGSHIP_SURFACES as parsed here, "none" when none)
 // and always names the header the Worker sets to the client's address, so the center and the Worker agree on both, and passes the
 // identity policy override where an environment sets one (only the acceptance environment's anonymous-flow ceiling) and the owner bootstrap
-// (digest and expiry) that a protected proof dispatch sets (never a checked-in value). The Hello's own Neon credential reaches only the C# host, or a Go center without a store. The
+// (digest and expiry) that a protected proof dispatch sets (never a checked-in value). The Hello's own Neon credential is used only when the Go center has no store. The
 // mail variables reach a Go center only while ARCFORGES_CENTER_MAIL_PROVIDER names a provider, and then only that provider's own closed list; an unset, empty or "disabled" provider
 // passes none (a secret left in the Worker environment is never handed on), and no deployed environment names a provider today. Proof subclasses
 // keep their closed outbound policy and their own environment hook.
@@ -15,8 +15,7 @@
 // version starts the center with against the digest recorded, in this Durable Object's storage, before the running center's start.
 // A center started under another digest is stopped (SIGTERM, then SIGKILL, each bounded) and started again with this version's
 // settings before the request is forwarded; one restart serves every request that arrives meanwhile.
-import { Container, type OutboundHandler } from "@cloudflare/containers";
-import { aiInternalOutbound } from "../ai/internal/outbound.ts";
+import { Container } from "@cloudflare/containers";
 import { startFailedText } from "../readiness/container.ts";
 import { containerSleepAfter } from "../tables/cloud-tables.generated.ts";
 import {
@@ -47,6 +46,7 @@ export interface CenterEnvironment {
   /** The identity policy override; only the acceptance environment sets one (its anonymous-flow ceiling, C1). */
   ARCFORGES_CENTER_IDENTITY_POLICY?: string;
   ARCFORGES_CENTER_ANDROID_APP?: string;
+  ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT?: string;
   ARCFORGES_CENTER_DATABASE_URL?: string;
   /** The protected proof deployment names one selected test-key binding, never its value. */
   ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING?: string;
@@ -115,7 +115,7 @@ const commerceVariables = [
 /**
  * The mail variables to hand the Go center for a provider value: none while mail is unset, empty or "disabled"; the closed list of
  * "postmark" or "smtp" (an exact string match); anything else, including a value that is not a string, throws a fixed error that
- * names no value (as an unknown Hello runtime does).
+ * names no value.
  */
 function mailVariablesOf(provider: unknown): readonly MailName[] {
   if (provider === undefined || provider === "" || provider === "disabled") return [];
@@ -124,79 +124,84 @@ function mailVariablesOf(provider: unknown): readonly MailName[] {
   throw new Error("Unknown mail provider.");
 }
 
-/** What the Container runs: the entrypoint (undefined keeps the image's C# default), its environment and TCP egress. */
+/** The entrypoint, environment and TCP egress included in the Container's start digest. */
 export interface CenterContainerSettings {
   entrypoint?: string[];
   envVars: Record<string, string>;
   enableInternet: boolean;
 }
 
-/** The Container settings of the configured Hello runtime; it throws on an unknown runtime or a missing Hello credential. */
+/** Validates the Go runtime configuration and prepares its explicit start settings. */
 export function centerContainerSettings(
   center: CenterEnvironment,
   options: { proofCommandKey?: boolean } = {},
-): CenterContainerSettings {
-  const runtime = center.ARCFORGES_HELLO_RUNTIME;
-  const settings: CenterContainerSettings = { envVars: {}, enableInternet: false };
-  const go = runtime === "go";
-  if (go) {
-    settings.entrypoint = ["/app/arcforges-center"];
-    // Passed through unchanged: the center validates them and refuses to start on a missing or invalid value.
-    for (const name of [
-      "ARCFORGES_CENTER_MODE",
-      "ARCFORGES_CENTER_PUBLIC_BASE_URL",
-      "ARCFORGES_CENTER_PLAN_CONFIGURATION",
-      "ARCFORGES_CENTER_IDENTITY_POLICY",
-      "ARCFORGES_CENTER_ANDROID_APP",
-      "ARCFORGES_CENTER_BOOTSTRAP_SHA256",
-      "ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT",
-    ] as const) {
-      const value = center[name];
-      if (value !== undefined) settings.envVars[name] = value;
-    }
-    if (center.ARCFORGES_CENTER_MODE === officialHostedCenterMode) {
-      const catalogue = center.ARCFORGES_CENTER_HOSTED_CATALOGUE;
-      if (catalogue !== undefined) settings.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE = catalogue;
-      if (
-        paddleWebhookRoute &&
-        enabledSurfaces(center.FLAGSHIP_SURFACES).has(paddleWebhookRoute.surface)
-      ) {
-        for (const name of commerceVariables) {
-          const value = center[name];
-          if (value !== undefined) settings.envVars[name] = value;
-        }
+): Required<CenterContainerSettings> {
+  if (center.ARCFORGES_HELLO_RUNTIME !== "go")
+    throw new Error("The Center container requires ARCFORGES_HELLO_RUNTIME=go.");
+  const surfaces = center.FLAGSHIP_SURFACES;
+  if (typeof surfaces === "string" && surfaces.split(",").includes("mobile"))
+    throw new Error("The mobile surface has been retired.");
+  if (
+    center.ARCFORGES_CENTER_ANDROID_APP !== undefined &&
+    center.ARCFORGES_CENTER_ANDROID_APP !== ""
+  )
+    throw new Error("ARCFORGES_CENTER_ANDROID_APP was retired with the mobile surface.");
+  if (center.ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT !== undefined)
+    throw new Error("ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT was retired with the mobile surface.");
+  const settings: Required<CenterContainerSettings> = {
+    entrypoint: ["/app/arcforges-center"],
+    envVars: {},
+    enableInternet: false,
+  };
+  // Passed through unchanged: the center validates them and refuses to start on a missing or invalid value.
+  for (const name of [
+    "ARCFORGES_CENTER_MODE",
+    "ARCFORGES_CENTER_PUBLIC_BASE_URL",
+    "ARCFORGES_CENTER_PLAN_CONFIGURATION",
+    "ARCFORGES_CENTER_IDENTITY_POLICY",
+    "ARCFORGES_CENTER_BOOTSTRAP_SHA256",
+    "ARCFORGES_CENTER_BOOTSTRAP_EXPIRES_AT",
+  ] as const) {
+    const value = center[name];
+    if (value !== undefined) settings.envVars[name] = value;
+  }
+  if (center.ARCFORGES_CENTER_MODE === officialHostedCenterMode) {
+    const catalogue = center.ARCFORGES_CENTER_HOSTED_CATALOGUE;
+    if (catalogue !== undefined) settings.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE = catalogue;
+    if (paddleWebhookRoute && enabledSurfaces(surfaces).has(paddleWebhookRoute.surface)) {
+      for (const name of commerceVariables) {
+        const value = center[name];
+        if (value !== undefined) settings.envVars[name] = value;
       }
     }
-    // The mail variables of the named provider, each only when it is a non-empty string. The egress switch is the database's: a mail
-    // variable never widens it (the identity surface that sends mail needs the store, and with it the switch is already on).
-    for (const name of mailVariablesOf(center.ARCFORGES_CENTER_MAIL_PROVIDER)) {
-      const value: unknown = center[name];
-      if (typeof value === "string" && value !== "") settings.envVars[name] = value;
-    }
-    // Only the protected proof entry can select a proof command key; stale or unselected Worker secrets are never forwarded.
-    if (options.proofCommandKey && enabledSurfaces(center.FLAGSHIP_SURFACES).has("relay")) {
-      const binding = center.ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING;
-      if (!isProofCommandKeyBinding(binding))
-        throw new Error("The proof command key binding is missing or invalid.");
-      const value = (center as unknown as Record<string, unknown>)[binding];
-      if (typeof value !== "string" || value === "")
-        throw new Error("The proof command key is missing or invalid.");
-      settings.envVars[binding] = value;
-    }
-    settings.envVars.ARCFORGES_CENTER_SURFACES = centerSurfaces(center.FLAGSHIP_SURFACES);
-    settings.envVars.ARCFORGES_CENTER_CLIENT_IP_HEADER = clientIpHeader;
-    if (center.ARCFORGES_CENTER_DATABASE_URL) {
-      // Native PostgreSQL TCP is not handled by the HTTP outbound proxy; allowedHosts would NOT restrict TCP port 5432.
-      settings.enableInternet = true;
-      settings.envVars.ARCFORGES_CENTER_DATABASE_URL = center.ARCFORGES_CENTER_DATABASE_URL;
-    }
-  } else if (runtime !== undefined && runtime !== "" && runtime !== "csharp")
-    throw new Error("Unknown Hello runtime.");
+  }
+  // The mail variables of the named provider, each only when it is a non-empty string. The egress switch is the database's: a mail
+  // variable never widens it (the identity surface that sends mail needs the store, and with it the switch is already on).
+  for (const name of mailVariablesOf(center.ARCFORGES_CENTER_MAIL_PROVIDER)) {
+    const value: unknown = center[name];
+    if (typeof value === "string" && value !== "") settings.envVars[name] = value;
+  }
+  // Only the protected proof entry can select a proof command key; stale or unselected Worker secrets are never forwarded.
+  if (options.proofCommandKey && enabledSurfaces(surfaces).has("relay")) {
+    const binding = center.ARCFORGES_CENTER_PROOF_COMMAND_KEY_BINDING;
+    if (!isProofCommandKeyBinding(binding))
+      throw new Error("The proof command key binding is missing or invalid.");
+    const value = (center as unknown as Record<string, unknown>)[binding];
+    if (typeof value !== "string" || value === "")
+      throw new Error("The proof command key is missing or invalid.");
+    settings.envVars[binding] = value;
+  }
+  settings.envVars.ARCFORGES_CENTER_SURFACES = centerSurfaces(surfaces);
+  settings.envVars.ARCFORGES_CENTER_CLIENT_IP_HEADER = clientIpHeader;
+  const store = center.ARCFORGES_CENTER_DATABASE_URL;
+  if (store) {
+    // Native PostgreSQL TCP is not handled by the HTTP outbound proxy; allowedHosts would NOT restrict TCP port 5432.
+    settings.enableInternet = true;
+    settings.envVars.ARCFORGES_CENTER_DATABASE_URL = store;
+  }
   const enabled = center.ARCFORGES_NEON_HELLO;
   if (enabled !== undefined && enabled !== "" && enabled !== "disabled") {
-    // A Go center with a store reads the greeting through its runtime role; only the C# host and a Go center without a store
-    // receive the Hello's own Neon credential.
-    const store = go && Boolean(center.ARCFORGES_CENTER_DATABASE_URL);
+    // A Go center with a store reads the greeting through its runtime role.
     if (enabled !== "enabled" || (!store && !center.NEON_DATABASE_URL))
       throw new Error("Neon Hello runtime configuration is missing or invalid.");
     settings.enableInternet = true;
@@ -213,9 +218,9 @@ export function applyCenterContainer(
   options: { proofCommandKey?: boolean } = {},
 ): void {
   const settings = centerContainerSettings(center, options);
-  if (settings.entrypoint) container.entrypoint = settings.entrypoint;
+  container.entrypoint = settings.entrypoint;
   container.enableInternet = settings.enableInternet;
-  if (Object.keys(settings.envVars).length > 0) container.envVars = settings.envVars;
+  container.envVars = settings.envVars;
 }
 
 /** The Durable Object storage key of the start digest of the running center (written before every start). */
@@ -323,7 +328,3 @@ export class CloudContainer extends Container {
     return true;
   }
 }
-
-CloudContainer.outboundByHost = {
-  "ai.internal": aiInternalOutbound as OutboundHandler,
-};

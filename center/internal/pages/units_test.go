@@ -4,6 +4,8 @@ package pages
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/url"
 	"strconv"
 	"strings"
@@ -17,6 +19,19 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/routes"
 	"github.com/ArcForges/Cloud/center/internal/session"
 )
+
+func TestRetiredMobileProofTemplatesAreNotEmbedded(t *testing.T) {
+	if _, err := loadViews("/api"); err != nil {
+		t.Fatalf("load active templates: %v", err)
+	}
+	for _, name := range []string{
+		"mobile-authorize", "mobile-authorize-review", "mobile-authorize-done", "app-callback",
+	} {
+		if _, err := templateFiles.ReadFile("templates/" + name + ".gohtml"); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("retired template %s is present: %v", name, err)
+		}
+	}
+}
 
 // everyRefusal is every refusal a page can show: each constructor of package arc the identity surface uses.
 func everyRefusal(at time.Time) []*arc.Refusal {

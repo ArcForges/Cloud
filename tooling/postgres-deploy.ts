@@ -11,7 +11,7 @@
 // name from the environment of its own process.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -53,6 +53,21 @@ export const postgresTargets: Record<PostgresTarget, TargetSettings> = {
 
 export function gateFile(target: PostgresTarget): string {
   return path.join(root, "artifacts", `postgres-gate-${target}.json`);
+}
+
+export async function sourceMigrationVersion(): Promise<number> {
+  const entries = (await readdir(path.join(root, "center", "internal", "schema", "migrations")))
+    .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/u.test(name))
+    .sort();
+  assert(entries.length > 0, "The candidate's PostgreSQL migration inventory is empty.");
+  for (const [index, name] of entries.entries()) {
+    assert.equal(
+      Number(name.slice(0, 4)),
+      index + 1,
+      "The candidate's migration history is not contiguous.",
+    );
+  }
+  return entries.length;
 }
 
 /** The variables the executable reads, by name; values come only from the deployment environment. */

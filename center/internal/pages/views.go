@@ -14,7 +14,10 @@ import (
 // The pages' templates, script and style sheet are embedded: a self-hosted center serves them without any Web deployment, and
 // nothing is loaded from anywhere else (the content security policy admits no other source).
 var (
-	//go:embed templates/*.gohtml
+	// Keep the archived mobile proof templates as source evidence outside the runtime image.
+	//go:embed templates/base.gohtml templates/bootstrap.gohtml templates/error.gohtml templates/register.gohtml templates/recovery.gohtml
+	//go:embed templates/devices.gohtml templates/sessions.gohtml templates/passkeys.gohtml templates/lifecycle.gohtml templates/sign-*.gohtml
+	//go:embed templates/activate*.gohtml templates/connect*.gohtml templates/fleet-node.gohtml templates/operations-*.gohtml
 	templateFiles embed.FS
 	//go:embed static/account.js static/account.css
 	staticFiles embed.FS
@@ -23,8 +26,7 @@ var (
 // pageNames are the templates; each is a content template laid out by base.html (with the fleet review pages' shared node block,
 // fleet-node.gohtml).
 var pageNames = []string{"sign-in", "bootstrap", "sign-out", "passkeys", "sessions", "devices", "register", "error", "operations-grant", "operations-review",
-	"operations-done", "connect", "connect-review", "connect-done", "activate", "activate-review", "activate-done", "mobile-authorize",
-	"mobile-authorize-review", "mobile-authorize-done", "app-callback", "lifecycle", "recovery"}
+	"operations-done", "connect", "connect-review", "connect-done", "activate", "activate-review", "activate-done", "lifecycle", "recovery"}
 
 // views are the parsed templates and the static files.
 type views struct {
@@ -94,9 +96,6 @@ type pageData struct {
 
 	// The fleet pages.
 	Fleet fleetView
-
-	// The mobile pages.
-	Mobile mobileView
 
 	// Account lifecycle plans carry no reusable authorization or private export data.
 	Lifecycle lifecycleView

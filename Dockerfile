@@ -1,37 +1,29 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-FROM python:3.15.2-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS native-tools
-# Distro packages bootstrap the separate tools; every product compilation selects
-# the archive-verified LLVM and source-verified GNU releases below.
-RUN apt-get update && apt-get install --no-install-recommends -y build-essential ca-certificates zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
-WORKDIR /source
-COPY eng/native_toolchain.py eng/native-toolchain.json ./eng/
-RUN python eng/native_toolchain.py install --destination /opt/arcforges-native-tools \
-    && cd /opt/arcforges-native-tools \
-    && find llvm-23.1.5 binutils-2.47 -type f -print0 | sort -z | xargs -0 sha256sum > installed.sha256
+FROM python:3.15.2-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS build
+WORKDIR /source/center
+# The build image supplies the HTTPS client and archive reader. The compiler
+# comes only from the release pinned by center/toolchain.json.
+RUN python - <<'PY'
+from hashlib import file_digest
+from shutil import copyfileobj
+from tarfile import open as open_archive
+from tempfile import TemporaryFile
+from urllib.request import urlopen
 
-FROM mcr.microsoft.com/dotnet/sdk:11.0.100-resolute-aot@sha256:f3264ae0bf11e2062b9650e0822d20c999320ac1685fe3acf4b7c17d0881af85 AS build
-COPY --from=native-tools /opt/arcforges-native-tools/llvm-23.1.5/ /opt/arcforges-native-tools/llvm-23.1.5/
-COPY --from=native-tools /opt/arcforges-native-tools/binutils-2.47/ /opt/arcforges-native-tools/binutils-2.47/
-COPY --from=native-tools /opt/arcforges-native-tools/installed.sha256 /opt/arcforges-native-tools/installed.sha256
-ENV PATH="/opt/arcforges-native-tools/llvm-23.1.5/bin:/opt/arcforges-native-tools/binutils-2.47/bin:${PATH}" CC=clang CXX=clang++
-RUN cd /opt/arcforges-native-tools && sha256sum --check --quiet installed.sha256 \
-    && test "$(readlink -f llvm-23.1.5/bin/clang)" = /opt/arcforges-native-tools/llvm-23.1.5/bin/clang-23 \
-    && test "$(readlink -f llvm-23.1.5/bin/clang++)" = /opt/arcforges-native-tools/llvm-23.1.5/bin/clang-23 \
-    && test "$(clang -print-prog-name=ld.bfd)" = /opt/arcforges-native-tools/binutils-2.47/bin/ld.bfd \
-    && cmp binutils-2.47/bin/ld binutils-2.47/bin/ld.bfd \
-    && clang --version && ld.bfd --version && llvm-objcopy --version
-WORKDIR /source
-# Official Go archive is pinned and verified; no toolchain auto-download or mutable base tag.
-RUN curl --fail --silent --show-error --location https://go.dev/dl/go1.27.4.linux-amd64.tar.gz -o /tmp/go.tar.gz \
-    && echo "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840  /tmp/go.tar.gz" | sha256sum -c - \
-    && tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
+url = "https://go.dev/dl/go1.27.4.linux-amd64.tar.gz"
+expected = "7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840"
+with TemporaryFile() as archive:
+    with urlopen(url, timeout=60) as response:
+        copyfileobj(response, archive)
+    archive.seek(0)
+    if file_digest(archive, "sha256").hexdigest() != expected:
+        raise SystemExit("The Go archive SHA-256 differs from the pinned release.")
+    archive.seek(0)
+    with open_archive(fileobj=archive, mode="r:gz") as release:
+        release.extractall("/usr/local", filter="data")
+PY
 ENV PATH="/usr/local/go/bin:${PATH}" GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOTELEMETRY=off
-COPY global.json Directory.Build.props Directory.Build.targets Directory.Packages.props NuGet.Config ./
-COPY src/ ./src/
-RUN dotnet restore src/ArcForges.Cloud --locked-mode
-COPY package-lock.json ./
-COPY eng/version-sources.json ./eng/version-sources.json
+COPY center/ ./
 ARG SOURCE_REVISION
 ARG SOURCE_COMMIT
 ARG SOURCE_DIRTY
@@ -40,19 +32,13 @@ ARG BUILD_KIND
 ARG BUILD_ID
 ARG PIPELINE_RUN
 ARG SOURCE_EPOCH
-RUN test -n "$SOURCE_REVISION" && dotnet publish src/ArcForges.Cloud -c Release -r linux-x64 --no-restore \
-    -p:CppCompilerAndLinker=clang -p:CppLibCreator=ar -p:LinkerFlavor=bfd -p:ObjCopyName=llvm-objcopy \
-    -p:CloudSourceArchive=true -p:SourceRevisionId="$SOURCE_COMMIT" -p:ArcForgesSourceCommit="$SOURCE_COMMIT" \
-    -p:CloudSourceDirty="$SOURCE_DIRTY" -p:Version="$APP_VERSION" -p:ArcForgesBuildKind="$BUILD_KIND" \
-    -p:ArcForgesBuildId="$BUILD_ID" -p:ArcForgesPipelineRun="$PIPELINE_RUN" -p:ArcForgesSourceDateEpoch="$SOURCE_EPOCH" \
-    -o /out && test -x /out/ArcForges.Cloud
-# The Go center: modules verified against go.sum, built without cgo and with the same identity inputs as the C# executable.
-COPY center/ ./center/
-WORKDIR /source/center
-RUN go mod download && go mod verify && identity=github.com/ArcForges/Cloud/center/internal/buildinfo \
+RUN test -n "$SOURCE_REVISION" && sha256sum go.mod go.sum > /tmp/center-modules.sha256 \
+    && go mod download && go mod verify \
+    && identity=github.com/ArcForges/Cloud/center/internal/buildinfo \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
     -ldflags="-s -w -X $identity.appVersion=${APP_VERSION} -X $identity.sourceCommit=${SOURCE_COMMIT} -X $identity.sourceDirty=${SOURCE_DIRTY} -X $identity.buildKind=${BUILD_KIND} -X $identity.buildID=${BUILD_ID} -X $identity.pipelineRun=${PIPELINE_RUN} -X $identity.sourceEpoch=${SOURCE_EPOCH}" \
-    -o /out/arcforges-center ./cmd/arcforges-center && test -x /out/arcforges-center
+    -o /out/arcforges-center ./cmd/arcforges-center \
+    && sha256sum --check --quiet /tmp/center-modules.sha256 && test -x /out/arcforges-center
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:11.0.0-resolute-chiseled@sha256:24534e1f18024d3f8026061537fa21ba424f46cc0cdab4297c5528937b1ae960
 ARG SOURCE_REVISION=local
@@ -60,12 +46,9 @@ LABEL org.opencontainers.image.source="https://github.com/ArcForges/Cloud" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.revision="$SOURCE_REVISION"
 WORKDIR /app
-COPY --from=build /out/ArcForges.Cloud ./
 COPY --from=build /out/arcforges-center ./
 COPY LICENSE ./LICENSE
 COPY artifacts/image-notices/ ./notices/
-ENV ASPNETCORE_ENVIRONMENT=Production \
-    DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 USER $APP_UID
 EXPOSE 8080 8081
-ENTRYPOINT ["/app/ArcForges.Cloud"]
+ENTRYPOINT ["/app/arcforges-center"]

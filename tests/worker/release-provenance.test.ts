@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { before, test } from "node:test";
@@ -16,6 +25,9 @@ import {
   verifyWorker,
 } from "../../tooling/release-provenance.ts";
 import { root } from "../../tooling/process.ts";
+import { expectedIdentity } from "../../tooling/build-identity.ts";
+import { goCandidateFiles } from "../../tooling/proof-candidate.ts";
+import { stageCandidateDirectory, verifyCandidate } from "../../tooling/project.ts";
 import { scratchDirectory } from "./support/scratch.ts";
 
 let worker: Buffer;
@@ -146,6 +158,48 @@ function filesUnder(directory: string, prefix = ""): string[] {
     .sort();
 }
 
+test("repeat image staging isolates old cached legal files and retains their bytes", (t) => {
+  const artifacts = scratchDirectory("cloud-image-notices-repeat-", t);
+  const staged = path.join(artifacts, "image-notices");
+  cpSync(path.join(root, "artifacts/image-notices"), staged, { recursive: true });
+  const expected = filesUnder(staged);
+  const obsolete = [
+    "Contracts.NOTICE.txt",
+    "DotNet.AspNetCore.NOTICES.txt",
+    "DotNet.LICENSE.txt",
+    "DotNet.Runtime.NOTICES.txt",
+    "Grpc.LICENSE.txt",
+    "Npgsql.LICENSE.txt",
+    "Protobuf.LICENSE.txt",
+  ].map((file) => `third-party/${file}`);
+  // Match the failed cache's names without depending on retired live licence files.
+  for (const file of obsolete)
+    writeFileSync(path.join(staged, file), `Cached fixture for ${file}\n`);
+
+  stageImageNotices(root, revision, artifacts);
+  assert.deepEqual(filesUnder(staged), expected);
+  const previous = readdirSync(artifacts).find((name) =>
+    name.startsWith("image-notices-previous-"),
+  );
+  assert(previous);
+  for (const file of obsolete)
+    assert.equal(
+      readFileSync(path.join(artifacts, previous, "image-notices", file), "utf8"),
+      `Cached fixture for ${file}\n`,
+    );
+
+  const provenance = path.join(staged, "provenance.json");
+  const generation = lstatSync(staged, { bigint: true }).ino;
+  const prior = object(parseDocument(readFileSync(provenance)));
+  prior.revision = "a".repeat(40);
+  Object.assign(object(prior.source), { commit: prior.revision, dirty: false });
+  writeFileSync(provenance, `${JSON.stringify(prior, null, 2)}\n`);
+  stageImageNotices(root, revision, artifacts);
+  assert.equal(object(parseDocument(readFileSync(provenance))).revision, revision);
+  assert.equal(lstatSync(staged, { bigint: true }).ino, generation);
+  assert.deepEqual(readdirSync(artifacts).sort(), ["image-notices", previous].sort());
+});
+
 function imageFixture() {
   const directory = scratchDirectory("cloud-image-provenance-");
   cpSync(path.join(root, "artifacts/image-notices"), path.join(directory, "notices"), {
@@ -153,7 +207,6 @@ function imageFixture() {
   });
   cpSync(path.join(root, "LICENSE"), path.join(directory, "LICENSE"));
   // An explicitly synthetic ELF prefix tests legal packaging only; Docker tests execute the real binary.
-  writeFileSync(path.join(directory, "ArcForges.Cloud"), Buffer.from([127, 69, 76, 70, 1]));
   writeFileSync(path.join(directory, "arcforges-center"), Buffer.from([127, 69, 76, 70, 2]));
   const cleanup = () => {
     assert.equal(path.dirname(directory), os.tmpdir());
@@ -162,6 +215,96 @@ function imageFixture() {
   };
   return { directory, cleanup };
 }
+
+test("candidate staging preserves the cached generation until the exact Go bundle verifies", async (t) => {
+  const artifacts = realpathSync(scratchDirectory("cloud-candidate-repeat-", t));
+  const destination = path.join(artifacts, "candidate");
+  const retired = "arcforges-tool.tar";
+  const oldArchive = Buffer.from("original cached managed tool fixture\n");
+  const oldManifest = Buffer.from('{"runtime":"native-aot"}\n');
+  mkdirSync(destination);
+  writeFileSync(path.join(destination, retired), oldArchive);
+  writeFileSync(path.join(destination, "manifest.json"), oldManifest);
+
+  const fixture = imageFixture();
+  t.after(fixture.cleanup);
+  const version = "0.1.0-local.1";
+  const image = "arcforges-cloud:local.1";
+  const imageId = `sha256:${"a".repeat(64)}`;
+  const identity = expectedIdentity(version);
+  const imageReceipt = {
+    schemaVersion: 1,
+    imageId,
+    ...verifyImageFiles(root, revision, fixture.directory),
+  };
+  function prepare(directory: string) {
+    const write = (file: string, value: unknown) =>
+      writeFileSync(path.join(directory, file), JSON.stringify(value));
+    write("build-identity.json", identity);
+    write("image-provenance.json", imageReceipt);
+    write("legal-notices.json", legalBundle(root, revision));
+    write("worker-meta.json", metadata);
+    writeFileSync(path.join(directory, "worker.js"), worker);
+    // Docker and the proof Worker are represented by explicit fixture bytes; the verifier binds their hashes.
+    writeFileSync(path.join(directory, "docker-image.tar"), "synthetic image archive");
+    writeFileSync(path.join(directory, "proof-worker.js"), "export {};");
+    write("proof-worker-meta.json", {});
+    write("wrangler.json", {
+      name: "arcforges-cloud",
+      main: "./worker.js",
+      no_bundle: true,
+      vars: {
+        SOURCE_REVISION: revision,
+        BUILD_IDENTITY: JSON.stringify(identity.build),
+        ARCFORGES_HELLO_RUNTIME: "go",
+      },
+      containers: [{ image, max_instances: 1 }],
+      env: { proof: {} },
+    });
+    write("manifest.json", {
+      schema: 2,
+      runtime: "go",
+      revision,
+      dirty: revision.endsWith("-dirty"),
+      version,
+      image,
+      imageId,
+      files: Object.fromEntries(
+        goCandidateFiles.map((file) => [file, hash(readFileSync(path.join(directory, file)))]),
+      ),
+    });
+  }
+
+  await assert.rejects(
+    stageCandidateDirectory(artifacts, async (directory) => {
+      prepare(directory);
+      writeFileSync(path.join(directory, retired), oldArchive);
+      return verifyCandidate(directory);
+    }),
+    { code: "ERR_ASSERTION" },
+  );
+  assert.deepEqual(readdirSync(artifacts), ["candidate"]);
+  assert.deepEqual(readFileSync(path.join(destination, retired)), oldArchive);
+  assert.deepEqual(readFileSync(path.join(destination, "manifest.json")), oldManifest);
+
+  const verified = await stageCandidateDirectory(artifacts, async (directory) => {
+    prepare(directory);
+    return verifyCandidate(directory);
+  });
+  assert.deepEqual(await verifyCandidate(destination), verified);
+  assert.deepEqual(readdirSync(destination).sort(), [...goCandidateFiles, "manifest.json"].sort());
+  const archived = readdirSync(artifacts).filter((name) => name !== "candidate");
+  assert.equal(archived.length, 1);
+  const [previous] = archived;
+  assert(previous);
+  assert.match(previous, /^candidate-previous-/u);
+  assert.deepEqual(readFileSync(path.join(artifacts, previous, "candidate", retired)), oldArchive);
+  assert.deepEqual(
+    readFileSync(path.join(artifacts, previous, "candidate", "manifest.json")),
+    oldManifest,
+  );
+});
+
 test("complete image legal fixture validates and binds source and concrete member hashes", () => {
   const f = imageFixture();
   try {
@@ -180,25 +323,25 @@ test("complete image legal fixture validates and binds source and concrete membe
     f.cleanup();
   }
 });
-for (const change of [
-  "missing licence",
-  "changed notice",
-  "extra resource",
-  "wrong source",
-  "same-length changed source",
-])
+for (const [change, refusal] of [
+  ["missing licence", /Unclassified or missing image member/u],
+  ["changed notice", /Changed image legal text: NOTICE/u],
+  ["extra resource", /Unclassified or missing image member/u],
+  ["retired C# executable", /Unclassified or missing image member/u],
+  ["wrong source", /Changed image source receipt/u],
+  ["same-length changed source", /Changed image source receipt/u],
+] as const)
   test(`reject image with ${change}`, () => {
     const f = imageFixture();
     try {
       if (change === "missing licence")
-        rmSync(path.join(f.directory, "notices/third-party/Protobuf.LICENSE.txt"));
+        rmSync(path.join(f.directory, "notices/third-party/Go.LICENSE.txt"));
       if (change === "changed notice")
-        writeFileSync(
-          path.join(f.directory, "notices/third-party/DotNet.Runtime.NOTICES.txt"),
-          "MIT\n",
-        );
+        writeFileSync(path.join(f.directory, "notices/NOTICE"), "MIT\n");
       if (change === "extra resource")
         writeFileSync(path.join(f.directory, "unreviewed.js"), "extra");
+      if (change === "retired C# executable")
+        writeFileSync(path.join(f.directory, "ArcForges.Cloud"), Buffer.from([127, 69, 76, 70, 1]));
       if (change === "wrong source")
         writeFileSync(path.join(f.directory, "notices/provenance.json"), "{}\n");
       if (change === "same-length changed source") {
@@ -208,7 +351,7 @@ for (const change of [
         bytes.writeUInt8(bytes.readUInt8(offset) ^ 1, offset);
         writeFileSync(file, bytes);
       }
-      assert.throws(() => verifyImageFiles(root, revision, f.directory));
+      assert.throws(() => verifyImageFiles(root, revision, f.directory), refusal);
     } finally {
       f.cleanup();
     }
@@ -232,6 +375,7 @@ test("distribution cannot omit legal text or substitute a source receipt", () =>
     const legal = legalBundle(root, revision);
     write("legal-notices.json", legal);
     verifyReleaseFiles(root, candidate, revision, imageId);
+    assert(Object.hasOwn(legal.files, "third-party/Containers.LICENSE.txt"));
     delete legal.files["third-party/Containers.LICENSE.txt"];
     write("legal-notices.json", legal);
     assert.throws(
@@ -246,7 +390,7 @@ test("distribution cannot omit legal text or substitute a source receipt", () =>
   }
 });
 
-test("reject a missing or non-native Go executable in the dual-runtime image", () => {
+test("reject a missing or non-native executable in the Go image", () => {
   const fixture = imageFixture();
   try {
     writeFileSync(path.join(fixture.directory, "arcforges-center"), "not an ELF executable");

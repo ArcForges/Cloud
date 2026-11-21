@@ -74,7 +74,7 @@ function bindings(
   const env: CloudBindings = {
     SOURCE_REVISION: "candidate",
     ALLOWED_ORIGIN: origin,
-    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile,relay,nodes,commerce",
+    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,relay,nodes,commerce",
     CLOUD_CONTAINER: {
       getByName() {
         return {
@@ -199,14 +199,10 @@ test("the generated page table is what the pages' contract names", () => {
   assert.equal(pageLocationPrefix, "/api/account/");
   const keys = new Set<string>();
   for (const row of pageRoutes) {
-    // The pages surface lives under the account and WebBrowserSession prefixes, the operations surface under its own, the fleet surface
-    // under /connect and /activate (each a page itself), the mobile surface's pages under /mobile/authorize (AF-CTR-04 part M; its
-    // native and apex rows are the Worker's other tables).
+    // Account and WebBrowserSession routes use their own prefixes, operations its own, and fleet /connect and /activate.
     if (row.surface === "operations") assert(row.path.startsWith("/operations/"), row.path);
     else if (row.surface === "fleet")
       assert(/^\/(?:connect|activate)(?:\/(?:review|decision))?$/u.test(row.path), row.path);
-    else if (row.surface === "mobile")
-      assert(/^\/mobile\/authorize(?:\/(?:review|decision))?$/u.test(row.path), row.path);
     else
       assert(row.path.startsWith("/account/") || row.path.startsWith("/session/v1/web/"), row.path);
     assert(!/[?#%\\ ]|\/\/|\.\.|\/$/u.test(row.path), `canonical: ${row.path}`);
@@ -276,10 +272,7 @@ test("a route belongs to its own surface: the operations page is not the pages' 
   for (const row of pageRoutes.filter(
     (item) => item.surface !== "operations" && item.surface !== "commerce",
   ))
-    assert(
-      row.surface === "pages" || row.surface === "fleet" || row.surface === "mobile",
-      row.path,
-    );
+    assert(row.surface === "pages" || row.surface === "fleet", row.path);
   assert.equal(pageTable.get("/api/operations/grant")?.length, 1);
   for (const flag of ["identity,pages", "pages", "identity", "operations,x"]) {
     const { env, seen, keys } = bindings(() => jsonOk(), { FLAGSHIP_SURFACES: flag });
@@ -324,7 +317,7 @@ test("a route belongs to its own surface: the operations page is not the pages' 
 
 test("the billing portal stays closed with every other surface enabled", async () => {
   const { env, seen, keys } = bindings(() => jsonOk(), {
-    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile,relay,nodes",
+    FLAGSHIP_SURFACES: "identity,pages,operations,fleet,relay,nodes",
   });
   const reply = await routeRequest(call(route("POST", "/account/billing/v1/portal")), env);
   const unknown = await routeRequest(

@@ -591,10 +591,13 @@ test("protected candidate orchestration narrows every child environment and veri
     revision = "a".repeat(40),
     id = `sha256:${"b".repeat(64)}`;
   const candidate = {
+    schema: 2,
+    runtime: "go",
     revision,
     dirty: false,
     image: "arcforges-cloud:0.1.0-ci.123.1",
     imageId: id,
+    workerConfigSha256: "d".repeat(64),
     version: "0.1.0-ci.123.1",
   };
   const digest = `registry.cloudflare.com/${account}/arcforges-cloud@sha256:${"c".repeat(64)}`;
@@ -657,12 +660,69 @@ test("protected candidate orchestration narrows every child environment and veri
       calls.push("gate");
       assert.equal(value, revision);
     },
-    { environment, run },
+    {
+      environment,
+      run,
+      verifyConfig: async (value) => {
+        assert.deepEqual(value, candidate);
+        calls.push("config");
+      },
+      prepareResources: async () => {
+        calls.push("resources");
+      },
+    },
   );
   assert.deepEqual(result, { candidate, imageDigest: digest });
-  assert.deepEqual(calls, ["candidate", "head", "gate", "load", "inspect", "push", "digest"]);
+  assert.deepEqual(calls, [
+    "candidate",
+    "config",
+    "head",
+    "gate",
+    "resources",
+    "load",
+    "inspect",
+    "push",
+    "digest",
+  ]);
 
-  for (const bad of ["candidate", "head", "gate", "load", "inspect", "push", "digest"] as const) {
+  for (const invalid of [
+    { ...candidate, schema: 1 },
+    { ...candidate, runtime: "csharp" },
+    { ...candidate, workerConfigSha256: "different" },
+  ]) {
+    const observed: string[] = [];
+    await assert.rejects(
+      prepareProofCandidate(
+        account,
+        async () => {
+          observed.push("gate");
+        },
+        {
+          environment,
+          prepareResources: async () => {
+            observed.push("resources");
+          },
+          run: async (stage) => {
+            observed.push(stage);
+            return invalid;
+          },
+        },
+      ),
+      /sealed proof candidate metadata is invalid/u,
+    );
+    assert.deepEqual(observed, ["candidate"]);
+  }
+
+  for (const bad of [
+    "candidate",
+    "head",
+    "gate",
+    "resources",
+    "load",
+    "inspect",
+    "push",
+    "digest",
+  ] as const) {
     const observed: string[] = [];
     const broken: typeof runSensitive = async (stage, command, args, childEnv, mode) => {
       const step =
@@ -690,12 +750,23 @@ test("protected candidate orchestration narrows every child environment and veri
           observed.push("gate");
           if (bad === "gate") throw new Error("synthetic-private-sentinel");
         },
-        { environment, run: broken },
+        {
+          environment,
+          run: broken,
+          prepareResources: async () => {
+            observed.push("resources");
+            if (bad === "resources")
+              throw new Error("The acceptance resource could not be prepared.");
+          },
+        },
       ),
-      (error: Error) => !error.message.includes("synthetic-private-sentinel"),
+      (error: Error) =>
+        !error.message.includes("synthetic-private-sentinel") &&
+        (bad !== "resources" || error.message === "The acceptance resource could not be prepared."),
     );
-    if (["candidate", "head", "gate", "load", "inspect"].includes(bad))
+    if (["candidate", "head", "gate", "resources", "load", "inspect"].includes(bad))
       assert(!observed.includes("push"));
+    if (["candidate", "head", "gate"].includes(bad)) assert(!observed.includes("resources"));
   }
 });
 
@@ -711,9 +782,9 @@ test(
       "tooling/build-identity.ts",
       "tooling/process.ts",
       "eng/version-sources.json",
-      "eng/generated/contracts-identity.json",
-      "Directory.Packages.props",
-      "src/ArcForges.Cloud/packages.lock.json",
+      "center/dependencies.json",
+      "center/go.mod",
+      "center/go.sum",
       "package-lock.json",
     ]) {
       const target = path.join(repository, name);
@@ -773,10 +844,13 @@ test(
     const account = "0".repeat(32),
       imageId = `sha256:${"b".repeat(64)}`;
     const candidate = {
+      schema: 2,
+      runtime: "go",
       revision: commit,
       dirty: false,
       image: "arcforges-cloud:0.1.0-ci.547.2",
       imageId,
+      workerConfigSha256: "d".repeat(64),
       version,
     };
     const digest = `registry.cloudflare.com/${account}/arcforges-cloud@sha256:${"c".repeat(64)}`;
@@ -911,7 +985,7 @@ test("protected candidate subprocess output and provider error sentinels are nev
     import { prepareProofCandidate } from ${JSON.stringify(moduleUrl)};
     import { runSensitive } from ${JSON.stringify(runnerUrl)};
     const account="0".repeat(32), revision="a".repeat(40), imageId="sha256:"+"b".repeat(64);
-    const candidate={revision,dirty:false,image:"arcforges-cloud:0.1.0-ci.123.1",imageId,version:"0.1.0-ci.123.1"};
+    const candidate={schema:2,runtime:"go",revision,dirty:false,image:"arcforges-cloud:0.1.0-ci.123.1",imageId,version:"0.1.0-ci.123.1",workerConfigSha256:"d".repeat(64)};
     const digest="registry.cloudflare.com/"+account+"/arcforges-cloud@sha256:"+"c".repeat(64);
     const environment={...process.env,GH_TOKEN:process.env.SYNTHETIC, CLOUDFLARE_API_TOKEN:process.env.SYNTHETIC,
       CLOUDFLARE_ACCOUNT_ID:account,NEON_DATABASE_URL_DIRECT:process.env.SYNTHETIC,
@@ -937,6 +1011,42 @@ test("protected candidate subprocess output and provider error sentinels are nev
   assert.equal(result.status, 0);
   assert.doesNotMatch(result.stdout + result.stderr, new RegExp(sentinel, "u"));
   assert.match(result.stdout, /40/u);
+});
+
+test("the proof verifier child can load a project that imports the Go payload list", (t) => {
+  const directory = scratchDirectory("proof-candidate-import-", t);
+  const tooling = path.join(directory, "tooling");
+  mkdirSync(tooling);
+  writeFileSync(path.join(directory, "package.json"), '{"type":"module"}\n');
+  for (const name of ["process.ts", "proof-candidate.ts", "sensitive-process.ts"])
+    copyFileSync(path.join(import.meta.dirname, "../../tooling", name), path.join(tooling, name));
+  const candidate = {
+    schema: 2,
+    runtime: "go",
+    revision: "a".repeat(40),
+    dirty: false,
+    image: "arcforges-cloud:0.1.0-ci.123.1",
+    imageId: `sha256:${"b".repeat(64)}`,
+    workerConfigSha256: "d".repeat(64),
+    version: "0.1.0-ci.123.1",
+  };
+  writeFileSync(
+    path.join(tooling, "project.ts"),
+    `import { goCandidateFiles } from "./proof-candidate.ts";\n
+    export async function verifyCandidate() {
+      if (goCandidateFiles.length !== 9) throw new Error("Wrong payload");
+      return { ...${JSON.stringify(candidate)}, files: { "wrangler.json": "d".repeat(64) } };
+    }\n`,
+  );
+  const result = spawnSync(process.execPath, [path.join(tooling, "proof-candidate.ts"), "verify"], {
+    cwd: directory,
+    env: proofProcessEnvironment(process.env),
+    encoding: "utf8",
+    timeout: 15_000,
+    windowsHide: true,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), candidate);
 });
 
 test("candidate preparation refuses oversized and failed real child output without advancing", async () => {

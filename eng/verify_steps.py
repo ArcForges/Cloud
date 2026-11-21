@@ -1,21 +1,21 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 """Local verification steps of Cloud, loaded by eng/verify.py (which injects `Step`).
 
-The full profile is every validation job of .github/workflows/ci.yml plus `candidate` (the Native AOT image and Worker
-build that `deploy` ships; main pushes no longer re-validate it), each on the host the hosted job used, in two legs on
+The full profile is every validation job of .github/workflows/ci.yml plus `candidate` (the Go Center image and sealed
+Worker build; ordinary main-push builds remain disabled), each on the host the hosted job used, in two legs on
 two native machines (eng/verify.py; AGENTS.md):
-- lane `win` (Windows, in <main checkout>/.worktree/_verify): `source (windows-latest)`: npm ci, the locked restore and
-  Release build of Cloud.slnx, the Go center's controls (`win-center`: python eng/center.py check, without the race detector
-  and fuzzing because the Windows host has no cgo; docs/engineering-controls.md), the native 8e5 self-hosted bridge
-  build and asset seal against the active release profile, and the evaluated licence report.
+- lane `win` (Windows, in <main checkout>/.worktree/_verify): `source (windows-latest)`: the Go center's controls
+  (`win-center`: python eng/center.py check, without the race detector and fuzzing because the Windows host has no cgo;
+  docs/engineering-controls.md), npm ci, the locked restore and Release build of the retained managed solution,
+  the native 8e5 self-hosted bridge checks, and the evaluated licence report.
 - lane `linux` (Linux, in ~/.cache/arcforges-verify/Cloud): `clone-identity`, `fresh-intermediates` (see
   FRESH_INTERMEDIATES), then `source (ubuntu-latest)`: npm ci,
   `npm run check`, `npm run check:dotnet`, the Go center's controls (`linux-center`: python eng/center.py check with the race
   detector, the fuzz targets, govulncheck and the image target) and the evaluated licence report; the dependency audit of
   `quality`; then
   the 615.1 self-hosted bridge carrier extraction and asset seal against the active release profile; then
-  `candidate` (`npm run candidate`: the Linux Native AOT image in the Linux host's Docker, both Worker bundles, the sealed tool and the
-  manifest, verified). Everything that runs dotnet or npm in the clone is in this lane: concurrent restores or builds of
+  `candidate` (`npm run candidate`: the Go image in the Linux host's Docker, both Worker bundles and the manifest,
+  verified). Everything that runs dotnet or npm in the clone is in this lane: concurrent restores or builds of
   shared projects in one checkout would race. `linux-center` runs in its own lane `center` beside it (Go and Docker only).
 - lane `scan`: the whitespace check of the commits since the merge base (`git diff --check`) and the secret
   scan of `quality` (the pinned gitleaks image digest, .gitleaks.toml) over the same range ({range}), in Docker
@@ -141,8 +141,7 @@ FINGERPRINT = {
 
 # The environment of ci.yml, without CI=true (see above). MSBuild node reuse is off, so that no build node outlives its step
 # (a step's process tree is what a timeout or a failure stops). RestoreLockedMode (an MSBuild property read from the
-# environment) locks the implicit restores of `dotnet run`/`dotnet publish` in check:plans, check:generated and the candidate's
-# tool publish, as the hosted jobs' explicit `--locked-mode` restores do.
+# environment) locks the retained managed verification tools in the same mode as the hosted restores.
 ENV = {"DOTNET_NOLOGO": "true", "DOTNET_CLI_TELEMETRY_OPTOUT": "true", "WRANGLER_SEND_METRICS": "false",
        "MSBUILDDISABLENODEREUSE": "1", "RestoreLockedMode": "true", "PYTHONDONTWRITEBYTECODE": "1"}
 
@@ -172,10 +171,8 @@ ACTIONLINT = (
 
 # ci.yml `candidate`, from the clean checkout CI builds it from; the image tag is removed after the verified build. The
 # image build's RUN steps fetch over the host network (ARCFORGES_LOCAL_DOCKER_BUILD_NETWORK=host, which
-# tooling/project.ts honours only outside CI): containers on Docker's default bridge network could not reach NuGet on the
-# workstation's former Linux environment, and the host network is the route that works wherever the host reaches NuGet.
-# Only the route changes: the restore is locked to the packages.lock.json content hashes, both base images
-# are pinned by digest, and the network mode enters neither the image nor the manifest.
+# tooling/project.ts honours only outside CI). The image producer verifies the Go release and module sums, uses the pinned
+# base images, and records the actual build identity. The network mode enters neither the image nor the manifest.
 CANDIDATE = (
     "set -euo pipefail; unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_KEY CLOUDFLARE_EMAIL; "
     "if [ -n \"$(git status --porcelain)\" ]; then git status --porcelain; "
@@ -246,16 +243,18 @@ STEPS = [
     win("win-toolchain-tests", ["python", "-m", "unittest", "discover", "-s", "eng", "-p", "test_toolchain.py"], 60),
     win("win-native-tool-tests", ["python", "-m", "unittest", "discover", "-s", "tests/tooling", "-p", "test_native_toolchain.py"], 60),
     # ci.yml source (windows-latest)
+    # The Go center: build, gofmt, vet, staticcheck, unit and protocol tests, drift, govulncheck and the native build.
+    win("win-center", ["python", "eng/center.py", "check"], 900, center_go=True),
     win("win-npm-ci", pwsh(f"node (node -p \"{_BUNDLED_NPM}\") ci --ignore-scripts"), 300),
     win("win-restore", ["dotnet", "restore", "Cloud.slnx", "--locked-mode"], 600),
     win("win-build", ["dotnet", "build", "Cloud.slnx", "-c", "Release", "--no-restore"], 900),
-    # The Go center (AF-CTR-02): build, gofmt, vet, staticcheck, unit and protocol tests, drift, govulncheck and the native build.
-    win("win-center", ["python", "eng/center.py", "check"], 900, center_go=True),
     # The exact 8e5 bridge is compiled on Windows and its complete asset is
     # sealed and checked against this commit's active release profile.
     win("win-ctr06-bridge-asset", ["python", "eng/verification/ctr06_native_bridge_check.py"], 600),
     win("win-ctr06-security-bridge", ["python", "eng/verification/ctr06_security_bridge_native_check.py"], 1200, center_go=True, security_archive=True),
     win("win-licence-evaluated", ["node", "tooling/project.ts", "licence-evaluated"], 600),
+    # The Linux center lane runs native Go controls, race, fuzz, PostgreSQL and the image-target build independently of npm.
+    linux("linux-center", "python eng/center.py check", 900, lane="center", center_go=True),
     # ci.yml source (ubuntu-latest), the dependency audit of quality, then candidate
     linux("clone-identity", "set -e; git config remote.origin.url https://github.com/ArcForges/Cloud.git; "
         "git checkout -q -B arcforges-verify {sha}; git update-ref refs/remotes/origin/main {base}", 60),
@@ -275,11 +274,6 @@ STEPS = [
     # test:artifact`), which no hosted job runs (the hosted candidate job runs the verifier itself): a profile that no longer names
     # the bundle the source builds fails here, before the candidate is built.
     linux("worker-provenance", "npm run test:artifact", 600),
-    # The Go center (AF-CTR-02): the Windows controls plus the race detector, the fuzz targets and the image target.
-    # Its own lane: center.py runs only Go and Docker (its own
-    # PostgreSQL container, govulncheck, the image target), never npm or dotnet, and reads nothing the other Linux steps write, so it
-    # cannot race the restores and builds of the `linux` lane; fresh-intermediates touches only C# obj directories.
-    linux("linux-center", "python eng/center.py check", 900, lane="center", center_go=True),
     linux("licence-evaluated", "node tooling/project.ts licence-evaluated", 300),
     linux("candidate", CANDIDATE, 900),
     # the whitespace check and quality's secret scan over the commits since the merge base; actionlint when a workflow changed

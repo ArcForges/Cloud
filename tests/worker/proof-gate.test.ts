@@ -2,6 +2,7 @@
 // The proof deployment gate (owner decision of 2026-11-04): the gate logic against recorded GitHub API answers, the fetch of the
 // gated candidate, and the workflow wiring (which jobs run for each event, the gate's permissions, and the main-push path).
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -23,6 +24,7 @@ import {
   trustedPoster,
 } from "../../eng/verification/proof-gate.ts";
 import { candidateEnvironment } from "../../tooling/build-identity.ts";
+import { gitEnvironment } from "../../tooling/process.ts";
 import { scratchDirectory } from "./support/scratch.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -440,7 +442,12 @@ test("both phases run on a manual dispatch of main in ArcForges/Cloud only", () 
 // The fetch phase of the deploy job, with an archive built here: the API answers are the recorded ones with this archive's digest.
 const members = {
   "docker-image.tar": "image bytes",
+  "legal-notices.json": "{}",
+  "proof-worker-meta.json": "{}",
+  "proof-worker.js": "export default {};\n",
+  "worker-meta.json": "{}",
   "worker.js": "export default {};\n",
+  "wrangler.json": "{}",
   "image-provenance.json": JSON.stringify({ revision: merge, imageId: `sha256:${"a".repeat(64)}` }),
   "build-identity.json": JSON.stringify({
     artifact: { id: "Cloud", version: "0.1.0-ci.547.1" },
@@ -460,7 +467,8 @@ const members = {
 function sealed(edit?: (files: Record<string, string>, manifest: Mutable) => void) {
   const files = structuredClone(members);
   const manifest: Mutable = {
-    schema: 1,
+    schema: 2,
+    runtime: "go",
     revision: merge,
     dirty: false,
     version: "0.1.0-ci.547.1",
@@ -625,6 +633,40 @@ test("the fetch refuses a sealed manifest that names another commit, run, versio
     });
   const cases: [Record<string, string>, RegExp][] = [
     [
+      {
+        ...sealed(),
+        "manifest.json": sealed()["manifest.json"].replace(
+          '"runtime":"go"',
+          '"runtime":"csharp","runtime":"go"',
+        ),
+      },
+      /candidate's manifest.json is missing or not JSON/u,
+    ],
+    [
+      manifestOf((m) => {
+        m.schema = 1;
+      }),
+      /candidate manifest has another schema/u,
+    ],
+    [
+      manifestOf((m) => {
+        m.runtime = "csharp";
+      }),
+      /candidate manifest does not select the Go Center/u,
+    ],
+    [
+      manifestOf((m) => {
+        m.migrations = {};
+      }),
+      /candidate manifest has unexpected or missing fields/u,
+    ],
+    [
+      manifestOf((m) => {
+        m.imageId = "unclassified";
+      }),
+      /candidate manifest has an invalid image identity/u,
+    ],
+    [
       manifestOf((m) => {
         m.revision = head;
       }),
@@ -686,9 +728,30 @@ test("the fetch refuses a sealed manifest that names another commit, run, versio
       (error: unknown) => error instanceof GateRefusal && message.test(error.message),
     );
   // A member that the manifest does not list, or a link instead of a file.
+  for (const archive of [
+    { ...sealed(), "extra.js": "x" },
+    sealed((files, manifest) => {
+      const extra = "arcforges-tool.tar";
+      files[extra] = "legacy tool";
+      field(manifest, "files")[extra] = createHash("sha256").update(files[extra]).digest("hex");
+    }),
+    sealed((files, manifest) => {
+      delete files["proof-worker.js"];
+      delete field(manifest, "files")["proof-worker.js"];
+    }),
+  ]) {
+    const candidate = fetchWith(t, archive);
+    assert.throws(candidate.run, /candidate archive must contain exactly the Go payload/u);
+    assert.equal(candidate.extracted(), false);
+  }
   assert.throws(
-    fetchWith(t, { ...sealed(), "extra.js": "x" }).run,
-    /not exactly the manifest's files/u,
+    fetchWith(
+      t,
+      manifestOf((m) => {
+        delete field(m, "files")["worker-meta.json"];
+      }),
+    ).run,
+    /members and manifest must contain exactly the Go payload/u,
   );
   assert.throws(
     fetchWith(t, sealed(), {
@@ -1499,16 +1562,26 @@ test("the deployment job fetches the gated candidate before it migrates or deplo
     assert.match(action, /^[a-z-]+\/[a-z-]+(?:\/[a-z-]+)?@[0-9a-f]{40}$/u);
 });
 
-test("the main-push path and the reviewed proof deployment steps remain pinned", () => {
-  // The candidate remains the pre-gate pin. CTR06 adds the asset dependency and verification gates,
-  // OIDC permissions and provider inputs for gated PG migration, and publishes sealed bridge assets.
-  // The preceding matrix and negative controls cover these changes; every future pin change needs review.
+test("the historical HOST-03 workflow retains the reviewed main-push and proof deployment pins", () => {
+  const commit = "9b8796eac760982d9814f371b820b736ddd945c4";
+  const git = (...args: string[]) =>
+    execFileSync("git", ["--no-replace-objects", ...args], {
+      cwd: root,
+      env: gitEnvironment(),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+  assert.equal(
+    git("rev-parse", "--verify", `${commit}^{tree}`).trim(),
+    "2b35c50007089d6e6c51797f62437334bd2826f3",
+  );
+  const historical = jobsOf(git("show", `${commit}:.github/workflows/ci.yml`));
   const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-  const deploy = jobs.get("deploy-proof") ?? "";
-  const candidate = jobs.get("candidate") ?? "";
+  const deploy = historical.get("deploy-proof") ?? "";
+  const candidate = historical.get("candidate") ?? "";
   const pins = {
     candidate: digest(candidate.slice(candidate.indexOf("    runs-on:"))),
-    deploy: digest(jobs.get("deploy") ?? ""),
+    deploy: digest(historical.get("deploy") ?? ""),
     proofSteps: digest(
       deploy.slice(deploy.indexOf("      # CLOUD.70: the same gated D1 migration step")),
     ),
@@ -1519,4 +1592,25 @@ test("the main-push path and the reviewed proof deployment steps remain pinned",
     deploy: "4dbfe83f395d403592ecc45447697b18b545e470073f040f775682f45d2a82be",
     proofSteps: "de3b13d8db0a7f4df9ea53afa9d25c933c4d62553d70fc5715cf12d11ce97e5c",
   });
+});
+
+test("Go-only candidate and deployment steps retain the artifact and gate order", () => {
+  const candidate = jobs.get("candidate") ?? "";
+  const build = candidate.indexOf("run: npm run candidate");
+  assert(build > 0 && candidate.indexOf("path: artifacts/candidate") > build);
+  assert.doesNotMatch(candidate, /setup-dotnet|\bdotnet\b|arcforges-tool\.tar/u);
+  const production = jobs.get("deploy") ?? "";
+  const proof = jobs.get("deploy-proof") ?? "";
+  for (const [job, gateTarget, postgresTarget, command] of [
+    [production, "production", "production", "run: npm run deploy"],
+    [proof, "proof", "acceptance", "run: npm run deploy:proof"],
+  ] as const) {
+    const noD1 = job.indexOf(`run: node eng/migrations/deploy.ts deploy --target ${gateTarget}`);
+    const postgres = job.indexOf(
+      `run: node tooling/postgres-deploy.ts migrate --target ${postgresTarget}`,
+    );
+    const promote = job.indexOf(command);
+    assert(noD1 > 0 && noD1 < postgres && postgres < promote);
+  }
+  assert.match(proof, /artifacts\/proof-key-registration\.json/u);
 });

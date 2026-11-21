@@ -30,7 +30,7 @@ import {
 } from "./ctr06-security-bridge-producer.ts";
 import { object, parseDocument, readOwned } from "./provenance.ts";
 import { root } from "./process.ts";
-import { releaseProfile } from "./release-provenance.ts";
+import { releaseProfile, verifySecurityBridgeProducer } from "./release-provenance.ts";
 
 interface Member {
   sha256: string;
@@ -106,7 +106,8 @@ export async function sealSecurityBridge(
   assert.equal(process.platform, "linux");
   for (const name of [source, linux, windows, goArchive, go]) assert(path.isAbsolute(name));
   const input = actualBridgeProducer(root, source);
-  // The checked-in active admission must bind this exact bootstrap producer closure.
+  // The archive audit cannot attest code being executed from this checkout.
+  verifySecurityBridgeProducer(root);
   releaseProfile(root);
   assert.equal(process.version, "v26.13.1");
   assert.equal(path.basename(go), "go");

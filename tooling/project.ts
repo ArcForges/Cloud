@@ -2,7 +2,20 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstatSync } from "node:fs";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,18 +29,17 @@ import {
   wrangler,
   writeJson,
 } from "./process.ts";
-import { probeProject, runProbe, waitForHealth } from "./protocol.ts";
+import { runProbe, waitForHealth } from "./protocol.ts";
 import { centerSurfaces } from "../worker/ingress/routes.ts";
 import { pageRoutes, surfaceRoutes } from "../worker/tables/center-tables.generated.ts";
 import { assertNotActivatedReply } from "./generated-replies.ts";
-import { sealedToolName } from "./sealed-tool.ts";
+import { goCandidateFiles } from "./proof-candidate.ts";
 import { auditLicences, evaluatedManagedLicences } from "./licence-boundary.ts";
 import { auditProvenance, readOwned } from "./provenance.ts";
 import {
   legalBundle,
   stageImageNotices,
   verifyBridgeAsset,
-  verifyImageProvenance,
   verifyStoredImage,
   verifyReleaseFiles,
 } from "./release-provenance.ts";
@@ -40,45 +52,9 @@ import {
   type Identity,
 } from "./build-identity.ts";
 
-/**
- * The publish of the sealed tool (CLOUD.84 S38(2), S41(1)): tools/ArcForges.Cloud.Generation, self-contained for linux-x64 and not
- * single-file. Nothing here may imply the ILLink pack (single-file, trimming or AOT analysis), because the reviewed tool lock does not hold
- * it and the CI restore is locked.
- */
-export function toolPublishArguments(output: string): string[] {
-  return [
-    "publish",
-    probeProject,
-    "-c",
-    "Release",
-    "-r",
-    "linux-x64",
-    "--self-contained",
-    "true",
-    "-p:PublishSingleFile=false",
-    "-p:DebugType=none",
-    "-o",
-    output,
-  ];
-}
-
-const payloadFiles = [
-  "build-identity.json",
-  "docker-image.tar",
-  "worker.js",
-  "wrangler.json",
-  "legal-notices.json",
-  "worker-meta.json",
-  // CLOUD.84 D1: the isolated proof environment has its own entry, so its bundle is a second sealed member. Its metadata is sealed beside it.
-  "proof-worker.js",
-  "proof-worker-meta.json",
-  "image-provenance.json",
-  // CLOUD.84 S33(3)(b), S38(2), S41(1): the self-contained, non-single-file tool archive (tooling/sealed-tool.ts). CI runs its Hello
-  // `probe` through runProbe and the deploy jobs its `migrate` command through eng/migrations/shim.ts, each after checking its digest.
-  sealedToolName,
-] as const;
 export interface Candidate {
-  schema: 1;
+  schema: 2;
+  runtime: "go";
   revision: string;
   dirty: boolean;
   version: string;
@@ -118,6 +94,17 @@ export type WorkerConfig = {
   [key: string]: unknown;
 };
 
+export function assertNoD1Binding(config: unknown) {
+  assert(
+    config && typeof config === "object" && !Array.isArray(config),
+    "Missing Worker configuration",
+  );
+  assert(
+    !Object.hasOwn(config, "d1_databases"),
+    "The current Go candidate still declares a D1 binding",
+  );
+}
+
 async function inspectImage(image: string): Promise<ImageInfo> {
   const info = JSON.parse(await run("docker", ["image", "inspect", image], true)) as ImageInfo[];
   assert.equal(info.length, 1);
@@ -125,9 +112,36 @@ async function inspectImage(image: string): Promise<ImageInfo> {
   return info[0];
 }
 
-export async function verifyCandidate(): Promise<Candidate> {
-  const candidate = await readJson<Candidate>(path.join(candidateDir, "manifest.json"));
-  assert.equal(candidate.schema, 1);
+const goEntrypoint = "/app/arcforges-center";
+
+function verifyGoImage(image: ImageInfo, revision: string) {
+  assert.equal(image.Os, "linux");
+  assert.equal(image.Architecture, "amd64");
+  assert.ok(
+    image.Config.User && !["0", "root"].includes(image.Config.User),
+    "Image must run as non-root.",
+  );
+  assert.deepEqual(image.Config.Entrypoint, [goEntrypoint]);
+  assert.equal(image.Config.Labels["org.opencontainers.image.revision"], revision);
+}
+
+export async function verifyCandidate(directory = candidateDir): Promise<Candidate> {
+  assert((await lstat(directory)).isDirectory(), "Invalid candidate directory");
+  const manifest = path.join(directory, "manifest.json");
+  assert((await lstat(manifest)).isFile(), "Invalid candidate manifest");
+  const candidate = await readJson<Candidate>(manifest);
+  assert.deepEqual(Object.keys(candidate).sort(), [
+    "dirty",
+    "files",
+    "image",
+    "imageId",
+    "revision",
+    "runtime",
+    "schema",
+    "version",
+  ]);
+  assert.equal(candidate.schema, 2);
+  assert.equal(candidate.runtime, "go");
   assert.match(candidate.revision, /^[0-9a-f]{40}(-dirty)?$/);
   assert.match(candidate.imageId, /^sha256:[0-9a-f]{64}$/);
   assert.match(candidate.image, /^arcforges-cloud:[a-z0-9.-]+$/);
@@ -136,24 +150,34 @@ export async function verifyCandidate(): Promise<Candidate> {
     assert.equal(candidate.revision, process.env.GITHUB_SHA);
     assert.equal(candidate.dirty, false);
   }
-  assert.deepEqual((await readdir(candidateDir)).sort(), [...payloadFiles, "manifest.json"].sort());
-  assert.deepEqual(Object.keys(candidate.files).sort(), [...payloadFiles].sort());
-  for (const file of payloadFiles) {
-    assert.equal(
-      await sha256(path.join(candidateDir, file)),
-      candidate.files[file],
-      `Candidate changed: ${file}`,
-    );
+  assert.deepEqual(
+    (await readdir(directory)).sort(),
+    [...goCandidateFiles, "manifest.json"].sort(),
+  );
+  assert.deepEqual(Object.keys(candidate.files).sort(), [...goCandidateFiles].sort());
+  for (const file of goCandidateFiles) {
+    const member = path.join(directory, file);
+    assert((await lstat(member)).isFile(), `Invalid candidate member: ${file}`);
+    assert.equal(await sha256(member), candidate.files[file], `Candidate changed: ${file}`);
   }
-  const config = await readJson<WorkerConfig>(path.join(candidateDir, "wrangler.json"));
+  const config = await readJson<WorkerConfig & { env?: { proof?: unknown } }>(
+    path.join(directory, "wrangler.json"),
+  );
+  assertNoD1Binding(config);
+  assertNoD1Binding(config.env?.proof);
   assert.equal(config.name, "arcforges-cloud");
   assert.equal(config.main, "./worker.js");
   assert.equal(config.vars.SOURCE_REVISION, candidate.revision);
+  assert.equal(
+    config.vars.ARCFORGES_HELLO_RUNTIME,
+    "go",
+    "The candidate must select the Go Center.",
+  );
   assert.equal(config.containers[0]?.image, candidate.image);
   assert.equal(config.containers[0]?.max_instances, 1);
   assert.equal(config.no_bundle, true);
-  verifyReleaseFiles(root, candidateDir, candidate.revision, candidate.imageId);
-  verifyIdentity(await readJson(path.join(candidateDir, "build-identity.json")), candidate.version);
+  verifyReleaseFiles(root, directory, candidate.revision, candidate.imageId);
+  verifyIdentity(await readJson(path.join(directory, "build-identity.json")), candidate.version);
   assert.equal(
     config.vars.BUILD_IDENTITY,
     JSON.stringify(expectedIdentity(candidate.version).build),
@@ -174,88 +198,24 @@ const containerHardening = [
   "1",
 ] as const;
 
-// Local opt-in diagnostic of the sealed candidate image (never CI). It starts the image's C# default entrypoint, then the Go
-// center (/app/arcforges-center) from the same image the way the production Container runs it.
+// Local opt-in diagnostic of the sealed Go candidate image (never CI).
 export async function testContainer(image: string, revision: string, identity: Identity) {
   assert.notEqual(process.env.CI, "true", "Container runtime tests are local opt-in only.");
-  const compiled = JSON.parse(
-    await run(
-      "docker",
-      [
-        "run",
-        "--rm",
-        "--network",
-        "none",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        image,
-        "--build-info",
-      ],
-      true,
-    ),
-  ) as unknown;
-  assert.deepEqual(compiled, identity, "Actual Native AOT binary identity differs");
-  await writeJson(path.join(candidateDir, "build-identity.json"), compiled);
   const imageInfo = await inspectImage(image);
-  assert.equal(imageInfo.Os, "linux");
-  assert.equal(imageInfo.Architecture, "amd64");
-  assert.ok(
-    imageInfo.Config.User && !["0", "root"].includes(imageInfo.Config.User),
-    "Image must run as non-root.",
-  );
-  assert.deepEqual(imageInfo.Config.Entrypoint, ["/app/ArcForges.Cloud"]);
-  assert.equal(imageInfo.Config.Labels["org.opencontainers.image.revision"], revision);
+  verifyGoImage(imageInfo, revision);
+  const provenance = await verifyStoredImage(image, imageInfo.Id, revision);
 
-  // Ephemeral host ports avoid colliding with other repository tasks.
-  const id = await run(
-    "docker",
-    [
-      "run",
-      "--detach",
-      ...containerHardening,
-      "--publish",
-      "127.0.0.1::8080",
-      "--publish",
-      "127.0.0.1::8081",
-      image,
-    ],
-    true,
-  );
   const binding = async (container: string, port: string) => {
     const output = await run("docker", ["port", container, port], true);
     const match = /^127\.0\.0\.1:(\d+)$/.exec(output);
     assert.ok(match, `Unexpected Docker port: ${output}`);
     return `http://127.0.0.1:${match[1]}`;
   };
-  let csharp: { health: unknown; grpcWeb: unknown };
-  try {
-    const provenance = await verifyImageProvenance(id, revision, imageInfo.Id);
-    await writeJson(path.join(candidateDir, "image-provenance.json"), provenance);
-    const web = await binding(id, "8080/tcp");
-    const health = await waitForHealth(web, revision, false, 60000);
-    verifyHealthIdentity(health, identity);
-    const grpcWeb = await runProbe(web, false);
-    // No native gRPC call to the C# host: its ingress admits binary gRPC-Web only and answers application/grpc with 415
-    // (docs/cloud-ingress.md, host admission rule 2). The published native Consumer runs against the Go center below,
-    // which admits native gRPC.
-    await run("docker", ["restart", id]);
-    const restartedWeb = await binding(id, "8080/tcp");
-    verifyHealthIdentity(await waitForHealth(restartedWeb, revision, false, 60000), identity);
-    await runProbe(restartedWeb, false);
-    csharp = { health, grpcWeb };
-  } finally {
-    await run("docker", ["logs", "--tail", "50", id]);
-    await run("docker", ["rm", "--force", id]);
-  }
-
   const center = await testCenterContainer(image, revision, identity, binding);
   await writeJson(path.join(root, "artifacts", "container-evidence.json"), {
     imageId: imageInfo.Id,
-    health: csharp.health,
-    grpcWeb: csharp.grpcWeb,
-    restart: true,
     nonRoot: true,
+    provenance,
     center,
   });
   return imageInfo.Id;
@@ -272,7 +232,6 @@ async function testCenterContainer(
   identity: Identity,
   binding: (container: string, port: string) => Promise<string>,
 ) {
-  const entrypoint = "/app/arcforges-center";
   const production = await readJson<{ vars: Record<string, string | undefined> }>(
     path.join(root, "wrangler.json"),
   );
@@ -295,8 +254,6 @@ async function testCenterContainer(
         "--read-only",
         "--cap-drop",
         "ALL",
-        "--entrypoint",
-        entrypoint,
         image,
         "--build-info",
       ],
@@ -323,8 +280,6 @@ async function testCenterContainer(
       `ARCFORGES_CENTER_PUBLIC_BASE_URL=${publicBaseUrl}`,
       "--env",
       "ARCFORGES_NEON_HELLO=disabled",
-      "--entrypoint",
-      entrypoint,
       image,
     ],
     true,
@@ -356,17 +311,25 @@ async function testCenterContainer(
       "--",
       native,
     ]);
+    await run("docker", ["restart", id]);
+    const restartedWeb = await binding(id, "8080/tcp");
+    verifyHealthIdentity(
+      await waitForHealth(restartedWeb, revision, false, 60000, undefined, "go"),
+      identity,
+    );
+    await runProbe(restartedWeb, false);
     // SIGTERM, as the Container runtime stops an instance: the center drains and exits 0.
     await run("docker", ["stop", "--time", "20", id]);
     const exitCode = await run("docker", ["inspect", "--format", "{{.State.ExitCode}}", id], true);
     assert.equal(exitCode, "0", "The center must stop cleanly on SIGTERM.");
     return {
-      entrypoint,
+      entrypoint: goEntrypoint,
       mode,
       publicBaseUrl,
       health,
       grpcWeb,
       nativeGrpc: true,
+      restart: true,
       gracefulStop: true,
     };
   } finally {
@@ -455,16 +418,15 @@ async function testWorker(candidate: Candidate) {
       true,
       180000,
       expectedIdentity(candidate.version).build,
-      config.vars.ARCFORGES_HELLO_RUNTIME === "go" ? "go" : "csharp",
+      "go",
     );
     verifyHealthIdentity(health, expectedIdentity(candidate.version));
     // AF-CTR-03: the center was started with the surfaces this Worker forwards.
-    if (config.vars.ARCFORGES_HELLO_RUNTIME === "go")
-      assert.equal(
-        (health as { center?: { surfaces?: unknown } }).center?.surfaces,
-        centerSurfaces(config.vars.FLAGSHIP_SURFACES),
-        "The center must serve exactly the surfaces the Worker forwards.",
-      );
+    assert.equal(
+      (health as { center?: { surfaces?: unknown } }).center?.surfaces,
+      centerSurfaces(config.vars.FLAGSHIP_SURFACES),
+      "The center must serve exactly the surfaces the Worker forwards.",
+    );
     const result = await runProbe("http://127.0.0.1:18787/api", true);
     const surfaces = await probeDisabledSurfaces(
       "http://127.0.0.1:18787/api",
@@ -537,6 +499,56 @@ export function dockerBuildNetwork(environment: NodeJS.ProcessEnv = process.env)
   return ["--network", "host"];
 }
 
+export async function stageCandidateDirectory<T>(
+  artifacts: string,
+  prepare: (directory: string) => Promise<T>,
+): Promise<T> {
+  assert(
+    (await lstat(artifacts)).isDirectory() && (await realpath(artifacts)) === artifacts,
+    "Linked candidate staging directory",
+  );
+  const destination = path.join(artifacts, "candidate");
+  const staged = await mkdtemp(path.join(artifacts, "candidate-stage-"));
+  let saved: string | undefined;
+  try {
+    const result = await prepare(staged);
+    const existing = lstatSync(destination, { throwIfNoEntry: false });
+    if (existing) {
+      assert(existing.isDirectory(), "Candidate destination is not a regular directory");
+      const archive = await mkdtemp(path.join(artifacts, "candidate-previous-"));
+      const previous = path.join(archive, "candidate");
+      try {
+        await rename(destination, previous);
+      } catch (error) {
+        await rmdir(archive);
+        throw error;
+      }
+      saved = previous;
+      assert(
+        (await lstat(saved)).isDirectory(),
+        "Candidate destination changed during publication",
+      );
+    }
+    await rename(staged, destination);
+    return result;
+  } catch (error) {
+    try {
+      if (saved) {
+        assert(
+          !lstatSync(destination, { throwIfNoEntry: false }),
+          "Candidate destination changed during publication",
+        );
+        await rename(saved, destination);
+        await rmdir(path.dirname(saved));
+      }
+      await rm(staged, { recursive: true, force: true });
+    } catch (restoreError) {
+      throw new AggregateError([error, restoreError], "Could not restore candidate staging");
+    }
+    throw error;
+  }
+}
+
 async function buildCandidate() {
   await writeJson(path.join(root, "artifacts/evidence/licence-boundary.json"), auditLicences(root));
   const head = await run("git", ["rev-parse", "HEAD"], true);
@@ -549,16 +561,15 @@ async function buildCandidate() {
   const version = `0.1.0-${suffix}`;
   const identity = expectedIdentity(version);
   const image = `arcforges-cloud:${suffix}`;
-  await mkdir(candidateDir, { recursive: true });
   await writeJson(
     path.join(root, "artifacts/evidence/source-provenance.json"),
     auditProvenance(root),
   );
   stageImageNotices(root, revision);
-  await writeJson(path.join(candidateDir, "legal-notices.json"), legalBundle(root, revision));
   const network = dockerBuildNetwork();
   if (network.length > 0)
     console.log("Local verification: the image build fetches over the host network.");
+  const existingTag = await run("docker", ["image", "ls", "--quiet", image], true);
   await run("docker", [
     "build",
     ...network,
@@ -573,17 +584,63 @@ async function buildCandidate() {
     image,
     ".",
   ]);
-  const imageInfo = await inspectImage(image);
-  assert.equal(imageInfo.Os, "linux");
-  assert.equal(imageInfo.Architecture, "amd64");
-  assert.ok(imageInfo.Config.User && !["0", "root"].includes(imageInfo.Config.User));
-  assert.deepEqual(imageInfo.Config.Entrypoint, ["/app/ArcForges.Cloud"]);
-  assert.equal(imageInfo.Config.Labels["org.opencontainers.image.revision"], revision);
+  let imageInfo: ImageInfo | undefined;
+  try {
+    const builtImage = await inspectImage(image);
+    imageInfo = builtImage;
+    const candidate = await stageCandidateDirectory(path.dirname(candidateDir), (directory) =>
+      prepareCandidate(directory, {
+        revision,
+        dirty,
+        version,
+        identity,
+        image,
+        imageInfo: builtImage,
+      }),
+    );
+    console.log(`Verified candidate ${version}: ${candidate.imageId}`);
+  } catch (error) {
+    if (!existingTag && imageInfo) {
+      try {
+        assert.equal(
+          (await inspectImage(image)).Id,
+          imageInfo.Id,
+          "Candidate image tag now names another image",
+        );
+        await run("docker", ["image", "rm", image]);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "Could not remove the failed candidate image",
+        );
+      }
+    }
+    throw error;
+  }
+}
+
+async function prepareCandidate(
+  directory: string,
+  build: {
+    revision: string;
+    dirty: boolean;
+    version: string;
+    identity: Identity;
+    image: string;
+    imageInfo: ImageInfo;
+  },
+): Promise<Candidate> {
+  const { revision, dirty, version, identity, image, imageInfo } = build;
+  verifyGoImage(imageInfo, revision);
   const imageId = imageInfo.Id;
+  await writeJson(path.join(directory, "legal-notices.json"), legalBundle(root, revision));
   // Inspect legal contents through a stopped container; never execute the application in CI.
   const provenance = await verifyStoredImage(image, imageId, revision);
-  await writeJson(path.join(candidateDir, "image-provenance.json"), provenance);
-  await writeJson(path.join(candidateDir, "build-identity.json"), identity);
+  await writeJson(path.join(directory, "image-provenance.json"), provenance);
+  await writeJson(path.join(directory, "build-identity.json"), identity);
+  const bundles = path.join(directory, "bundles");
+  const main = path.join(bundles, "worker");
+  const proof = path.join(bundles, "proof");
   await run(process.execPath, [
     wrangler,
     "deploy",
@@ -591,18 +648,12 @@ async function buildCandidate() {
     "--containers-rollout",
     "none",
     "--outdir",
-    "artifacts/worker-bundle",
+    main,
     "--metafile",
-    "artifacts/worker-bundle/bundle-meta.json",
+    path.join(main, "bundle-meta.json"),
   ]);
-  await copyFile(
-    path.join(root, "artifacts/worker-bundle/bundle-meta.json"),
-    path.join(candidateDir, "worker-meta.json"),
-  );
-  await copyFile(
-    path.join(root, "artifacts/worker-bundle/index.js"),
-    path.join(candidateDir, "worker.js"),
-  );
+  await copyFile(path.join(main, "bundle-meta.json"), path.join(directory, "worker-meta.json"));
+  await copyFile(path.join(main, "index.js"), path.join(directory, "worker.js"));
   // CLOUD.84 D1: the proof bundle is built from its own entry (worker/proof/entry.ts) and sealed with the candidate. The dry-run needs
   // the proof asset directory to exist; its contents are uploaded only at deploy time and are not part of this bundle.
   await mkdir(path.join(root, "artifacts", "proof-assets"), { recursive: true });
@@ -615,18 +666,16 @@ async function buildCandidate() {
     "--containers-rollout",
     "none",
     "--outdir",
-    "artifacts/worker-bundle-proof",
+    proof,
     "--metafile",
-    "artifacts/worker-bundle-proof/bundle-meta.json",
+    path.join(proof, "bundle-meta.json"),
   ]);
   await copyFile(
-    path.join(root, "artifacts/worker-bundle-proof/bundle-meta.json"),
-    path.join(candidateDir, "proof-worker-meta.json"),
+    path.join(proof, "bundle-meta.json"),
+    path.join(directory, "proof-worker-meta.json"),
   );
-  await copyFile(
-    path.join(root, "artifacts/worker-bundle-proof/entry.js"),
-    path.join(candidateDir, "proof-worker.js"),
-  );
+  await copyFile(path.join(proof, "entry.js"), path.join(directory, "proof-worker.js"));
+  await rm(bundles, { recursive: true });
   const config = await readJson<WorkerConfig>(path.join(root, "wrangler.json"));
   delete config.$schema;
   config.main = "./worker.js";
@@ -634,39 +683,13 @@ async function buildCandidate() {
   config.vars.SOURCE_REVISION = revision;
   config.vars.BUILD_IDENTITY = JSON.stringify(identity.build);
   config.containers[0].image = image;
-  await writeJson(path.join(candidateDir, "wrangler.json"), config);
-  await run("docker", ["save", "--output", "artifacts/candidate/docker-image.tar", image]);
-  // CLOUD.84 S33(3)(b), S38(2), S41(1): the tool (its Hello `probe` and its D1 `migrate` command) is published once, self-contained for
-  // linux-x64 and NOT single-file. A single-file publish turns on the single-file analyzer, whose implicit Microsoft.NET.ILLink.Tasks
-  // reference is not in the reviewed tool lock, so the locked CI restore refuses it (NU1004). The publish output is archived in a fixed
-  // order with fixed metadata as one sealed member; the probe runner and the deploy jobs check its SHA-256 against this manifest before they
-  // extract and run it, so no .NET build runs in a deploy job. The reviewed tool lock must come out of the publish byte-identical: it is
-  // never rewritten or restored here, and a changed lock fails the candidate.
-  const toolLockFile = path.join(root, "tools", "ArcForges.Cloud.Generation", "packages.lock.json");
-  const reviewedToolLock = await readFile(toolLockFile);
-  const toolOutput = path.join(root, "artifacts", "tool-publish");
-  await rm(toolOutput, { recursive: true, force: true });
-  await run("dotnet", toolPublishArguments(toolOutput));
-  assert.ok(
-    reviewedToolLock.equals(await readFile(toolLockFile)),
-    "The tool publish changed the reviewed tools/ArcForges.Cloud.Generation/packages.lock.json.",
-  );
-  await run("tar", [
-    "--sort=name",
-    "--mtime=@0",
-    "--owner=0",
-    "--group=0",
-    "--numeric-owner",
-    "-cf",
-    path.join(candidateDir, sealedToolName),
-    "-C",
-    toolOutput,
-    ".",
-  ]);
+  await writeJson(path.join(directory, "wrangler.json"), config);
+  await run("docker", ["save", "--output", path.join(directory, "docker-image.tar"), image]);
   const files: Record<string, string> = {};
-  for (const file of payloadFiles) files[file] = await sha256(path.join(candidateDir, file));
-  await writeJson(path.join(candidateDir, "manifest.json"), {
-    schema: 1,
+  for (const file of goCandidateFiles) files[file] = await sha256(path.join(directory, file));
+  await writeJson(path.join(directory, "manifest.json"), {
+    schema: 2,
+    runtime: "go",
     revision,
     dirty,
     version,
@@ -674,8 +697,7 @@ async function buildCandidate() {
     imageId,
     files,
   });
-  await verifyCandidate();
-  console.log(`Verified candidate ${version}: ${imageId}`);
+  return verifyCandidate(directory);
 }
 
 export async function verifyToolchain(nodeVersion: string, npmVersion: string) {

@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import {
-  bridgeIdentity,
+  type bridgeIdentity,
   bridgeSource,
   collectBridgeFacts,
   securityBridgeDockerfile,
@@ -15,7 +15,7 @@ import {
   type ProducerFacts,
 } from "../../tooling/ctr06-security-bridge-source.ts";
 import { childEnvironment } from "../../tooling/ctr06-security-bridge-producer.ts";
-import { root } from "../../tooling/process.ts";
+import { gitEnvironment, root } from "../../tooling/process.ts";
 import { scratchDirectory } from "./support/scratch.ts";
 
 const producerCommit = "a".repeat(40);
@@ -126,8 +126,56 @@ test("identity uses the old source axes and actual run inputs without changing G
     }),
   );
   execFileSync("tar", ["-xf", tar, "-C", scratch]);
+  // Use the same historical producer as the native archival check.
+  const producerRevision = "9b8796eac760982d9814f371b820b736ddd945c4";
+  const git = (...args: string[]) =>
+    execFileSync("git", ["--no-replace-objects", ...args], {
+      cwd: root,
+      env: gitEnvironment(),
+      maxBuffer: 128 * 1024 * 1024,
+    });
+  assert.equal(
+    git("rev-parse", "--verify", `${producerRevision}^{tree}`).toString("ascii").trim(),
+    "2b35c50007089d6e6c51797f62437334bd2826f3",
+  );
+  const historicalProducer = scratchDirectory("ctr06-producer-identity-", t);
+  const historicalModule = "tooling/ctr06-security-bridge-source.ts";
+  const producerTar = path.join(historicalProducer, "producer.tar");
+  writeFileSync(
+    producerTar,
+    git(
+      "archive",
+      "--format=tar",
+      producerRevision,
+      "--",
+      "package.json",
+      historicalModule,
+      "tooling/build-identity.ts",
+      "tooling/process.ts",
+      "tooling/provenance.ts",
+    ),
+  );
+  execFileSync("tar", ["-xf", producerTar, "-C", historicalProducer]);
   const producer = validateBridgeProducer(fixtureEnv, fixtureEvent, fixtureFacts);
-  const identity = bridgeIdentity(scratch, producer);
+  const runner = path.join(historicalProducer, "probe.mjs");
+  writeFileSync(
+    runner,
+    `import { bridgeIdentity } from "./tooling/ctr06-security-bridge-source.ts";
+const [source, producer] = process.argv.slice(2);
+process.stdout.write(JSON.stringify(bridgeIdentity(source, JSON.parse(producer))));
+`,
+  );
+  const readIdentity = () =>
+    JSON.parse(
+      execFileSync(process.execPath, [runner, scratch, JSON.stringify(producer)], {
+        cwd: historicalProducer,
+        env: childEnvironment(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 10_000,
+      }),
+    ) as ReturnType<typeof bridgeIdentity>;
+  const identity = readIdentity();
   assert.deepEqual(identity.artifact, { id: "Cloud", version: "0.1.0-ci.42.2" });
   assert.equal(identity.build.sourceCommit, bridgeSource.commit);
   assert.equal(identity.build.buildId, "123456.2");
@@ -149,7 +197,7 @@ test("identity uses the old source axes and actual run inputs without changing G
     properties,
     readFileSync(properties, "utf8").replace("1.0.0-ci.287.1", "1.0.0-ci.450.1"),
   );
-  assert.throws(() => bridgeIdentity(scratch, producer));
+  assert.throws(readIdentity);
 });
 
 test("bridge children retain Windows cache location but not owner credentials or legacy compiler selectors", () => {

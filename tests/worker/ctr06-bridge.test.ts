@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { bridgeAudience, verifyBridgeProviderSnapshot } from "../../tooling/ctr06-bridge.ts";
 import { promoteCTR06Bridge } from "../../tooling/ctr06-publisher.ts";
 import type { CenterRunner } from "../../tooling/postgres-deploy.ts";
+import { scratchDirectory } from "./support/scratch.ts";
 
 const account = "c".repeat(32);
 const version = "00000000-0000-4000-8000-000000000001";
@@ -251,4 +255,35 @@ test("phase 1 refuses the historical bridge before provider work or credential d
       /security bridge successor is not yet bound/u,
     );
   assert.equal(called, false);
+});
+
+test("the current publisher still refuses if a future successor gate returns", (t) => {
+  const scratch = scratchDirectory("ctr06-archival-publisher-", t);
+  copyFileSync(
+    path.join(import.meta.dirname, "../../tooling/ctr06-publisher.ts"),
+    path.join(scratch, "ctr06-publisher.ts"),
+  );
+  writeFileSync(path.join(scratch, "package.json"), '{"type":"module"}\n');
+  writeFileSync(
+    path.join(scratch, "ctr06-security-bridge-gate.ts"),
+    "export function requireSecurityBridgeSuccessor() {}\n",
+  );
+  const script = `
+    import assert from "node:assert/strict";
+    import { promoteCTR06Bridge } from "./ctr06-publisher.ts";
+    const forbidden = () => { throw new Error("an effect was attempted"); };
+    const variables = new Proxy({}, { get: forbidden, ownKeys: forbidden });
+    for (const target of ["production", "acceptance"])
+      await assert.rejects(
+        promoteCTR06Bridge(target, "fixture", variables, forbidden),
+        /archival-only at Cloud 9b8796e/
+      );
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: scratch,
+    encoding: "utf8",
+    timeout: 15_000,
+    windowsHide: true,
+  });
+  assert.equal(child.status, 0, child.stderr);
 });

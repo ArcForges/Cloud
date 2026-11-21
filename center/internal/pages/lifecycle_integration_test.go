@@ -46,7 +46,7 @@ func mustLifecycle(t *testing.T, reply response) lifecycleAnswer {
 // The HTTP protocol reaches real account fences, command receipts and passkey
 // evidence. Database fixtures seed identities only, never a successful decision.
 func TestLifecyclePlansExportAndPendingAccountRemediation(t *testing.T) {
-	h := newHarness(t, settings{surfaces: "identity,pages,mobile,fleet", policy: writePolicy})
+	h := newHarness(t, settings{surfaces: "identity,pages,fleet", policy: writePolicy})
 	who := h.seedAccount(1)
 	b := h.newBrowser()
 	b.mustSignIn(who)
@@ -167,20 +167,8 @@ func TestLifecyclePlansExportAndPendingAccountRemediation(t *testing.T) {
 			t.Errorf("pending %s: %d", path, reply.status)
 		}
 	}
-	// The retained mobile surface performs center-defined operations rather
-	// than RPC table calls. Its forms must obey the same pending-account fence.
-	attempt := h.mustBegin(h.app())
-	for path, fields := range map[string]url.Values{
-		"/mobile/authorize/review":   {"flow_id": {attempt.FlowID}},
-		"/mobile/authorize/decision": {"flow_id": {attempt.FlowID}, "decision": {"deny"}},
-		"/connect/review":            {"flow_id": {platform.NewID().String()}},
-	} {
-		if reply := pending.postForm(path, fields); reply.status != 403 {
-			t.Errorf("pending center-defined page %s: %d %s", path, reply.status, reply.text())
-		}
-	}
-	if h.count("SELECT count(*) FROM identity.mobile_authorization WHERE flow_id=$1 AND state=1 AND viewed_by IS NULL", idOf(t, attempt.FlowID)) != 1 {
-		t.Fatal("pending account mutated another browser authorization flow")
+	if reply := pending.postForm("/connect/review", url.Values{"flow_id": {platform.NewID().String()}}); reply.status != 403 {
+		t.Errorf("pending node enrollment page: %d %s", reply.status, reply.text())
 	}
 	if reply := pending.stepUp(who, identity.ClassExportAccount, who.id); reply.status != 403 {
 		t.Fatalf("pending unrelated step-up: %d %s", reply.status, reply.text())

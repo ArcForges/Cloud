@@ -19,6 +19,7 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	fleetv1 "github.com/ArcForges/Contracts/go/arcforges/fleet/v1"
 	foundationv1 "github.com/ArcForges/Contracts/go/arcforges/foundation/v1"
 	hellov1 "github.com/ArcForges/Contracts/go/arcforges/hello/v1"
 	"github.com/ArcForges/Contracts/go/arcforges/hello/v1/hellov1connect"
@@ -91,6 +92,23 @@ func (h *harness) count() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return *h.calls
+}
+
+func TestTheRetiredFleetServiceIsUnimplemented(t *testing.T) {
+	h := start(t, hello.Stateless)
+	service := fleetv1.File_arcforges_fleet_v1_fleet_proto.Services().ByName("FleetService")
+	methods := service.Methods()
+	const formerlyUnpublished = 9
+	if methods.Len() != 22+formerlyUnpublished {
+		t.Fatalf("unexpected FleetService descriptor with %d procedures", methods.Len())
+	}
+	for index := range methods.Len() {
+		path := "/" + string(service.FullName()) + "/" + string(methods.Get(index).Name())
+		reply := grpcWeb(t, h.server.URL, path, ingress.Frame(nil), nil)
+		if reply.trailers["grpc-status"] != "12" || len(reply.messages) != 0 {
+			t.Errorf("%s: HTTP %d, gRPC %s, %d messages", path, reply.httpStatus, reply.trailers["grpc-status"], len(reply.messages))
+		}
+	}
 }
 
 func TestGRPCAndGRPCWebPreserveThePublishedHello(t *testing.T) {

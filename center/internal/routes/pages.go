@@ -31,9 +31,9 @@ const (
 	PageActivatePrefix = "/activate"
 )
 
-// PageSurfaces names the modules that may declare browser, native or apex page routes.
+// PageSurfaces names the modules that may declare browser routes.
 func PageSurfaces() []string {
-	return []string{SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile, SurfaceCommerce}
+	return []string{SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceCommerce}
 }
 
 // underPrefix reports whether a path is a prefix page itself or one of its children.
@@ -245,9 +245,9 @@ func pageSurfaceRoutes() []PageRoute {
 	}
 }
 
-// AllPageRoutes are the routes of the shared account page handler, including the mobile native JSON and apex routes.
+// AllPageRoutes are the routes of the shared account page handler.
 func AllPageRoutes() []PageRoute {
-	return append(append(append(PageRoutes(), OperationsPageRoutes()...), FleetPageRoutes()...), MobilePageRoutes()...)
+	return append(append(PageRoutes(), OperationsPageRoutes()...), FleetPageRoutes()...)
 }
 
 // OperationsPageRoutes are the routes of the operations surface, in registration order: the page of the operator grant, its review (the
@@ -275,8 +275,7 @@ var ErrPageRegistration = fmt.Errorf("%w: inconsistent page registration", ErrRe
 // canonical (no trailing slash, query, percent-encoding or dot segment), a method other than GET and POST, a duplicate row, a body or
 // content type that does not fit the method, a bound out of range, an unknown cookie rule, a redirect on a route that is not an HTML
 // route, a route of a surface that has no pages, or a route outside its surface's prefixes (the pages surface: the account and the
-// WebBrowserSession prefixes; the operations surface: its prefix; the fleet surface: /connect and /activate, each a page itself; the
-// mobile surface: mobileRowAdmitted's exact shapes). Only the mobile surface declares native JSON and apex routes.
+// WebBrowserSession prefixes; the operations surface: its prefix; the fleet surface: /connect and /activate, each a page itself).
 func CheckPages(rows []PageRoute) error {
 	seen := map[string]bool{}
 	ids := map[string]bool{}
@@ -293,17 +292,13 @@ func CheckPages(rows []PageRoute) error {
 			return fmt.Errorf("%w: %s is outside the operations prefix", ErrPageRegistration, row.Path)
 		case row.Surface == SurfaceFleet && !underPrefix(row.Path, PageConnectPrefix) && !underPrefix(row.Path, PageActivatePrefix):
 			return fmt.Errorf("%w: %s is outside the fleet prefixes", ErrPageRegistration, row.Path)
-		case row.Surface == SurfaceMobile && !mobileRowAdmitted(row):
-			return fmt.Errorf("%w: %s is not a mobile route of an admitted shape", ErrPageRegistration, row.ID)
 		case (row.Surface == SurfaceCommerce || row.Path == CommercePortalPath) && !isCommercePortal(row):
 			return fmt.Errorf("%w: the commerce portal must use its dedicated browser route", ErrPageRegistration)
-		case row.Surface != SurfaceMobile && (row.Kind == PageNativeKind || row.Kind == PageApexKind):
-			return fmt.Errorf("%w: %s is a native or apex route outside the mobile surface", ErrPageRegistration, row.ID)
 		case strings.ContainsAny(row.Path, "?#%\\ ") || strings.Contains(row.Path, "//") || strings.Contains(row.Path, "..") || strings.HasSuffix(row.Path, "/"):
 			return fmt.Errorf("%w: %s is not canonical", ErrPageRegistration, row.Path)
 		case seen[key] || ids[row.ID] || row.ID == "":
 			return fmt.Errorf("%w: %s is registered twice or unnamed", ErrPageRegistration, key)
-		case row.Kind != PageHTMLKind && row.Kind != PageAssetKind && row.Kind != PageJSONKind && row.Kind != PageNativeKind && row.Kind != PageApexKind:
+		case row.Kind != PageHTMLKind && row.Kind != PageAssetKind && row.Kind != PageJSONKind:
 			return fmt.Errorf("%w: %s has the kind %q", ErrPageRegistration, row.ID, row.Kind)
 		case row.SetCookie != SetCookieNone && row.SetCookie != SetCookieSession && row.SetCookie != SetCookieClear:
 			return fmt.Errorf("%w: %s has the Set-Cookie rule %q", ErrPageRegistration, row.ID, row.SetCookie)

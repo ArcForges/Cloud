@@ -15,7 +15,7 @@ import (
 )
 
 // The authorizer's own verification of a node-relayed call (AF-CTR-05 E2a; Plan addendum C-N6; decisions B-4; EVIDENCE: REAL code,
-// MOCKED verifier: the hub's verification is tested in package hub and through the composed center there). These calls are refused or
+// MOCKED verifier: the hub's verification is tested in package hub). These calls are refused or
 // admitted before any stage that reads or writes the store, so the authorizer runs without one.
 
 type relayStub struct {
@@ -34,8 +34,15 @@ func (r relayStub) RelayingInstallationID() platform.ID { return r.installation 
 func TestAuthorizeVerifiesTheRelayOfANodeCaller(t *testing.T) {
 	installation := platform.NewID()
 	node := ingress.Caller{Credential: ingress.CredentialNativeBearer, Scope: "node", UserID: platform.NewID().String(), InstallationID: installation.String()}
+	const procedure = fleetv1connect.FleetServiceListNodesProcedure
+	legacyRow := Operation{Path: procedure, ID: "fleet.listNodes", Risk: "R1", Session: true, RelayedScopes: []string{"node"}}
+	newRelayAuthorizer := func(verify RelayVerifier) *Authorizer {
+		authorizer := NewAuthorizer(nil, nil, WithRelayVerifier(verify))
+		authorizer.lookup = func(path string) (Operation, bool) { return legacyRow, path == procedure }
+		return authorizer
+	}
 	call := func(caller ingress.Caller) *ingress.Call {
-		return &ingress.Call{Policy: ingress.Policy{FullName: fleetv1connect.FleetServiceListNodesProcedure}, Caller: caller}
+		return &ingress.Call{Policy: ingress.Policy{FullName: procedure}, Caller: caller}
 	}
 	reason := func(err error) string {
 		var refusal *arc.Refusal
@@ -67,13 +74,13 @@ func TestAuthorizeVerifiesTheRelayOfANodeCaller(t *testing.T) {
 		"a relay of another installation": {verifier(relayStub{verified: true, installation: platform.NewID()}, nil), stated, arc.RelayCredentialMismatch},
 		"a nil relay":                     {verifier(nil, nil), stated, arc.RelaySignatureInvalid},
 	} {
-		authorizer := NewAuthorizer(nil, nil, WithRelayVerifier(c.verifier))
+		authorizer := newRelayAuthorizer(c.verifier)
 		if _, relay, err := authorizer.AuthorizeRelayed(context.Background(), call(node), nil, c.claim); reason(err) != c.want || relay != nil {
 			t.Errorf("%s: %s", name, reason(err))
 		}
 	}
 	asked = nil
-	authorizer := NewAuthorizer(nil, nil, WithRelayVerifier(verifier(relayStub{verified: true, installation: installation}, nil)))
+	authorizer := newRelayAuthorizer(verifier(relayStub{verified: true, installation: installation}, nil))
 	if _, relay, err := authorizer.AuthorizeRelayed(context.Background(), call(node), nil, nil); err != nil || relay == nil || !relay.Verified() ||
 		len(asked) != 1 || asked[0].Assertion != nil {
 		t.Fatalf("a request without a claim is verified as one without an assertion: %v %v %v", relay, err, asked)

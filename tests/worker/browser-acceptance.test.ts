@@ -2267,8 +2267,7 @@ test("the operator form follows the price-free V2 development catalogue in the c
   assert(fixtureFeatures.includes(grantedFeature as never));
   assert.equal(grantedFeature, "remote.view");
   assert.equal(requestedDays, 1);
-  // The proof environment loads exactly this catalogue and the operations surface (with fleet since AF-CTR-04 E3 and mobile since
-  // part M); production loads neither.
+  // The proof environment loads the development catalogue and the current Go management surfaces.
   const wrangler = JSON.parse(readFileSync(path.join(root, "wrangler.json"), "utf8")) as {
     vars: Record<string, string>;
     env: { proof: { vars: Record<string, string> } };
@@ -2276,7 +2275,7 @@ test("the operator form follows the price-free V2 development catalogue in the c
   assert.equal(wrangler.env.proof.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, "development-fixtures");
   assert.equal(
     wrangler.env.proof.vars.FLAGSHIP_SURFACES,
-    "identity,pages,operations,fleet,mobile,relay,nodes",
+    "identity,pages,operations,fleet,relay,nodes",
   );
   assert.equal(wrangler.vars.FLAGSHIP_SURFACES, "");
   assert.equal(wrangler.vars.ARCFORGES_CENTER_PLAN_CONFIGURATION, undefined);
