@@ -1,287 +1,135 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Docker build context must carry every C# source folder of the host and of every project it
-// references: a folder missing from .dockerignore compiles locally and fails only in the hosted image build.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
+const read = (file: string) => readFileSync(path.join(root, file), "utf8");
 
-/** Every folder of a project that holds C# sources, relative to the repository root. */
-function sourceFolders(directory: string): string[] {
-  const folders: string[] = [];
-  const entries = readdirSync(path.join(root, directory), { withFileTypes: true });
-  if (entries.some((entry) => entry.isFile() && entry.name.endsWith(".cs")))
-    folders.push(directory);
-  for (const entry of entries)
-    if (entry.isDirectory() && !["bin", "obj"].includes(entry.name))
-      folders.push(...sourceFolders(path.posix.join(directory, entry.name)));
-  return folders;
-}
-/** The one glob form the context uses: `*` stands for one path segment, as in Go's filepath.Match. */
-function matches(rule: string, target: string) {
-  const expression = rule
-    .split("*")
-    .map((part) => part.replaceAll(/[.+?^${}()|[\]\\]/gu, String.raw`\$&`))
-    .join("[^/]*");
-  return new RegExp(`^${expression}$`, "u").test(target);
-}
-
-const rules = readFileSync(path.join(root, ".dockerignore"), "utf8")
-  .split("\n")
+// This model covers the anchored paths, star globs and globstar paths in this repository.
+// A rule can match a parent directory, and a later matching rule overrides it.
+const rules = read(".dockerignore")
+  .split(/\r?\n/u)
   .map((line) => line.trim())
-  .filter(Boolean);
-const includes = rules.filter((rule) => rule.startsWith("!")).map((rule) => rule.slice(1));
-const admitted = (target: string) => includes.some((rule) => matches(rule, target));
-const projects = readdirSync(path.join(root, "src"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && entry.name.startsWith("ArcForges.Cloud"))
-  .map((entry) => `src/${entry.name}`);
+  .filter((line) => line && !line.startsWith("#"))
+  .map((line) => {
+    const include = line.startsWith("!");
+    const glob = (include ? line.slice(1) : line).replace(/\/$/u, "");
+    assert.match(glob, /^[A-Za-z0-9._/*-]+$/u, "Extend the context test for new pattern syntax");
+    const expression = glob
+      .split(/(\*\*\/|\*\*|\*)/u)
+      .map((part) => {
+        if (part === "**/") return "(?:.*/)?";
+        if (part === "**") return ".*";
+        if (part === "*") return "[^/]*";
+        return part.replaceAll(".", "\\.");
+      })
+      .join("");
+    return { include, pattern: new RegExp(`^${expression}$`, "u") };
+  });
 
-test("every source project of the image is admitted to the Docker context by explicit directory and file rules", () => {
-  assert(projects.includes("src/ArcForges.Cloud"));
-  assert(projects.includes("src/ArcForges.Cloud.Storage.D1"));
-  assert.equal(projects.filter((project) => project.includes(".Modules.")).length, 20);
-  const host = sourceFolders("src/ArcForges.Cloud");
-  assert(host.includes("src/ArcForges.Cloud/Foundation") && host.includes("src/ArcForges.Cloud"));
-  for (const project of projects) {
-    const name = path.posix.basename(project);
-    for (const file of [`${name}.csproj`, "packages.lock.json"])
-      assert(admitted(`${project}/${file}`), `Missing file rule for ${project}/${file}`);
-    for (const folder of sourceFolders(project)) {
-      assert(admitted(`${folder}/`), `Missing directory rule for ${folder}`);
-      assert(admitted(`${folder}/Example.cs`), `Missing source rule for ${folder}`);
-    }
-  }
-});
-
-/**
- * Every folder of the Go center that holds a non-test Go source or a file the executable embeds: a migration, a page template
- * (`*.gohtml`), the account pages' script and style sheet (`static/*.js`, `static/*.css`) or the plan catalogue's development fixtures
- * (`fixtures/*.json`).
- */
-function centerFolders(directory: string): { folder: string; files: string[] }[] {
-  const entries = readdirSync(path.join(root, directory), { withFileTypes: true });
-  const embeddedNames = new Set(
-    entries
-      .filter(
-        (entry) => entry.isFile() && entry.name.endsWith(".go") && !entry.name.endsWith("_test.go"),
-      )
-      .flatMap((entry) =>
-        [
-          ...readFileSync(path.join(root, directory, entry.name), "utf8").matchAll(
-            /^\/\/go:embed ([^\s*?\[\]]+)$/gmu,
-          ),
-        ].map((match) => match[1]),
-      ),
-  );
-  const files = entries
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        ((entry.name.endsWith(".txt") && embeddedNames.has(entry.name)) ||
-          (entry.name.endsWith(".go") && !entry.name.endsWith("_test.go")) ||
-          entry.name.endsWith(".sql") ||
-          entry.name.endsWith(".gohtml") ||
-          (directory.endsWith("/static") && /\.(?:js|css)$/u.test(entry.name)) ||
-          (directory.endsWith("/fixtures") && entry.name.endsWith(".json"))),
-    )
-    .map((entry) => entry.name);
-  const folders = files.length > 0 ? [{ folder: directory, files }] : [];
-  for (const entry of entries)
-    if (entry.isDirectory() && entry.name !== "testdata")
-      folders.push(...centerFolders(path.posix.join(directory, entry.name)));
-  return folders;
+function carried(target: string): boolean {
+  const segments = target.split("/");
+  const parents = segments.map((_, index) => segments.slice(0, index + 1).join("/"));
+  let include = true;
+  for (const rule of rules)
+    if (parents.some((parent) => rule.pattern.test(parent))) include = rule.include;
+  return include;
 }
 
-test("every package of the Go center and its embedded migrations are admitted to the Docker context", () => {
-  const folders = [
-    ...centerFolders("center/internal"),
-    ...centerFolders("center/cmd/arcforges-center"),
-  ];
-  const names = folders.map((entry) => entry.folder);
-  for (const expected of [
-    "center/internal/store/migrate",
-    "center/internal/schema/migrations",
-    "center/cmd/arcforges-center",
-    "center/internal/pages/templates",
-    "center/internal/pages/static",
+const tracked = execFileSync("git", ["ls-files", "-z", "center"], { cwd: root, encoding: "utf8" })
+  .split("\0")
+  .filter(Boolean);
+
+test("tracked executable sources and embedded runtime assets are admitted to the Go image", () => {
+  const testDirectories = /\/(?:arctest|virtual|mailtest|nodetest|mobiletest|testdata)\//u;
+  const required = tracked.filter((name) => {
+    if (name.startsWith("center/cmd/arcforges-center/")) return !name.endsWith("_test.go");
+    if (!name.startsWith("center/internal/") || testDirectories.test(name)) return false;
+    return (
+      (name.endsWith(".go") && !name.endsWith("_test.go")) ||
+      name.endsWith(".sql") ||
+      name.endsWith(".gohtml") ||
+      /\/(?:static\/account\.(?:js|css)|fixtures\/host-v2\.json|migrate\/[a-z0-9_]+_inventory\.txt)$/u.test(
+        name,
+      )
+    );
+  });
+  assert(required.length > 100, "Runtime source inventory is missing");
+  for (const name of [
+    "center/go.mod",
+    "center/go.sum",
+    "center/toolchain.json",
+    "center/dependencies.json",
+    ...required,
   ])
-    assert(names.includes(expected), expected);
-  for (const { folder, files } of folders) {
-    assert(admitted(`${folder}/`), `Missing directory rule for ${folder}`);
-    for (const file of files)
-      assert(admitted(`${folder}/${file}`), `Missing file rule for ${folder}/${file}`);
-  }
-  assert(!admitted("center/internal/schema/migrations/notes.md"));
-  // The embedded assets are admitted by name, and a stray file of those folders is not.
-  assert(!admitted("center/internal/pages/templates/notes.md"));
-  assert(!admitted("center/internal/pages/static/notes.md"));
-  assert(!admitted("center/internal/pages/static/account.map"));
-  assert(
-    rules.indexOf("center/**/*_test.go") > rules.indexOf("!center/internal/store/migrate/*.go"),
-  );
-  // Docker applies the last matching line: the closing rule that removes the mail test doubles works only below the rules that admit
-  // them (above them the context carries the doubles, and the matcher below, which ignores order, would not see it).
-  assert(
-    rules.indexOf("center/internal/mail/mailtest/") >
-      rules.indexOf("!center/internal/mail/mailtest/*.go"),
-  );
-  // The MOCKED node of the center's tests (AF-CTR-04) sits under center/internal/*/, which the rules admit; its closing exclusion
-  // comes after them.
-  assert(rules.indexOf("center/internal/nodetest/") > rules.indexOf("!center/internal/*/*.go"));
-  // The development stand-in of a node (AF-CTR-04 E3) is excluded by name as well as by the closing rules, as center-gen is.
-  assert(rules.includes("center/cmd/node-probe/"));
-  // MobileProbe (AF-CTR-04 part M), the MOCKED stand-in of the Android app, is never in the image: its library's closing exclusion
-  // comes after the rules that admit center/internal/*/, and its command is excluded by name.
-  assert(rules.indexOf("center/internal/mobiletest/") > rules.indexOf("!center/internal/*/*.go"));
-  assert(rules.includes("center/cmd/mobile-probe/"));
+    assert(carried(name), name);
 });
 
-test("a rule never admits tests, the Worker, the plan files, build output or a stray file", () => {
-  for (const forbidden of [
-    "!tests/",
-    "!worker/",
-    "!storage/",
-    "!storage/plans/",
-    "!eng/verification/",
-  ])
-    assert(!rules.includes(forbidden), forbidden);
-  for (const target of [
-    "tests/ArcForges.Cloud.Tests/Example.cs",
+test("the runtime context omits local overrides, test tools, and the retired C# Center", () => {
+  for (const name of [
+    "center/go.work",
+    "center/go.work.sum",
+    "center/vendor/github.com/example/module.go",
+    "center/cmd/arcforges-center/operator_test.go",
+    "center/cmd/arcforges-center/extra.s",
+    "center/cmd/node-probe/main.go",
+    "center/cmd/mobile-probe/main.go",
+    "center/cmd/center-gen/main.go",
+    "center/internal/mail/mailtest/smtpserver.go",
+    "center/internal/identity/passkey/virtual/virtual.go",
+    "center/internal/nodetest/nodetest.go",
+    "center/internal/mobiletest/mobiletest.go",
+    "center/internal/schema/migrations/notes.md",
+    "center/internal/pages/templates/notes.md",
+    "center/internal/pages/static/account.map",
+    "center/internal/store/migrate/unreviewed.txt",
+    "center/internal/feature/fixtures/unaudited.json",
+    "center/internal/newpackage/unreviewed/subfolder/other.bin",
+    "center/internal/entitlement/testdata/legacy-vectors.json",
+    "center/tools/go.mod",
+    "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
+    "src/ArcForges.Cloud.Storage.D1/Example.cs",
     "worker/index.ts",
     "storage/plans/foundation/readiness.sql",
-    "src/ArcForges.Cloud/obj/Example.cs",
-    "src/ArcForges.Cloud/bin/Example.cs",
-    "src/ArcForges.Cloud.Modules.Identity/obj/project.assets.json",
-    "src/ArcForges.Cloud.Storage.D1/Example.sql",
-    "src/ArcForges.Cloud.Modules.Identity/Notes.md",
+    "tests/worker/docker-context.test.ts",
+    "artifacts/candidate/docker-image.tar",
   ])
-    assert(!admitted(target) || target.includes("/bin/") || target.includes("/obj/"), target);
-  // Build output stays excluded by the closing rules whatever the earlier rules admit.
-  assert(rules.indexOf("**/bin/") > rules.indexOf("!src/ArcForges.Cloud.Storage.D1/*.cs"));
-  assert(rules.indexOf("**/obj/") > rules.indexOf("!src/ArcForges.Cloud.Storage.D1/*.cs"));
+    assert.equal(carried(name), false, name);
+  assert(carried("artifacts/image-notices/Go.LICENSE.txt"));
 });
 
-test("the image restores and publishes the whole source tree under the locked restore", () => {
-  const dockerfile = readFileSync(path.join(root, "Dockerfile"), "utf8");
-  assert(
-    /^COPY src\/ \.\/src\/$/mu.test(dockerfile),
-    "the Dockerfile copies the admitted src tree",
-  );
-  assert(dockerfile.includes("dotnet restore src/ArcForges.Cloud --locked-mode"));
-  assert(
-    dockerfile.indexOf("COPY src/ ./src/") <
-      dockerfile.indexOf("dotnet restore src/ArcForges.Cloud --locked-mode"),
-    "every referenced project and its lock file is in the context before the locked restore",
+test("the image builds the locked Go runtime and starts only that executable", () => {
+  const dockerfile = read("Dockerfile");
+  assert.match(dockerfile, /^COPY center\/ \.\/$/mu);
+  assert.match(dockerfile, /GOTOOLCHAIN=local GOFLAGS=-mod=readonly/u);
+  assert.match(dockerfile, /go mod download && go mod verify/u);
+  assert.match(dockerfile, /sha256sum --check --quiet \/tmp\/center-modules\.sha256/u);
+  assert.match(dockerfile, /CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath/u);
+  assert.match(dockerfile, /^COPY --from=build \/out\/arcforges-center \.\/$/mu);
+  assert.match(dockerfile, /^USER \$APP_UID$/mu);
+  assert.match(dockerfile, /^ENTRYPOINT \["\/app\/arcforges-center"\]$/mu);
+  assert.doesNotMatch(
+    dockerfile,
+    /\/app\/ArcForges\.Cloud|dotnet (?:publish|restore)|^COPY src\//mu,
   );
 });
 
-/**
- * Whether the Docker context carries a Go center file: an include rule names it (by the same file rules as above, so a stray file of
- * a carried folder is not carried) and none of the closing exclusions of the center removes it again (`center/tools/`,
- * `center/cmd/center-gen/`, every `testdata` folder, every test file). `**` crosses directories, `*` stays inside one, and a trailing
- * slash names a directory and all it holds.
- */
-function carried(target: string): boolean {
-  if (!admitted(target)) return false;
-  const excludes = rules.filter((rule) => rule.startsWith("center/"));
-  assert(excludes.length >= 4, "the closing exclusions of the center were found");
-  return !excludes.some((rule) => {
-    const directory = rule.endsWith("/");
-    const expression = (directory ? rule.slice(0, -1) : rule)
-      .split("**/")
-      .map((part) =>
-        part
-          .split("*")
-          .map((literal) => literal.replaceAll(/[.+?^${}()|[\]\\]/gu, String.raw`\$&`))
-          .join("[^/]*"),
-      )
-      .join("(?:.*/)?");
-    return new RegExp(`^${expression}${directory ? "/.*" : ""}$`, "u").test(target);
-  });
-}
-
-/** The input files of the release profile the provenance inventory names (the image's, then the Worker's). */
-function activeProfile(): {
-  image: { inputs: Record<string, string> };
-  worker: { inputs: Record<string, string> };
-  id: string;
-} {
-  const inventory = JSON.parse(
-    readFileSync(path.join(root, "eng/provenance/files.json"), "utf8"),
-  ) as { artifacts: string[] };
-  const record = JSON.parse(
-    readFileSync(
-      path.join(root, "eng/provenance/records", `${inventory.artifacts[0]}.json`),
-      "utf8",
-    ),
-  ) as { artifactTargets: { profile: string }[] };
-  return JSON.parse(
-    readFileSync(path.join(root, record.artifactTargets[0]?.profile ?? ""), "utf8"),
-  );
-}
-
-test("the matcher of the Docker context follows the rules the file states", () => {
-  for (const [target, expected] of [
-    ["center/cmd/arcforges-center/main.go", true],
-    ["center/cmd/arcforges-center/operator.go", true],
-    ["center/cmd/arcforges-center/operator_test.go", false],
-    ["center/cmd/center-gen/main.go", false],
-    // AF-CTR-04 E3: the development stand-in of a node is never in the image.
-    ["center/cmd/node-probe/main.go", false],
-    ["center/internal/entitlement/operator.go", true],
-    ["center/internal/entitlement/operator_test.go", false],
-    ["center/internal/entitlement/testdata/csharp-resolver-vectors.json", false],
-    ["center/internal/schema/migrations/0003_entitlement.sql", true],
-    ["center/internal/store/migrate/ctr06_schema10_inventory.txt", true],
-    ["center/internal/store/migrate/ctr06_schema11_inventory.txt", true],
-    ["center/internal/store/migrate/unreviewed.txt", false],
-    ["center/internal/pages/templates/operations-review.gohtml", true],
-    ["center/internal/pages/templates/notes.md", false],
-    ["center/internal/feature/fixtures/development.json", true],
-    ["center/internal/identity/passkey/virtual/virtual.go", true],
-    // The mail package is carried; its test doubles are admitted by rule (the folder holds Go sources) and removed again by the
-    // closing exclusion, so the image never carries them and they are no image input (only test files import them).
-    ["center/internal/mail/guard.go", true],
-    ["center/internal/mail/mailtest/smtpserver.go", false],
-    // AF-CTR-04: the fleet packages are carried; the test node is not.
-    ["center/internal/fleet/enroll.go", true],
-    ["center/internal/fleetapi/fleetapi.go", true],
-    ["center/internal/nodetest/nodetest.go", false],
-    // AF-CTR-04 part M: the mobile authorization is carried; MobileProbe (the MOCKED app) and the vendored vectors are not.
-    ["center/internal/mobileauth/token.go", true],
-    ["center/internal/mobileauth/testdata/mobile-native-vectors.json", false],
-    ["center/internal/mobiletest/mobiletest.go", false],
-    ["center/cmd/mobile-probe/main.go", false],
-    ["center/internal/schema/migrations/0006_mobile_authorization.sql", true],
-    ["center/internal/pages/templates/mobile-authorize-review.gohtml", true],
-    ["center/internal/schema/migrations/0004_fleet_enrollment.sql", true],
-    ["center/tools/anything.go", false],
-    ["center/README.md", false],
-    ["tests/worker/docker-context.test.ts", false],
-  ] as const)
-    assert.equal(carried(target), expected, target);
-});
-
-// Limit: "carried" is modelled from the include rules and the closing exclusions of .dockerignore, like the tests above; a real build
-// carries every center/ file the closing exclusions do not remove, so a stray vendor/, .s or go.work file is not seen here (see
-// "What waits" in docs/center-entitlement.md).
-// Every file the Docker context carries from the Go center is compiled or embedded into the shipped image, so it is an input the
-// release profile must bind: a carried file the profile does not name could change after the admission with no successor record
-// (records-1: the role-granting commands of the executable were once such a file).
-test("every file of the center that the Docker context carries is an input of the active release profile", () => {
-  const profile = activeProfile();
-  const tracked = execFileSync("git", ["ls-files", "center"], { cwd: root, encoding: "utf8" })
-    .split("\n")
-    .filter((name) => name !== "");
+test("the active image profile binds every tracked Center file carried by Docker", () => {
+  const inventory = JSON.parse(read("eng/provenance/files.json")) as { artifacts: string[] };
+  const record = JSON.parse(read(`eng/provenance/records/${inventory.artifacts[0]}.json`)) as {
+    artifactTargets: { profile: string }[];
+  };
+  const profile = JSON.parse(read(record.artifactTargets[0]?.profile ?? "")) as {
+    image: { inputs: Record<string, string> };
+    id: string;
+  };
   const carriedFiles = tracked.filter(carried);
-  assert(carriedFiles.length > 100, "the files of the center were found");
   assert(carriedFiles.includes("center/cmd/arcforges-center/main.go"));
-  const unbound = carriedFiles.filter((name) => profile.image.inputs[name] === undefined);
   assert.deepEqual(
-    unbound,
+    carriedFiles.filter((name) => profile.image.inputs[name] === undefined),
     [],
     `the Docker context carries files that ${profile.id} does not bind`,
   );

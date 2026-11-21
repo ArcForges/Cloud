@@ -618,9 +618,6 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 			}
 			continue
 		}
-		if routedOperation(operation.ID) {
-			continue
-		}
 		if strings.HasPrefix(operation.ID, "fleet.v2.") {
 			// The typed cohort has separate exact feature/authorization
 			// assertions in TestTypedManagementRowsAuthorizeOnlyTheOwningAccountAndRequiredFeature.
@@ -630,9 +627,7 @@ func TestOperationRowsAreCheckedForConsistency(t *testing.T) {
 			continue
 		}
 		if strings.HasPrefix(operation.ID, "fleet.") {
-			// The node registry (AF-CTR-05 E2a) is never gated either (Q20); its rows that address one node name it (Object node).
-			registry := strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.FleetService/")
-			if operation.Feature != "" || operation.Object != "" && !(registry && operation.Object == ObjectNode) || operation.Audit == AuditBeforeCall {
+			if operation.Feature != "" || operation.Object != "" || operation.Audit == AuditBeforeCall {
 				t.Errorf("%s: a fleet row carries a gate rule", operation.ID)
 			}
 			continue

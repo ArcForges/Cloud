@@ -114,9 +114,7 @@ export interface PageRoute {
 }
 
 /**
- * A native JSON route of the mobile app (AF-CTR-04 part M, MB-3): an exact POST path below the owned /api prefix. The native handler
- * admits a request only for such a row whose surface is enabled: exactly application/json, no cookie (a request with one is refused),
- * no Origin or CSRF requirement, no CORS; it forwards no cookie and answers no Set-Cookie and no redirect.
+ * The Worker adapter's native JSON route shape. No native JSON route is registered by the Center.
  */
 export interface NativeRoute {
   readonly surface: Surface;
@@ -131,8 +129,7 @@ export interface NativeRoute {
 }
 
 /**
- * An apex route of the mobile surface (AF-CTR-04 part M, MB-8, M-13): an exact GET path at the root of the host, outside the /api
- * prefix, forwarded to the same center path only while its surface is enabled; no cookie, no body, no redirect.
+ * The Worker adapter's apex route shape. No apex route is registered by the Center.
  */
 export interface ApexRoute {
   readonly surface: Surface;
@@ -205,10 +202,6 @@ func Render(table routes.WorkerTable) (string, error) {
 	values = append(values, table.Surfaces...)
 	for _, row := range table.Pages {
 		values = append(values, row.Method, row.Path, row.RequestType, string(row.SetCookie), string(row.Kind))
-		values = append(values, row.ResponseTypes...)
-	}
-	for _, row := range append(slices.Clone(table.Native), table.Apex...) {
-		values = append(values, row.Method, row.Path, row.RequestType, string(row.Kind), row.Surface)
 		values = append(values, row.ResponseTypes...)
 	}
 	for _, row := range table.Upgrades {
@@ -314,7 +307,8 @@ func Render(table routes.WorkerTable) (string, error) {
 	text.WriteString(constant("remoteGrantRevisionHeader", quote(ingress.RemoteGrantRevisionHeader)))
 	text.WriteString("\n")
 	pageTable(&text, table)
-	mobileTables(&text, table)
+	text.WriteString("export const nativeRoutes: readonly NativeRoute[] = [];\n")
+	text.WriteString("export const apexRoutes: readonly ApexRoute[] = [];\n\n")
 	upgradeTable(&text, table)
 	paddleWebhook(&text, table.PaddleWebhook)
 	text.WriteString("export const helloPath = " + quote(table.HelloPath) + ";\n")
@@ -397,43 +391,6 @@ func pageTable(text *strings.Builder, table routes.WorkerTable) {
 	text.WriteString("/** The most characters of the percent-encoded return path in a redirect's fragment. */\n")
 	text.WriteString("export const pageReturnPathBytes = " + strconv.Itoa(routes.PageReturnPathBytes) + ";\n")
 	text.WriteString("\n")
-}
-
-// mobileTables writes the native JSON routes and the apex routes of the mobile surface (AF-CTR-04 part M).
-func mobileTables(text *strings.Builder, table routes.WorkerTable) {
-	types := func(row routes.PageRoute) {
-		if list := joinQuoted(row.ResponseTypes); len("    responseTypes: ["+list+"],") <= 100 {
-			text.WriteString("    responseTypes: [" + list + "],\n")
-		} else {
-			text.WriteString("    responseTypes:\n      [" + list + "],\n")
-		}
-	}
-	text.WriteString("/** The native JSON routes of the mobile app; each is forwarded only while its surface is enabled. */\n")
-	text.WriteString("export const nativeRoutes: readonly NativeRoute[] = [\n")
-	for _, row := range table.Native {
-		text.WriteString("  {\n")
-		text.WriteString("    surface: " + quote(row.Surface) + ",\n")
-		text.WriteString("    method: " + quote(row.Method) + ",\n")
-		text.WriteString("    path: " + quote(row.Path) + ",\n")
-		text.WriteString("    requestType: " + quote(row.RequestType) + ",\n")
-		types(row)
-		text.WriteString("    maxRequestBytes: " + strconv.Itoa(row.MaxRequestBytes) + ",\n")
-		text.WriteString("    maxResponseBytes: " + strconv.Itoa(row.MaxResponseBytes) + ",\n")
-		text.WriteString("  },\n")
-	}
-	text.WriteString("];\n")
-	text.WriteString("/** The apex routes of the mobile surface, at the root of the host; each is forwarded only while its surface is enabled. */\n")
-	text.WriteString("export const apexRoutes: readonly ApexRoute[] = [\n")
-	for _, row := range table.Apex {
-		text.WriteString("  {\n")
-		text.WriteString("    surface: " + quote(row.Surface) + ",\n")
-		text.WriteString("    method: " + quote(row.Method) + ",\n")
-		text.WriteString("    path: " + quote(row.Path) + ",\n")
-		types(row)
-		text.WriteString("    maxResponseBytes: " + strconv.Itoa(row.MaxResponseBytes) + ",\n")
-		text.WriteString("  },\n")
-	}
-	text.WriteString("];\n\n")
 }
 
 // upgradeTable writes the upgrade routes of the relay surface (AF-CTR-05 E1a) and the header that names an upgrade refusal's reason.

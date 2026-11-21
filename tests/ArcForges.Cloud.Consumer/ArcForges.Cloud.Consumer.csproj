@@ -3,8 +3,9 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="ArcForges.Contracts.PublicApi" />
+    <PackageReference Include="ArcForges.Contracts.PublicApi" GeneratePathProperty="true" />
     <PackageReference Include="Grpc.Net.Client" />
+    <EmbeddedResource Include="$(PkgArcForges_Contracts_PublicApi)/source.json" LogicalName="Consumer.ContractsSource" />
   </ItemGroup>
   <PropertyGroup>
     <LicenceBoundary>AGPL</LicenceBoundary>

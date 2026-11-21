@@ -35,6 +35,8 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { goCandidateFiles } from "../../tooling/proof-candidate.ts";
+import { parseDocument } from "../../tooling/provenance.ts";
 
 export const repository = "ArcForges/Cloud";
 export const workflowPath = ".github/workflows/ci.yml";
@@ -495,7 +497,7 @@ export function checkEntries(entries: string[]): string[] {
 function readJsonFile(directory: string, name: string): Json {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path.join(directory, name), "utf8"));
+    parsed = parseDocument(readFileSync(path.join(directory, name)));
   } catch {
     refuse(`the candidate's ${name} is missing or not JSON`);
   }
@@ -506,12 +508,19 @@ function fileSha256(file: string): string {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
+const goCandidateEntries = JSON.stringify([...goCandidateFiles, "manifest.json"].sort());
+const goCandidateDigestEntries = JSON.stringify([...goCandidateFiles].sort());
+const goCandidateManifestKeys = JSON.stringify(
+  ["schema", "runtime", "revision", "dirty", "version", "image", "imageId", "files"].sort(),
+);
+
 /**
  * The sealed manifest names exactly the dispatched commit, the main-push run and its version: manifest.json (revision, clean, version,
  * the file digests of every member), build-identity.json (the source commit and the producing run) and image-provenance.json (the
  * revision and the image of the manifest). Every member is a regular file. The tree is the commit's (checked against the checkout).
  */
 export function checkSealedCandidate(directory: string, input: FetchInput): { version: string } {
+  check(lstatSync(directory).isDirectory(), "the candidate directory is not a directory");
   const entries = readdirSync(directory).sort();
   for (const entry of entries)
     check(
@@ -519,7 +528,19 @@ export function checkSealedCandidate(directory: string, input: FetchInput): { ve
       `the candidate member ${entry} is not a regular file`,
     );
   const manifest = readJsonFile(directory, "manifest.json");
-  check(manifest.schema === 1, "the candidate manifest has another schema");
+  check(manifest.schema === 2, "the candidate manifest has another schema");
+  check(manifest.runtime === "go", "the candidate manifest does not select the Go Center");
+  check(
+    JSON.stringify(Object.keys(manifest).sort()) === goCandidateManifestKeys,
+    "the Go candidate manifest has unexpected or missing fields",
+  );
+  check(
+    typeof manifest.image === "string" &&
+      /^arcforges-cloud:[a-z0-9.-]+$/u.test(manifest.image) &&
+      typeof manifest.imageId === "string" &&
+      artifactDigest.test(manifest.imageId),
+    "the Go candidate manifest has an invalid image identity",
+  );
   check(
     manifest.revision === input.sha && manifest.dirty === false,
     `The candidate manifest does not name the clean commit ${input.sha}. ${fallback}`,
@@ -531,12 +552,13 @@ export function checkSealedCandidate(directory: string, input: FetchInput): { ve
   );
   const files = object(manifest.files, "the candidate manifest's files");
   check(
-    JSON.stringify([...Object.keys(files), "manifest.json"].sort()) === JSON.stringify(entries),
-    "the candidate members are not exactly the manifest's files",
+    JSON.stringify(entries) === goCandidateEntries &&
+      JSON.stringify(Object.keys(files).sort()) === goCandidateDigestEntries,
+    "the candidate members and manifest must contain exactly the Go payload",
   );
-  for (const [name, digest] of Object.entries(files))
+  for (const name of goCandidateFiles)
     check(
-      digest === fileSha256(path.join(directory, name)),
+      files[name] === fileSha256(path.join(directory, name)),
       `the candidate member ${name} does not match its manifest digest`,
     );
   const identity = readJsonFile(directory, "build-identity.json");
@@ -631,7 +653,10 @@ export function fetchCandidate(
       digest === input.artifactDigest,
       `The downloaded ${name} has the digest ${digest}, not the API's ${input.artifactDigest}. ${fallback}`,
     );
-    checkEntries(ports.entries(archive));
+    check(
+      JSON.stringify(checkEntries(ports.entries(archive))) === goCandidateEntries,
+      "the candidate archive must contain exactly the Go payload",
+    );
     mkdirSync(directory);
     ports.extract(archive, directory);
   } finally {

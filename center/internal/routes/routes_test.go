@@ -13,6 +13,33 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 )
 
+func TestManagementRoutesCanBeRegisteredWithoutLegacyFleet(t *testing.T) {
+	module := Module{Name: "nodes", Surface: SurfaceNodes, Budgets: map[string]Budget{}}
+	if err := addManagementRoutes(&module); err != nil {
+		t.Fatal(err)
+	}
+	devices, remote := 0, 0
+	for _, policy := range module.Policies {
+		switch {
+		case strings.HasPrefix(policy.FullName, "/arcforges.management.v2.DeviceService/"):
+			devices++
+			if policy.CarriesRemoteTarget {
+				t.Errorf("%s unexpectedly requires a remote target", policy.FullName)
+			}
+		case strings.HasPrefix(policy.FullName, "/arcforges.sandbox.v2."):
+			remote++
+			if !policy.CarriesRemoteTarget {
+				t.Errorf("%s is missing its remote target requirement", policy.FullName)
+			}
+		default:
+			t.Errorf("unexpected management method %s", policy.FullName)
+		}
+	}
+	if devices != 3 || remote != 23 {
+		t.Fatalf("got %d device methods and %d remote methods", devices, remote)
+	}
+}
+
 func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 	modules, err := Center()
 	if err != nil {
@@ -78,31 +105,6 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.fleet.v1.NodeEnrollmentService/RefreshNodeSession anonymous 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/ReportNodeInfo session 4096",
 		"/arcforges.fleet.v1.NodeEnrollmentService/SignOutNode session 4096",
-		// AF-CTR-05 E2a: the node registry of FleetService (the nodes surface).
-		"/arcforges.fleet.v1.FleetService/ListNodes session 4096",
-		"/arcforges.fleet.v1.FleetService/GetNode session 4096",
-		"/arcforges.fleet.v1.FleetService/RenameNode session 4096",
-		"/arcforges.fleet.v1.FleetService/RevokeNode session 4096",
-		// AF-CTR-05 E2b: the routed task methods.
-		"/arcforges.fleet.v1.FleetService/SubmitNodeTask session 262144",
-		"/arcforges.fleet.v1.FleetService/GetNodeTask session 8192",
-		"/arcforges.fleet.v1.FleetService/ListNodeTasks session 8192",
-		"/arcforges.fleet.v1.FleetService/WaitNodeTask session 8192",
-		"/arcforges.fleet.v1.FleetService/ReadNodeTaskOutput session 8192",
-		"/arcforges.fleet.v1.FleetService/CancelNodeTask session 8192",
-		// AF-CTR-06 explicit routes; older rows/bounds remain unchanged.
-		"/arcforges.fleet.v1.FleetService/ReadNodeFile session 262144",
-		"/arcforges.fleet.v1.FleetService/WriteNodeFile session 262144",
-		"/arcforges.fleet.v1.FleetService/EditNodeFile session 262144",
-		"/arcforges.fleet.v1.FleetService/SearchNodeFiles session 262144",
-		"/arcforges.fleet.v1.FleetService/ListNodeDirectory session 262144",
-		"/arcforges.fleet.v1.FleetService/PlanNodeRemoval session 262144",
-		"/arcforges.fleet.v1.FleetService/ExecuteNodeRemoval session 262144",
-		"/arcforges.fleet.v1.FleetService/GetNodeFileOperation session 262144",
-		"/arcforges.fleet.v1.FleetService/RegisterNodeWorkspace session 262144",
-		"/arcforges.fleet.v1.FleetService/UnregisterNodeWorkspace session 262144",
-		"/arcforges.fleet.v1.FleetService/ListNodeWorkspaces session 262144",
-		"/arcforges.fleet.v1.FleetService/GetNodeWorkspace session 262144",
 		"/arcforges.management.v2.DeviceService/List session 4096",
 		"/arcforges.management.v2.DeviceService/Inspect session 4096",
 		"/arcforges.management.v2.DeviceService/Revoke session 4096",
@@ -138,9 +140,9 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 		"/arcforges.publicapi.v1.CommerceService/ReactivateSubscription session 4096",
 		"/arcforges.publicapi.v1.CommerceService/ListBillingHistory session 4096",
 	}
-	if len(table.Surfaces) != 8 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
-		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceMobile || table.Surfaces[5] != SurfaceRelay || table.Surfaces[6] != SurfaceNodes ||
-		table.Surfaces[7] != SurfaceCommerce || len(table.SurfaceRows) != len(served) {
+	if len(table.Surfaces) != 7 || table.Surfaces[0] != SurfaceIdentity || table.Surfaces[1] != SurfacePages || table.Surfaces[2] != SurfaceOperations ||
+		table.Surfaces[3] != SurfaceFleet || table.Surfaces[4] != SurfaceRelay || table.Surfaces[5] != SurfaceNodes ||
+		table.Surfaces[6] != SurfaceCommerce || len(table.SurfaceRows) != len(served) {
 		t.Fatalf("surfaces: %v, %d rows", table.Surfaces, len(table.SurfaceRows))
 	}
 	for index, row := range table.SurfaceRows {
@@ -170,25 +172,6 @@ func TestTheCenterServesHelloTheHealthRouteAndTheIdentitySurface(t *testing.T) {
 			surface, deadline = SurfaceNodes, 10_000
 			if row.Path == "/arcforges.management.v2.DeviceService/List" {
 				reply = ListDevicesReplyBytes
-			}
-		case strings.HasPrefix(row.Path, "/arcforges.fleet.v1.FleetService/"):
-			// The node registry (AF-CTR-05 E2a): 5 s, RevokeNode 10 s; ListNodes replies up to 640 KiB.
-			surface, deadline = SurfaceNodes, 5_000
-			switch row.Path {
-			case "/arcforges.fleet.v1.FleetService/RevokeNode":
-				deadline = 10_000
-			case "/arcforges.fleet.v1.FleetService/ListNodes":
-				reply = ListNodesReplyBytes
-			case "/arcforges.fleet.v1.FleetService/SubmitNodeTask", "/arcforges.fleet.v1.FleetService/GetNodeTask", "/arcforges.fleet.v1.FleetService/ListNodeTasks",
-				"/arcforges.fleet.v1.FleetService/CancelNodeTask":
-				// The routed task methods (E2b): 10 s, Wait 55 s, ReadOutput 30 s; a node response of up to 1 MiB plus its frame.
-				deadline, reply = 10_000, RoutedReplyBytes
-			case "/arcforges.fleet.v1.FleetService/ReadNodeFile", "/arcforges.fleet.v1.FleetService/WriteNodeFile", "/arcforges.fleet.v1.FleetService/EditNodeFile", "/arcforges.fleet.v1.FleetService/SearchNodeFiles", "/arcforges.fleet.v1.FleetService/ListNodeDirectory", "/arcforges.fleet.v1.FleetService/PlanNodeRemoval", "/arcforges.fleet.v1.FleetService/ExecuteNodeRemoval", "/arcforges.fleet.v1.FleetService/GetNodeFileOperation", "/arcforges.fleet.v1.FleetService/RegisterNodeWorkspace", "/arcforges.fleet.v1.FleetService/UnregisterNodeWorkspace", "/arcforges.fleet.v1.FleetService/ListNodeWorkspaces", "/arcforges.fleet.v1.FleetService/GetNodeWorkspace":
-				deadline, reply = 15_000, RoutedReplyBytes
-			case "/arcforges.fleet.v1.FleetService/WaitNodeTask":
-				deadline, reply = 55_000, RoutedReplyBytes
-			case "/arcforges.fleet.v1.FleetService/ReadNodeTaskOutput":
-				deadline, reply = 30_000, RoutedReplyBytes
 			}
 		case strings.HasPrefix(row.Path, "/arcforges.fleet.v1."):
 			surface, deadline = SurfaceFleet, 10_000
@@ -311,7 +294,7 @@ func TestInconsistentRegistrationsStopTheGenerator(t *testing.T) {
 }
 
 // TestTheCenterSendsEveryReplyItsBudgetsAdmit (F8): the Connect writer's bound is the largest reply budget of the registrations, so
-// it admits every method's budget (a full DeviceService.List page among them, and since AF-CTR-05 E2a a full ListNodes of 640 KiB),
+// it admits every method's budget (including a full DeviceService.List page),
 // not only the largest request.
 func TestTheCenterSendsEveryReplyItsBudgetsAdmit(t *testing.T) {
 	modules, err := Center()

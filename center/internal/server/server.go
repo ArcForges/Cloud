@@ -318,8 +318,6 @@ type composedIdentity struct {
 	clock      func() time.Time
 	// fleet is the fleet surface's account methods in process, for its pages; nil where the fleet surface is off.
 	fleet *fleetapi.Direct
-	// mobile is the mobile surface's native authorization, for its routes; nil where the mobile surface is off.
-	mobile *mobileauth.Service
 }
 
 // composeIdentity registers the identity surface's served methods and its credential verifiers.
@@ -343,20 +341,13 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	participants := append([]device.Participant{fleet.NodeParticipant{}}, options.Participants...)
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants,
-		// The approvals of the node sign-in and of the mobile authorization are cancelled by the account's remediations wherever identity
-		// runs (protocol-6): the browser node flows first, then the device authorizations, then the mobile flows (the registration order
-		// is the lock order between the tables).
+		// Remediation still cancels preserved approvals from the retired mobile surface. Registration order keeps the existing lock order.
 		AccountParticipants: append(fleet.AccountParticipants(), mobileauth.ApprovalParticipant{})})
 	c.drain = service.Drain
 	// The per-account resource controls stand in front of every gated row (AF-CTR-05 E0, CTR5-GATE-05): a gated row without one
 	// refuses the composition.
 	controls := append(quota.Controls(c.Store, c.Config.Identity.Policy, clock), options.Controls...)
-	authorizerOptions := []access.Option{access.WithGate(c.Features), access.WithControls(controls...)}
-	if c.Hub != nil {
-		// A node-relayed call is verified by the authorizer itself against the hub's relay nonces (AF-CTR-05 E2a, C-N6, decisions B-4).
-		authorizerOptions = append(authorizerOptions, access.WithRelayVerifier(c.Hub.RelayVerifier()))
-	}
-	authorizer := access.NewAuthorizer(c.Store, clock, authorizerOptions...)
+	authorizer := access.NewAuthorizer(c.Store, clock, access.WithGate(c.Features), access.WithControls(controls...))
 	if err := authorizer.CheckComposition(); err != nil {
 		return composedIdentity{}, err
 	}
@@ -372,27 +363,15 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 		// The /connect and /activate pages call the same server's account methods in process (AF-CTR-04 E3).
 		fleetDirect = fleetServer.Direct()
 		if c.Config.Identity.Enabled(config.SurfaceNodes) && c.Hub != nil {
-			// FleetService's node registry (AF-CTR-05 E2a): RevokeNode revokes the node's device with the identity service's cascade.
-			// The routed task methods (E2b) route through the hub (hubRouter), with the routed mutations' replay window and the
-			// center's long-poll bound (PN-1).
 			longPolls := config.RoutedLongPolls(c.Config.MaxConnections)
-			registry := fleetServer.Registry(c.Hub, service.RevokeDevice).WithRouter(hubRouter{hub: c.Hub}, fleetapi.RoutedLimits{
-				ReplayWindow: c.Config.Identity.Policy.RoutedReplayWindow, LongPolls: longPolls, Events: c.Metrics})
-			dispatcher.Register(registry.Methods()...)
 			dispatcher.Register(fleetServer.DeviceMethods(c.Hub, service.RevokeDevice)...)
 			dispatcher.Register(fleetServer.V2ControlMethods(c.Hub, c.Config.Identity.Policy.RoutedReplayWindow)...)
 			dispatcher.Register(fleetServer.V2WatchMethods(c.Hub, longPolls, c.Metrics.ObserveManagementWatch)...)
 		}
 	}
-	var mobile *mobileauth.Service
-	if c.Config.Identity.Enabled(config.SurfaceMobile) {
-		// The mobile native authorization (AF-CTR-04 part M): its routes are page routes, served by the pages handler.
-		mobile = mobileauth.New(mobileauth.Options{DB: c.Store, Policy: c.Config.Identity.Policy, Mobile: c.Config.Mobile, PublicBaseURL: c.Config.PublicBaseURL,
-			Clock: clock, Events: c.Metrics, Logger: logger})
-	}
 	verifier := session.NewVerifier(c.Store, origin, clock)
 	pipeline.Bearer, pipeline.Browser = verifier, verifier
-	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock, fleet: fleetDirect, mobile: mobile}, nil
+	return composedIdentity{service: service, server: server, authorizer: authorizer, verifier: verifier, clock: clock, fleet: fleetDirect}, nil
 }
 
 // composeHub builds the node channel's hub (AF-CTR-05 E1a); composeIdentity binds its authorizer and verifier afterwards.
@@ -489,9 +468,9 @@ func (c *Center) composePages(composed composedIdentity, registry *ingress.Regis
 	return pages.New(pages.Options{
 		Origin: config.Origin(c.Config.PublicBaseURL), BasePath: config.BasePath(c.Config.PublicBaseURL),
 		Enabled: func(surface string) bool { return c.Config.Identity.Enabled(config.Surface(surface)) },
-		Policy:  c.Config.Identity.Policy, Operator: c.operator(composed.clock), Fleet: composed.fleet, Mobile: composed.mobile, Identity: composed.service,
+		Policy:  c.Config.Identity.Policy, Operator: c.operator(composed.clock), Fleet: composed.fleet, Identity: composed.service,
 		Direct: composed.server.Direct(), Access: composed.authorizer, Verifier: composed.verifier,
-		DB: c.Store, Registry: registry, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP, ClientOrigin: pipeline.ClientOrigin,
+		DB: c.Store, Registry: registry, ClientIP: pipeline.ClientIP, RequireClientIP: pipeline.RequireClientIP,
 		Clock: composed.clock, Logger: logger,
 	})
 }
@@ -534,7 +513,7 @@ func checkIdentityComposition(modules []routes.Module) error {
 	status := management.EntitlementStatusMethod(nil, nil, nil).Spec
 	served[status.Procedure] = status.StreamType
 	fleetServer := fleetapi.New(nil, nil, nil, nil, nil)
-	for _, method := range slices.Concat(fleetServer.Methods(), fleetServer.Registry(nil, nil).Methods(),
+	for _, method := range slices.Concat(fleetServer.Methods(),
 		fleetServer.DeviceMethods(nil, nil), fleetServer.V2ControlMethods(nil, 0), fleetServer.V2WatchMethods(nil, 1, nil), commerceRPC{}.methods()) {
 		served[method.Spec.Procedure] = method.Spec.StreamType
 	}
@@ -924,9 +903,6 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		"helloBackend", center.Health.HelloBackend, "store", center.Store != nil, "schemaBuildVersion", center.buildVersion,
 		"revision", center.Health.Revision, "version", center.Health.Artifact.Version, "surfaces", surfaces,
 		"bootstrapConfigured", cfg.Identity.Bootstrap != nil, "mail", mailName(cfg.Mail))
-	if cfg.Mobile.TestOnly() && cfg.Identity.Enabled(config.SurfaceMobile) {
-		logger.Warn("the Android app statement of /.well-known/assetlinks.json is a labelled non-shipping test value", "variable", config.EnvAndroidApp)
-	}
 	if cfg.Identity.Disabled != "" {
 		logger.Error("the identity surface is off", "reason", cfg.Identity.Disabled)
 	}

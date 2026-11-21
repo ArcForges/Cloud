@@ -38,7 +38,7 @@ export interface ApiRoute {
 
 /** A switchable surface of the center (AF-CTR-03; AF-PLAT-01 owns the activation variable's other names). */
 export type Surface =
-  "identity" | "pages" | "operations" | "fleet" | "mobile" | "relay" | "nodes" | "commerce";
+  "identity" | "pages" | "operations" | "fleet" | "relay" | "nodes" | "commerce";
 
 /** A method of a switchable surface. */
 export interface SurfaceRoute extends ApiRoute {
@@ -75,9 +75,7 @@ export interface PageRoute {
 }
 
 /**
- * A native JSON route of the mobile app (AF-CTR-04 part M, MB-3): an exact POST path below the owned /api prefix. The native handler
- * admits a request only for such a row whose surface is enabled: exactly application/json, no cookie (a request with one is refused),
- * no Origin or CSRF requirement, no CORS; it forwards no cookie and answers no Set-Cookie and no redirect.
+ * The Worker adapter's native JSON route shape. No native JSON route is registered by the Center.
  */
 export interface NativeRoute {
   readonly surface: Surface;
@@ -92,8 +90,7 @@ export interface NativeRoute {
 }
 
 /**
- * An apex route of the mobile surface (AF-CTR-04 part M, MB-8, M-13): an exact GET path at the root of the host, outside the /api
- * prefix, forwarded to the same center path only while its surface is enabled; no cookie, no body, no redirect.
+ * The Worker adapter's apex route shape. No apex route is registered by the Center.
  */
 export interface ApexRoute {
   readonly surface: Surface;
@@ -144,7 +141,6 @@ export const surfaceNames: readonly Surface[] = [
   "pages",
   "operations",
   "fleet",
-  "mobile",
   "relay",
   "nodes",
   "commerce",
@@ -170,8 +166,6 @@ export const notActivatedReplies: Readonly<Record<Surface, string>> = {
     "AAAAAGEaXwoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86FyIVCgdzdXJmYWNlEgpvcGVyYXRpb25zgAAAABBncnBjLXN0YXR1czogMA0K",
   fleet:
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVmbGVldIAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
-  mobile:
-    "AAAAAF0aWwoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EyIRCgdzdXJmYWNlEgZtb2JpbGWAAAAAEGdycGMtc3RhdHVzOiAwDQo=",
   relay:
     "AAAAAFwaWgoNbm90X2FjdGl2YXRlZBAGGhllcnJvci5zdGF0ZS5ub3RfYWN0aXZhdGVkIgIIASgBMhIKEAEjRWeJq83vASNFZ4mrze86EiIQCgdzdXJmYWNlEgVyZWxheYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==",
   nodes:
@@ -185,7 +179,6 @@ export const notActivatedReplyCorrelationOffsets: Readonly<Record<Surface, numbe
   pages: 61,
   operations: 61,
   fleet: 61,
-  mobile: 61,
   relay: 61,
   nodes: 61,
   commerce: 61,
@@ -670,270 +663,6 @@ export const surfaceRoutes: readonly SurfaceRoute[] = [
     instance: "hello",
     requestMeta: true,
     surface: "fleet",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/ListNodes",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 4096,
-    maxFrameBytes: 655360,
-    maxUnaryResponseBytes: 655360,
-    maxDurationMs: 5000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/GetNode",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 4096,
-    maxFrameBytes: 65536,
-    maxUnaryResponseBytes: 65536,
-    maxDurationMs: 5000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/RenameNode",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 4096,
-    maxFrameBytes: 65536,
-    maxUnaryResponseBytes: 65536,
-    maxDurationMs: 5000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/RevokeNode",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 4096,
-    maxFrameBytes: 65536,
-    maxUnaryResponseBytes: 65536,
-    maxDurationMs: 10000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/SubmitNodeTask",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 10000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/GetNodeTask",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 8192,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 10000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/ListNodeTasks",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 8192,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 10000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/WaitNodeTask",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 8192,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 55000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/ReadNodeTaskOutput",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 8192,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 30000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/CancelNodeTask",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 8192,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 10000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/ReadNodeFile",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/WriteNodeFile",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/EditNodeFile",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/SearchNodeFiles",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/ListNodeDirectory",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/PlanNodeRemoval",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/ExecuteNodeRemoval",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/GetNodeFileOperation",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/RegisterNodeWorkspace",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/UnregisterNodeWorkspace",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/ListNodeWorkspaces",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
-  },
-  {
-    path: "/arcforges.fleet.v1.FleetService/GetNodeWorkspace",
-    kind: "unary",
-    auth: "session",
-    maxRequestBytes: 262144,
-    maxFrameBytes: 1048576,
-    maxUnaryResponseBytes: 1048576,
-    maxDurationMs: 15000,
-    instance: "hello",
-    requestMeta: true,
-    surface: "nodes",
   },
   {
     path: "/arcforges.management.v2.DeviceService/List",
@@ -1910,45 +1639,6 @@ export const pageRoutes: readonly PageRoute[] = [
     redirects: false,
   },
   {
-    surface: "mobile",
-    method: "GET",
-    path: "/mobile/authorize",
-    kind: "html",
-    requestType: "",
-    responseTypes: ["text/html; charset=utf-8"],
-    maxRequestBytes: 0,
-    maxResponseBytes: 131072,
-    cookie: false,
-    setCookie: "none",
-    redirects: false,
-  },
-  {
-    surface: "mobile",
-    method: "POST",
-    path: "/mobile/authorize/review",
-    kind: "html",
-    requestType: "application/x-www-form-urlencoded",
-    responseTypes: ["text/html; charset=utf-8"],
-    maxRequestBytes: 4096,
-    maxResponseBytes: 131072,
-    cookie: true,
-    setCookie: "none",
-    redirects: false,
-  },
-  {
-    surface: "mobile",
-    method: "POST",
-    path: "/mobile/authorize/decision",
-    kind: "html",
-    requestType: "application/x-www-form-urlencoded",
-    responseTypes: ["text/html; charset=utf-8"],
-    maxRequestBytes: 4096,
-    maxResponseBytes: 131072,
-    cookie: true,
-    setCookie: "none",
-    redirects: false,
-  },
-  {
     surface: "commerce",
     method: "POST",
     path: "/account/billing/v1/portal",
@@ -1994,44 +1684,8 @@ export const pageCookieMaxAgeDigits = 6;
 /** The most characters of the percent-encoded return path in a redirect's fragment. */
 export const pageReturnPathBytes = 512;
 
-/** The native JSON routes of the mobile app; each is forwarded only while its surface is enabled. */
-export const nativeRoutes: readonly NativeRoute[] = [
-  {
-    surface: "mobile",
-    method: "POST",
-    path: "/session/v1/mobile/begin",
-    requestType: "application/json",
-    responseTypes: ["application/json"],
-    maxRequestBytes: 4096,
-    maxResponseBytes: 4096,
-  },
-  {
-    surface: "mobile",
-    method: "POST",
-    path: "/session/v1/mobile/token",
-    requestType: "application/json",
-    responseTypes: ["application/json"],
-    maxRequestBytes: 4096,
-    maxResponseBytes: 65536,
-  },
-];
-/** The apex routes of the mobile surface, at the root of the host; each is forwarded only while its surface is enabled. */
-export const apexRoutes: readonly ApexRoute[] = [
-  {
-    surface: "mobile",
-    method: "GET",
-    path: "/.well-known/assetlinks.json",
-    responseTypes: ["application/json"],
-    maxResponseBytes: 8192,
-  },
-  {
-    surface: "mobile",
-    method: "GET",
-    path: "/app/callback",
-    responseTypes: ["text/html; charset=utf-8"],
-    maxResponseBytes: 131072,
-  },
-];
+export const nativeRoutes: readonly NativeRoute[] = [];
+export const apexRoutes: readonly ApexRoute[] = [];
 
 /** The WebSocket upgrade routes; each is passed through only while its surface is enabled. */
 export const upgradeRoutes: readonly UpgradeRoute[] = [

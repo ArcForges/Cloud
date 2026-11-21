@@ -10,5 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/ArcForges.Cloud/ArcForges.Cloud.csproj" />
+    <Compile Include="../../tests/ArcForges.Cloud.Consumer/HelloProbe.cs" Link="HelloProbe.cs" />
   </ItemGroup>
 </Project>

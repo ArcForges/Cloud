@@ -27,6 +27,10 @@ type DeviceChannels interface {
 	V2Presence(account, enrollment, node, protocolEpoch platform.ID) (management.V2Presence, bool)
 }
 
+// RevokeDevice revokes a caller's device, applies its cascade and audits the change in the caller's
+// transaction. It returns the new device revision.
+type RevokeDevice func(ctx context.Context, tx pgx.Tx, caller identity.Caller, deviceID platform.ID, now time.Time) (int64, error)
+
 type devices struct {
 	*Server
 	store    *management.Store

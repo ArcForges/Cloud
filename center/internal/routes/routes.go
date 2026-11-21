@@ -127,10 +127,6 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	mobile, err := Mobile()
-	if err != nil {
-		return nil, err
-	}
 	relay, err := Relay()
 	if err != nil {
 		return nil, err
@@ -143,7 +139,7 @@ func Center() ([]Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []Module{hello, identity, pages, operations, fleet, mobile, relay, nodes, commerce}, nil
+	return []Module{hello, identity, pages, operations, fleet, relay, nodes, commerce}, nil
 }
 
 // Surfaces are the switchable surfaces of the registrations, in registration order.
@@ -209,11 +205,8 @@ type WorkerTable struct {
 	Surfaces    []string
 	SurfaceRows []Row
 	// Pages are the page routes of every page surface (PLT-1): the Worker's page handler forwards them only while their surface is
-	// enabled. Native are the native JSON routes and Apex the apex routes (the mobile surface, AF-CTR-04 part M): the Worker's native
-	// and apex handlers forward them only while their surface is enabled; neither is in Pages.
-	Pages  []PageRoute
-	Native []PageRoute
-	Apex   []PageRoute
+	// enabled.
+	Pages []PageRoute
 	// Upgrades are the WebSocket upgrade routes (the relay surface, AF-CTR-05 E1a): the Worker's upgrade handler passes them through
 	// only while their surface is enabled, and returns the center's 101 unchanged.
 	Upgrades []UpgradeRoute
@@ -273,7 +266,7 @@ func Table(modules []Module) (WorkerTable, error) {
 	budgets := map[string]Budget{}
 	var rows, surfaceRows []Row
 	var plain []string
-	var pageRows, nativeRows, apexRows []PageRoute
+	var pageRows []PageRoute
 	var upgradeRows []UpgradeRoute
 	names := map[string]bool{}
 	for _, module := range modules {
@@ -300,16 +293,7 @@ func Table(modules []Module) (WorkerTable, error) {
 			if err := CheckPages(module.Pages); err != nil {
 				return WorkerTable{}, err
 			}
-			for _, row := range module.Pages {
-				switch row.Kind {
-				case PageNativeKind:
-					nativeRows = append(nativeRows, row)
-				case PageApexKind:
-					apexRows = append(apexRows, row)
-				default:
-					pageRows = append(pageRows, row)
-				}
-			}
+			pageRows = append(pageRows, module.Pages...)
 		}
 		for name, budget := range module.Budgets {
 			if _, duplicate := budgets[name]; duplicate {
@@ -404,8 +388,6 @@ func Table(modules []Module) (WorkerTable, error) {
 		Surfaces:                   Surfaces(modules),
 		SurfaceRows:                surfaceRows,
 		Pages:                      pageRows,
-		Native:                     nativeRows,
-		Apex:                       apexRows,
 		Upgrades:                   upgradeRows,
 		PaddleWebhook:              callback,
 		MaxBodyBytes:               HelloMaxBodyBytes,

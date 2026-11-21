@@ -60,9 +60,8 @@ func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
 	if err = Check(append(policies, extra)); err == nil {
 		t.Fatal("a served method without a row was admitted")
 	}
-	// An operation ID names one row (review A N-2): a second row on another path that reuses fleet.listNodes is refused.
-	reused := append(Operations(), Operation{Path: "/arcforges.fleet.v1.FleetService/IssueRelayToken", ID: "fleet.listNodes", Risk: "R1", Session: true,
-		RelayedScopes: []string{"node"}})
+	// An operation ID names one row, even if the second row uses another path.
+	reused := append(Operations(), Operation{Path: "/arcforges.fleet.v1.FleetService/IssueRelayToken", ID: "identity.getProfile", Risk: "R1", Session: true})
 	reusedPolicy, err := ingress.NewUnary("/arcforges.fleet.v1.FleetService/IssueRelayToken", ingress.Session, ingress.NoScope, 4096, true)
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +85,11 @@ func TestTheOperationTableIsExactlyTheServedMethods(t *testing.T) {
 	}
 	if _, ok := Lookup("/arcforges.publicapi.v1.IdentityService/RequestAccountDeletion"); ok {
 		t.Fatal("an unserved method has a row")
+	}
+	for _, row := range Operations() {
+		if strings.HasPrefix(row.Path, "/arcforges.fleet.v1.FleetService/") {
+			t.Errorf("retired method %s has an authorization row", row.Path)
+		}
 	}
 }
 
@@ -148,35 +152,8 @@ func TestTheOperationTableIsThePlansSectionThree(t *testing.T) {
 		"fleet.lookupDeviceCode":         "R2 upgrade none - no-receipt active",
 		"fleet.approveDeviceCode":        "R3 upgrade evidence-on-approve user_code receipt active",
 		// AF-CTR-05 E1a (CTR5-SUR-02): the node channel, the first gated row (TestOperationRowsAreCheckedForConsistency).
-		"fleet.nodeChannel":      "R2 allowed none - no-receipt active node",
-		"management.nodeChannel": "R2 allowed none - no-receipt active node",
-		// AF-CTR-05 E2a (CTR5-SUR-02 as amended by PB-1, C-N6 and Q20): the node registry; the reads also admit a node-relayed caller,
-		// RenameNode and RevokeNode are a person's device management, RevokeNode with evidence bound to the node.
-		"fleet.listNodes":  "R1 allowed none - no-receipt active relayed:node",
-		"fleet.getNode":    "R1 allowed none - no-receipt active relayed:node",
-		"fleet.renameNode": "R2 upgrade none - receipt restricted",
-		"fleet.revokeNode": "R3 upgrade evidence node receipt restricted",
-		// AF-CTR-05 E2b (CTR5-SUR-02 as amended by PB-1, PB-2, D0-B1, C-N6; decisions section 5): the routed task methods, each also
-		// for a node-relayed caller; Submit (high) and Cancel (medium) a person's step-up rows bound to the node, the reads low.
-		"fleet.submitNodeTask":     "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.getNodeTask":        "R1 allowed none - no-receipt active relayed:node",
-		"fleet.listNodeTasks":      "R1 allowed none - no-receipt active relayed:node",
-		"fleet.waitNodeTask":       "R1 allowed none - no-receipt active relayed:node",
-		"fleet.readNodeTaskOutput": "R1 allowed none - no-receipt active relayed:node",
-		"fleet.cancelNodeTask":     "R2 upgrade evidence node no-receipt active relayed:node",
-		// AF-CTR-06: six mutations use routed receipts; five require method/target step-up; planning and queries are low risk.
-		"fleet.readNodeFile":                     "R1 allowed none - no-receipt active relayed:node",
-		"fleet.writeNodeFile":                    "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.editNodeFile":                     "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.searchNodeFiles":                  "R1 allowed none - no-receipt active relayed:node",
-		"fleet.listNodeDirectory":                "R1 allowed none - no-receipt active relayed:node",
-		"fleet.planNodeRemoval":                  "R1 allowed none - no-receipt active relayed:node",
-		"fleet.executeNodeRemoval":               "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.getNodeFileOperation":             "R1 allowed none - no-receipt active relayed:node",
-		"fleet.registerNodeWorkspace":            "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.unregisterNodeWorkspace":          "R3 upgrade evidence node no-receipt active relayed:node",
-		"fleet.listNodeWorkspaces":               "R1 allowed none - no-receipt active relayed:node",
-		"fleet.getNodeWorkspace":                 "R1 allowed none - no-receipt active relayed:node",
+		"fleet.nodeChannel":                      "R2 allowed none - no-receipt active node",
+		"management.nodeChannel":                 "R2 allowed none - no-receipt active node",
 		"fleet.v2.NodeService.GetOperation":      "R1 allowed none - no-receipt active",
 		"fleet.v2.NodeService.ListRemoteGrants":  "R1 allowed none - no-receipt active",
 		"fleet.v2.NodeService.RevokeRemoteGrant": "R3 upgrade none - no-receipt active",
@@ -246,8 +223,7 @@ func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 		"identity.revokeSession": TargetSession, "identity.revokeAllSessions": TargetAccount, "device.revoke": TargetDevice, UpgradeClass: TargetSession,
 		"management.deviceRevoke":     TargetDevice,
 		"commerce.cancelSubscription": TargetSubscription, "commerce.portal": TargetSubscription,
-		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode, "fleet.revokeNode": TargetNode,
-		"fleet.submitNodeTask": TargetNode, "fleet.cancelNodeTask": TargetNode, "fleet.writeNodeFile": TargetNode, "fleet.editNodeFile": TargetNode, "fleet.executeNodeRemoval": TargetNode, "fleet.registerNodeWorkspace": TargetNode, "fleet.unregisterNodeWorkspace": TargetNode}
+		"fleet.approveNodeSignIn": TargetFlow, "fleet.approveDeviceCode": TargetUserCode}
 	if target, ok := StepUpClass("center.operatorGrant"); !ok || target != TargetRequest {
 		t.Fatalf("the operator grant class: %q %v", target, ok)
 	}
@@ -260,7 +236,7 @@ func TestTheStepUpClassesAreTheEvidenceRows(t *testing.T) {
 	if target, ok := StepUpClass(UpgradeClass); !ok || target != TargetSession {
 		t.Fatal("the upgrade class")
 	}
-	for _, class := range []string{"", "identity.updateProfile", "identity.getProfile", "center.operatorgrant", "center.execute", "identity.upgradesession"} {
+	for _, class := range []string{"", "identity.updateProfile", "identity.getProfile", "center.operatorgrant", "center.execute", "identity.upgradesession", "fleet.revokeNode", "fleet.submitNodeTask"} {
 		if _, ok := StepUpClass(class); ok {
 			t.Errorf("%q is a step-up class", class)
 		}
@@ -293,21 +269,19 @@ func TestTheMobileLimitedRules(t *testing.T) {
 func TestFleetRowsCarryNoFeature(t *testing.T) {
 	rows := 0
 	for _, operation := range Operations() {
-		if !strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.") || operation.ID == "fleet.nodeChannel" || routedOperation(operation.ID) {
-			// The node channel is the first gated row (AF-CTR-05 E1a): TestOperationRowsAreCheckedForConsistency pins it; the routed
-			// task rows (E2b) are gated by their groups' keys, pinned by TestTheRoutedRowsAreGatedByTheirGroups.
+		if !strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.NodeEnrollmentService/") {
 			continue
 		}
 		rows++
 		account := operation.ID == "fleet.getNodeSignInFlow" || operation.ID == "fleet.approveNodeSignIn" || operation.ID == "fleet.lookupDeviceCode" ||
-			operation.ID == "fleet.approveDeviceCode" || strings.HasPrefix(operation.Path, "/arcforges.fleet.v1.FleetService/")
+			operation.ID == "fleet.approveDeviceCode"
 		if operation.Feature != "" || operation.Audit == AuditBeforeCall || operation.Session && !account && strings.Join(operation.Scopes, ",") != "node" ||
 			account && len(operation.Scopes) != 0 {
 			t.Errorf("%s: feature %q, audit %d, scopes %v", operation.ID, operation.Feature, operation.Audit, operation.Scopes)
 		}
 	}
-	if rows == 0 {
-		t.Fatal("no fleet row: the test is vacuous")
+	if rows != 11 {
+		t.Fatalf("got %d node enrollment rows", rows)
 	}
 }
 
@@ -325,24 +299,12 @@ func TestTheApprovalRowDecidesTheEvidenceOfADecision(t *testing.T) {
 	}
 }
 
-// TestTheRelayedRowsFollowTheirRules (AF-CTR-05 E2a; Plan CTR5-SUR-03, PB-1 item 2; decisions N-1): the rows that admit a node-relayed
-// caller are exactly the registry's reads, each a person's R1 session row with the node scope relayed; CheckRow refuses a relayed row
-// that is an agent row, an anonymous row, outside RelayedOperations, a restricted account's security row, ungated above R1, addressing
-// another object or admitting another or a repeated scope; it keeps a relayed row's person rules (an Upgrade and an Evidence on the
-// session half are admitted), and a person's row without relayed scopes is unchanged.
-func TestTheRelayedRowsFollowTheirRules(t *testing.T) {
-	var relayed []string
-	for _, operation := range Operations() {
-		if len(operation.RelayedScopes) > 0 {
-			relayed = append(relayed, operation.ID)
-		}
-	}
-	if strings.Join(relayed, ",") != strings.Join(RelayedOperations(), ",") {
-		t.Fatalf("the relayed rows: %v", relayed)
-	}
-	row, ok := Lookup(fleetv1connect.FleetServiceGetNodeProcedure)
-	if !ok || CheckRow(row) != nil {
-		t.Fatalf("the GetNode row: %+v %v", row, CheckRow(row))
+// The retained legacy relay validator still rejects malformed historical operation descriptions.
+func TestLegacyRelayedRowsFollowTheirRules(t *testing.T) {
+	row := Operation{Path: fleetv1connect.FleetServiceGetNodeProcedure, ID: "fleet.getNode",
+		Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Object: ObjectNode}
+	if err := CheckRow(row); err != nil {
+		t.Fatal(err)
 	}
 	gated := Operation{Path: "/arcforges.fleet.v1.FleetService/SubmitNodeTask", ID: "fleet.submitNodeTask", Risk: "R3", Session: true, RelayedScopes: []string{"node"},
 		MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Object: ObjectNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall}
@@ -366,37 +328,6 @@ func TestTheRelayedRowsFollowTheirRules(t *testing.T) {
 		if CheckRow(changed) == nil {
 			t.Errorf("%s was admitted", name)
 		}
-	}
-}
-
-// routedOperation reports only the explicitly declared routed task/file/workspace rows.
-func routedOperation(id string) bool {
-	return slices.Contains([]string{"fleet.submitNodeTask", "fleet.getNodeTask", "fleet.listNodeTasks", "fleet.waitNodeTask", "fleet.readNodeTaskOutput",
-		"fleet.cancelNodeTask", "fleet.readNodeFile", "fleet.writeNodeFile", "fleet.editNodeFile", "fleet.searchNodeFiles", "fleet.listNodeDirectory", "fleet.planNodeRemoval", "fleet.executeNodeRemoval", "fleet.getNodeFileOperation", "fleet.registerNodeWorkspace", "fleet.unregisterNodeWorkspace", "fleet.listNodeWorkspaces", "fleet.getNodeWorkspace"}, id)
-}
-
-// TestTheRoutedRowsAreGatedByTheirGroups (AF-CTR-05 E2b, E2-3; CTR5-GATE-06): each routed task row carries its group's key of the routed
-// task control table (submission center.execute, status and output remote.view, control remote.control), is audited before the call,
-// addresses a node and admits the node-relayed caller; the routed controls cover it.
-func TestTheRoutedRowsAreGatedByTheirGroups(t *testing.T) {
-	want := map[string]feature.Group{"fleet.submitNodeTask": feature.GroupSubmission, "fleet.getNodeTask": feature.GroupStatusAndOutput,
-		"fleet.listNodeTasks": feature.GroupStatusAndOutput, "fleet.waitNodeTask": feature.GroupStatusAndOutput, "fleet.readNodeTaskOutput": feature.GroupStatusAndOutput,
-		"fleet.cancelNodeTask": feature.GroupControl, "fleet.readNodeFile": feature.GroupSubmission, "fleet.writeNodeFile": feature.GroupSubmission, "fleet.editNodeFile": feature.GroupSubmission, "fleet.searchNodeFiles": feature.GroupSubmission, "fleet.listNodeDirectory": feature.GroupSubmission, "fleet.planNodeRemoval": feature.GroupSubmission, "fleet.executeNodeRemoval": feature.GroupSubmission, "fleet.getNodeFileOperation": feature.GroupSubmission, "fleet.registerNodeWorkspace": feature.GroupSubmission, "fleet.unregisterNodeWorkspace": feature.GroupSubmission, "fleet.listNodeWorkspaces": feature.GroupSubmission, "fleet.getNodeWorkspace": feature.GroupSubmission}
-	seen := 0
-	for _, operation := range Operations() {
-		group, ok := want[operation.ID]
-		if !ok {
-			continue
-		}
-		seen++
-		key, _ := feature.LegacyKeyOfGroup(group)
-		if operation.V2Hosted || operation.Group != group || operation.Feature != key || operation.Audit != AuditBeforeCall || operation.Object != ObjectNode ||
-			strings.Join(operation.RelayedScopes, ",") != "node" || CheckRow(operation) != nil {
-			t.Errorf("%s: %+v", operation.ID, operation)
-		}
-	}
-	if seen != len(want) {
-		t.Fatalf("%d routed rows", seen)
 	}
 }
 

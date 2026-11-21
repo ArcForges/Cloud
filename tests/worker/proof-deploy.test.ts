@@ -62,14 +62,9 @@ test("the checked-in proof environment is the isolated acceptance center", () =>
       ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
       // AF-CTR-03 and AF-CTR-04 E3: the acceptance environment serves the identity, pages, operations and fleet surfaces; browser cookies are bound to its own
       // origin, and its anonymous flows have a global ceiling (C1: it shares the production Neon project until the retention sweeps exist).
-      FLAGSHIP_SURFACES: "identity,pages,operations,fleet,mobile,relay,nodes",
+      FLAGSHIP_SURFACES: "identity,pages,operations,fleet,relay,nodes",
       ALLOWED_ORIGIN: "https://proof.arcforges.com",
       ARCFORGES_CENTER_IDENTITY_POLICY: '{"anonymousFlowsLimit":600,"anonymousFlowsWindow":"1h"}',
-      // AF-CTR-04 part M (Q-1, H3): a labelled NON-SHIPPING TEST statement for the asset links of the proof host: a package name no app
-      // will ever publish and the SHA-256 fingerprint of a throwaway self-signed certificate (its key was destroyed; only the public
-      // fingerprint was ever kept). AF-AND-01 replaces it with the real app identity (AR-08, H-02).
-      ARCFORGES_CENTER_ANDROID_APP:
-        '[{"packageName":"com.arcforges.prooftest","sha256CertFingerprints":["33:58:0E:12:2B:9D:69:27:3B:BB:B9:1E:EC:58:D5:A2:B3:79:30:F8:EE:14:E4:20:62:FA:57:EC:23:76:5E:02"],"testOnly":true}]',
     },
   );
   // Production keeps the Hello-only bindings and never the development fixtures.
@@ -103,14 +98,10 @@ test("the checked-in proof environment is the isolated acceptance center", () =>
   const entry = readFileSync(path.resolve(import.meta.dirname, "../../", proofSourceEntry), "utf8");
   for (const name of ["FoundationContainer", "FoundationJobCoordinator", "HarnessRunAlarm"])
     assert.match(entry, new RegExp(`export class ${name} extends`, "u"), name);
-  // The C# proof's resources stay as they are, unbound; only the retained D1 database stays bound (the gated C# migration step
-  // keeps it current until AF-CTR-09).
+  // Historical provider resources and Durable Object state stay retained without a D1 binding in the acceptance deployment.
   const record = proof as unknown as Record<string, unknown>;
-  for (const key of ["assets", "r2_buckets", "queues"]) assert.equal(record[key], undefined, key);
-  assert.deepEqual(
-    proof.d1_databases.map((entry) => (entry as { database_name?: string }).database_name),
-    ["arcforges-proof-business"],
-  );
+  for (const key of ["assets", "r2_buckets", "queues", "d1_databases"])
+    assert.equal(record[key], undefined, key);
   // No resource name is shared with another environment.
   assert(!JSON.stringify(proof).includes('"arcforges-cloud"'));
   // Variables carry configuration, never secret values.
@@ -198,24 +189,9 @@ test("the proof config pins the registry digest, revision and account and nothin
   assert.equal(config.env.proof.containers[0]?.image, digest);
   assert.equal(config.env.proof.vars.SOURCE_REVISION, "b".repeat(40));
   assert.equal((config as Record<string, unknown>).account_id, account);
-  assert.equal(config.env.proof.d1_databases[0]?.database_id, undefined);
+  assert.equal(config.env.proof.d1_databases, undefined);
   assert.equal(wrangler.env.proof.containers[0]?.image, "./Dockerfile", "the input is not mutated");
-  const withDatabase = buildProofConfig(wrangler, {
-    account,
-    imageDigest: digest,
-    revision: "b".repeat(40),
-    main: sealedProofBundle,
-    databaseId: "11111111-1111-4111-8111-111111111111",
-  });
-  assert.equal(
-    withDatabase.env.proof.d1_databases[0]?.database_id,
-    "11111111-1111-4111-8111-111111111111",
-  );
-  for (const bad of [
-    { account: "short" },
-    { imageDigest: "arcforges-cloud:latest" },
-    { databaseId: "not-a-uuid" },
-  ])
+  for (const bad of [{ account: "short" }, { imageDigest: "arcforges-cloud:latest" }])
     assert.throws(() =>
       buildProofConfig(wrangler, {
         account,
@@ -290,6 +266,8 @@ test("the proof deploy uploads the sealed proof bundle and never resolves the so
     "./worker/proof/entry.ts",
     "../worker/index.ts",
     "/tmp/x.js",
+    "./candidate/other.js",
+    "./ctr06-bridge/proof-worker.js",
   ])
     assert.throws(
       () =>
@@ -299,7 +277,7 @@ test("the proof deploy uploads the sealed proof bundle and never resolves the so
           revision: "b".repeat(40),
           main,
         }),
-      /sealed candidate bundle/u,
+      /sealed Go proof bundle/u,
     );
   // A candidate whose proof environment lost its own entry would fall back to the production entry: refused.
   const withoutEntry = { ...wrangler.env.proof };
@@ -333,18 +311,32 @@ test("deployment secrets are generated fresh, well formed, distinct and carry no
   assert.throws(() => generateSecrets(() => new Uint8Array(8)), /required shape/u);
 });
 
-test("the proof config carries the migrations directory and refuses an unsafe environment", () => {
-  const config = buildProofConfig(wrangler, {
+test("the current proof config refuses D1 bindings and deployment overrides", () => {
+  const options = {
     account,
     imageDigest: digest,
     revision: "b".repeat(40),
     main: sealedProofBundle,
-    migrationsDir: "../worker/proof-migrations",
-  });
-  assert.equal(
-    (config.env.proof.d1_databases[0] as { migrations_dir?: string }).migrations_dir,
-    "../worker/proof-migrations",
-  );
+  };
+  const d1_databases = [{ binding: "DB", database_name: "arcforges-proof-business" }];
+  for (const candidate of [
+    { ...wrangler, d1_databases },
+    { ...wrangler, env: { proof: { ...wrangler.env.proof, d1_databases } } },
+    { ...wrangler, env: { proof: { ...wrangler.env.proof, d1_databases: [] } } },
+  ])
+    assert.throws(() => buildProofConfig(candidate, options), /must not declare D1 bindings/u);
+  for (const override of [
+    { databaseId: "11111111-1111-4111-8111-111111111111" },
+    { migrationsDir: "../worker/proof-migrations" },
+    { databaseId: undefined },
+  ])
+    assert.throws(
+      () => buildProofConfig(wrangler, { ...options, ...override }),
+      /does not accept D1 deployment overrides/u,
+    );
+});
+
+test("the proof config refuses an unsafe environment", () => {
   for (const unsafe of [
     { workers_dev: true },
     { preview_urls: true },

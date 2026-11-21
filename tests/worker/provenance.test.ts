@@ -28,7 +28,38 @@ import {
   validateRecord,
 } from "../../tooling/provenance.ts";
 import { root as owner } from "../../tooling/process.ts";
+import {
+  verifyArchivedBridgeProfile,
+  verifyBridgeAsset,
+  verifySecurityBridgeProfile,
+} from "../../tooling/release-provenance.ts";
 import { scratchDirectory } from "./support/scratch.ts";
+
+test("CTR06 archival verification uses committed producer bytes and immutable asset bindings", () => {
+  const archived = verifyArchivedBridgeProfile(owner);
+  assert.equal(
+    archived.profileHash,
+    "33cbcda0ad74235d9251322e0f40a913597ffd588615acfea711779cadfa07d8",
+  );
+  verifySecurityBridgeProfile(owner, archived.securityBridge);
+  const changed = structuredClone(archived.securityBridge);
+  changed.producerInputs["tooling/release-provenance.ts"] = hash(
+    readOwned(owner, "tooling/release-provenance.ts"),
+    "lf",
+  );
+  assert.throws(
+    () => verifySecurityBridgeProfile(owner, changed),
+    /Changed archived security bridge profile/u,
+  );
+  assert.throws(
+    () => verifyBridgeAsset(owner, "linux", Buffer.from("substituted release asset")),
+    /differs from the archived release profile/u,
+  );
+  assert.throws(
+    () => verifyArchivedBridgeProfile(path.join(owner, "tooling")),
+    /Cloud repository root/u,
+  );
+});
 
 function fixture() {
   const root = scratchDirectory("cloud-provenance-");

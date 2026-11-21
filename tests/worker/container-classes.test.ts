@@ -71,19 +71,16 @@ const containerContext = {
   },
   blockConcurrencyWhile: () => Promise.resolve(),
 };
+const goRuntime = { ARCFORGES_HELLO_RUNTIME: "go" };
 
-test("the production Container class registers exactly the ai.internal outbound host (HAR.40 reviewed change)", () => {
-  assert.deepEqual(Object.keys(CloudContainer.outboundByHost ?? {}), ["ai.internal"]);
-  assert.equal(typeof CloudContainer.outboundByHost?.["ai.internal"], "function");
-  assert.equal(
-    CloudContainer.outboundHandlers,
-    undefined,
-    "no named handler set beyond the ai.internal host",
-  );
+test("the production Go Container registers no virtual outbound hosts or named handlers", () => {
+  assert.deepEqual(Object.keys(CloudContainer.outboundByHost ?? {}), []);
+  assert.equal(CloudContainer.outboundHandlers, undefined);
 });
 
-test("the production Container forwards only Neon configuration and keeps proof classes isolated", () => {
+test("the production Container forwards standalone Neon configuration and keeps proof classes isolated", () => {
   const environment = {
+    ...goRuntime,
     ARCFORGES_NEON_HELLO: "enabled",
     NEON_DATABASE_URL: "synthetic-runtime-secret",
     NEON_DATABASE_URL_DIRECT: "never-forward",
@@ -92,11 +89,13 @@ test("the production Container forwards only Neon configuration and keeps proof 
   const enabled = new CloudContainer(containerContext, environment);
   assert.equal(enabled.enableInternet, true);
   assert.deepEqual(enabled.envVars, {
+    ARCFORGES_CENTER_SURFACES: "none",
+    ARCFORGES_CENTER_CLIENT_IP_HEADER: "x-arcforges-client-ip",
     ARCFORGES_NEON_HELLO: "enabled",
     NEON_DATABASE_URL: "synthetic-runtime-secret",
   });
   assert.throws(
-    () => new CloudContainer(containerContext, { ARCFORGES_NEON_HELLO: "enabled" }),
+    () => new CloudContainer(containerContext, { ...goRuntime, ARCFORGES_NEON_HELLO: "enabled" }),
     /configuration/u,
   );
   const proof = new FoundationContainer(containerContext, environment);
@@ -104,18 +103,22 @@ test("the production Container forwards only Neon configuration and keeps proof 
   assert.deepEqual(proof.envVars, {});
 });
 
-test("the production Container keeps the Hello settings and no environment variables", () => {
+test("the production Container keeps the Hello settings and only Go startup variables", () => {
   const instance = new CloudContainer(containerContext, {
+    ...goRuntime,
     FOUNDATION_PROOF: "enabled",
     HMAC_C2W_SECRET: "x",
   });
   assert.equal(instance.defaultPort, 8080);
   assert.equal(instance.sleepAfter, "60s");
   assert.equal(instance.enableInternet, false);
-  assert.deepEqual(instance.envVars, {}, "no foundation variable reaches the production class");
+  assert.deepEqual(instance.envVars, {
+    ARCFORGES_CENTER_SURFACES: "none",
+    ARCFORGES_CENTER_CLIENT_IP_HEADER: "x-arcforges-client-ip",
+  });
 });
 
-test("only the proof class carries the storage, objects and harness alarm hosts and the environment hook; ai.internal stays production-only", () => {
+test("only the proof class carries the storage, objects and harness alarm hosts and the environment hook", () => {
   assert.deepEqual(Object.keys(FoundationContainer.outboundByHost ?? {}).sort(), [
     "harness.internal",
     "objects.internal",
@@ -145,7 +148,7 @@ test("the 60 second sleep timer never stops a Container that has a request or a 
   // A server stream may live longer than sleepAfter (streamLifetimeMs). The library counts every proxied
   // request until its response body ends and treats the Container as active meanwhile; this pins that
   // behavior of the exact locked @cloudflare/containers so an upgrade cannot silently end open streams.
-  const container = new CloudContainer(containerContext, {}) as Record<string, unknown> & {
+  const container = new CloudContainer(containerContext, goRuntime) as Record<string, unknown> & {
     inflightRequests: number;
     sleepAfterMs: number;
     isActivityExpired(): boolean;
@@ -160,7 +163,7 @@ test("the 60 second sleep timer never stops a Container that has a request or a 
   assert.ok(container.sleepAfterMs > Date.now(), "and the sleep window is renewed");
 });
 
-test("the Go center is selected only for the production class and proof remains C#", () => {
+test("production starts Go explicitly and the historical proof class stays isolated", () => {
   const environment = {
     ARCFORGES_HELLO_RUNTIME: "go",
     ARCFORGES_NEON_HELLO: "enabled",
@@ -183,27 +186,32 @@ test("the Go center is selected only for the production class and proof remains 
   const proof = new FoundationContainer(containerContext, environment);
   assert.equal(proof.entrypoint, undefined);
   assert.equal(proof.enableInternet, false);
-  assert.throws(
-    () => new CloudContainer(containerContext, { ARCFORGES_HELLO_RUNTIME: "unknown" }),
-    /Unknown Hello runtime/u,
-  );
 });
 
-test("without a mode the Go center gets none and refuses to start; the C# runtime gets no center variable", () => {
-  const unconfigured = new CloudContainer(containerContext, { ARCFORGES_HELLO_RUNTIME: "go" });
+test("production and acceptance require the exact Go runtime before reading startup settings", () => {
+  for (const Class of [CloudContainer, acceptance.FoundationContainer]) {
+    for (const flag of [undefined, "", "csharp", "unknown", "Go", " go "]) {
+      assert.throws(
+        () =>
+          new Class(containerContext, {
+            ...(flag === undefined ? {} : { ARCFORGES_HELLO_RUNTIME: flag }),
+            get ARCFORGES_CENTER_MODE() {
+              throw new Error("Go startup settings were read");
+            },
+          }),
+        { message: "The Center container requires ARCFORGES_HELLO_RUNTIME=go." },
+        String(flag),
+      );
+    }
+  }
+});
+
+test("an unconfigured Go center receives no inferred mode", () => {
+  const unconfigured = new CloudContainer(containerContext, goRuntime);
   assert.deepEqual(unconfigured.entrypoint, ["/app/arcforges-center"]);
   assert.equal(unconfigured.enableInternet, false);
   assert.equal(
     (unconfigured.envVars as Record<string, string> | undefined)?.ARCFORGES_CENTER_MODE,
-    undefined,
-  );
-  const csharp = new CloudContainer(containerContext, {
-    ARCFORGES_HELLO_RUNTIME: "csharp",
-    ARCFORGES_CENTER_MODE: "official-hosted",
-  });
-  assert.equal(csharp.entrypoint, undefined);
-  assert.equal(
-    (csharp.envVars as Record<string, string> | undefined)?.ARCFORGES_CENTER_MODE,
     undefined,
   );
 });
@@ -234,15 +242,13 @@ test("a Go center with a store gets the runtime role's URL and never the Hello's
   // With a store the Hello needs no Neon credential of its own.
   const { NEON_DATABASE_URL: _hello, ...withoutHello } = centerEnvironment;
   assert.doesNotThrow(() => new CloudContainer(containerContext, withoutHello));
-  // The C# host never receives the center's runtime credential.
-  const csharp = new CloudContainer(containerContext, {
-    ...centerEnvironment,
-    ARCFORGES_HELLO_RUNTIME: "csharp",
-  });
-  assert.equal((csharp.envVars as Record<string, string>).ARCFORGES_CENTER_DATABASE_URL, undefined);
-  assert.equal(
-    (csharp.envVars as Record<string, string>).NEON_DATABASE_URL,
-    "synthetic-hello-credential",
+  assert.throws(
+    () =>
+      new CloudContainer(containerContext, {
+        ...centerEnvironment,
+        ARCFORGES_HELLO_RUNTIME: "csharp",
+      }),
+    /requires ARCFORGES_HELLO_RUNTIME=go/u,
   );
 });
 
@@ -255,12 +261,6 @@ test("the Go center gets the surfaces the Worker forwards and always the client-
   for (const flag of [undefined, "", "Identity", "identity,identity", "identity, operations"])
     assert.equal(settings(flag).ARCFORGES_CENTER_SURFACES, "none", String(flag));
   assert.equal(settings("identity").ARCFORGES_CENTER_CLIENT_IP_HEADER, "x-arcforges-client-ip");
-  const csharp = new CloudContainer(containerContext, {
-    ARCFORGES_HELLO_RUNTIME: "csharp",
-    FLAGSHIP_SURFACES: "identity",
-  }).envVars as Record<string, string> | undefined;
-  assert.equal(csharp?.ARCFORGES_CENTER_SURFACES, undefined);
-  assert.equal(csharp?.ARCFORGES_CENTER_CLIENT_IP_HEADER, undefined);
 });
 
 test("the Go center gets the identity policy override only where an environment sets one", () => {
@@ -272,29 +272,34 @@ test("the Go center gets the identity policy override only where an environment 
     }).envVars as Record<string, string>;
   assert.equal(settings(policy).ARCFORGES_CENTER_IDENTITY_POLICY, policy);
   assert.equal(settings(undefined).ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
-  const csharp = new CloudContainer(containerContext, {
-    ARCFORGES_HELLO_RUNTIME: "csharp",
-    ARCFORGES_CENTER_IDENTITY_POLICY: policy,
-  }).envVars as Record<string, string> | undefined;
-  assert.equal(csharp?.ARCFORGES_CENTER_IDENTITY_POLICY, undefined);
 });
 
-test("the Go center gets the Android app identity only where an environment sets one (AF-CTR-04 part M)", () => {
-  const identity =
-    '[{"packageName":"com.arcforges.prooftest","sha256CertFingerprints":["AB"],"testOnly":true}]';
-  const settings = (value: string | undefined) =>
-    new CloudContainer(containerContext, {
+test("production and acceptance refuse retired mobile startup settings", () => {
+  for (const Class of [CloudContainer, acceptance.FoundationContainer]) {
+    for (const [overrides, message] of [
+      [
+        { FLAGSHIP_SURFACES: "identity,pages,mobile,fleet" },
+        "The mobile surface has been retired.",
+      ],
+      [
+        { ARCFORGES_CENTER_ANDROID_APP: "[]" },
+        "ARCFORGES_CENTER_ANDROID_APP was retired with the mobile surface.",
+      ],
+      [
+        { ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT: "" },
+        "ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT was retired with the mobile surface.",
+      ],
+    ] as const) {
+      assert.throws(() => new Class(containerContext, { ...centerEnvironment, ...overrides }), {
+        message,
+      });
+    }
+    const vars = new Class(containerContext, {
       ...centerEnvironment,
-      ARCFORGES_CENTER_ANDROID_APP: value,
+      ARCFORGES_CENTER_ANDROID_APP: "",
     }).envVars as Record<string, string>;
-  assert.equal(settings(identity).ARCFORGES_CENTER_ANDROID_APP, identity);
-  assert.equal(settings(undefined).ARCFORGES_CENTER_ANDROID_APP, undefined);
-  // The debug scheme is a self-hosted center's own variable: the hosted Worker never passes it.
-  const withDebug = new CloudContainer(containerContext, {
-    ...centerEnvironment,
-    ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT: "com.arcforges.android.debug",
-  } as never).envVars as Record<string, string>;
-  assert.equal(withDebug.ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT, undefined);
+    assert.equal(vars.ARCFORGES_CENTER_ANDROID_APP, undefined);
+  }
 });
 
 test("the acceptance entry runs the Go center under the proof Container class and keeps the retired classes inert", async () => {
@@ -574,8 +579,10 @@ test("the Worker passes the owner bootstrap through to the center and restarts i
   );
   const revision = "c".repeat(40);
   assert.notEqual(await startDigest(revision, plain), await startDigest(revision, bootstrapped));
-  // The C# runtime never receives one.
-  assert.deepEqual(centerContainerSettings({ ...bootstrap }).envVars, {});
+  assert.throws(
+    () => centerContainerSettings({ ...bootstrap }),
+    /requires ARCFORGES_HELLO_RUNTIME=go/u,
+  );
 });
 
 // PLT-18: ARCFORGES_CENTER_DISABLED_FEATURES is a self-hosted operator's own limit (center/internal/config refuses it in
@@ -583,21 +590,16 @@ test("the Worker passes the owner bootstrap through to the center and restarts i
 // Worker must never hand the variable to the Container, whatever its own environment or a stray binding says.
 test("the self-hosted operator's feature limits are never passed to the hosted center (PLT-18)", () => {
   const name = "ARCFORGES_CENTER_DISABLED_FEATURES";
-  for (const runtime of ["go", "csharp", "", undefined]) {
-    const settings = centerContainerSettings({
-      ...(runtime === undefined ? {} : { ARCFORGES_HELLO_RUNTIME: runtime }),
-      ARCFORGES_CENTER_MODE: "official-hosted",
-      ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
-      ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
-      FLAGSHIP_SURFACES: "identity,pages",
-      [name]: "push,remote.control",
-    });
-    assert(
-      !Object.hasOwn(settings.envVars, name),
-      `the ${runtime ?? "default"} runtime was handed it`,
-    );
-    assert(!Object.values(settings.envVars).some((value) => value.includes("remote.control")));
-  }
+  const settings = centerContainerSettings({
+    ...goRuntime,
+    ARCFORGES_CENTER_MODE: "official-hosted",
+    ARCFORGES_CENTER_PUBLIC_BASE_URL: "https://proof.arcforges.com/api",
+    ARCFORGES_CENTER_PLAN_CONFIGURATION: "development-fixtures",
+    FLAGSHIP_SURFACES: "identity,pages",
+    [name]: "push,remote.control",
+  });
+  assert(!Object.hasOwn(settings.envVars, name));
+  assert(!Object.values(settings.envVars).some((value) => value.includes("remote.control")));
   // No environment of wrangler.json sets it, and no source of the Worker names it.
   const root = path.resolve(import.meta.dirname, "../..");
   const wrangler = JSON.parse(readFileSync(path.join(root, "wrangler.json"), "utf8")) as {
@@ -747,7 +749,7 @@ test("an unknown provider is a fixed error that names no value, and so is a valu
     );
 });
 
-test("only a non-empty string is handed on, and the C# runtime never receives a mail variable", () => {
+test("only non-empty strings from the active mail provider are handed on", () => {
   const values = everyMailVariable("postmark");
   values[`${mailPrefix}FROM_NAME`] = "";
   values[`${mailPrefix}POSTMARK_STREAM`] = undefined as unknown as string;
@@ -756,15 +758,6 @@ test("only a non-empty string is handed on, and the C# runtime never receives a 
   for (const name of ["FROM_NAME", "POSTMARK_STREAM", "TIMEOUT"])
     assert(!Object.hasOwn(envVars, mailPrefix + name), name);
   assert.equal(envVars[`${mailPrefix}POSTMARK_TOKEN`], values[`${mailPrefix}POSTMARK_TOKEN`]);
-  for (const runtime of ["csharp", "", undefined]) {
-    for (const provider of ["postmark", "smtp", "ses"]) {
-      const settings = centerContainerSettings({
-        ...(runtime === undefined ? {} : { ARCFORGES_HELLO_RUNTIME: runtime }),
-        ...everyMailVariable(provider),
-      });
-      assert.deepEqual(settings.envVars, {}, `${runtime ?? "default"} runtime, ${provider}`);
-    }
-  }
 });
 
 test("a mail variable never widens the egress switch, and a rotated credential restarts the center", async () => {
@@ -844,11 +837,14 @@ test("the acceptance container forwards only its selected proof command key when
     FLAGSHIP_SURFACES: "identity,pages,fleet",
   });
   assert.equal((off.envVars as Record<string, string>)[binding], undefined);
-  const csharp = new acceptance.FoundationContainer(containerContext, {
-    ...environment,
-    ARCFORGES_HELLO_RUNTIME: "csharp",
-  });
-  assert.equal((csharp.envVars as Record<string, string>)[binding], undefined);
+  assert.throws(
+    () =>
+      new acceptance.FoundationContainer(containerContext, {
+        ...environment,
+        ARCFORGES_HELLO_RUNTIME: "csharp",
+      }),
+    /requires ARCFORGES_HELLO_RUNTIME=go/u,
+  );
   const changed = new acceptance.FoundationContainer(containerContext, {
     ...environment,
     [binding]: "synthetic-rotated-proof-key",
@@ -908,10 +904,12 @@ test("the container passes only named merchant settings to configured official c
   const dark = centerContainerSettings({ ...config, FLAGSHIP_SURFACES: "identity" });
   assert.equal(dark.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE, hosted);
   const selfHost = centerContainerSettings({ ...config, ARCFORGES_CENTER_MODE: "self-hosted" });
-  const rollback = centerContainerSettings({ ...config, ARCFORGES_HELLO_RUNTIME: "csharp" });
-  for (const settings of [dark, selfHost, rollback]) {
+  for (const settings of [dark, selfHost]) {
     for (const key of Object.keys(merchant)) assert.equal(settings.envVars[key], undefined);
   }
   assert.equal(selfHost.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE, undefined);
-  assert.equal(rollback.envVars.ARCFORGES_CENTER_HOSTED_CATALOGUE, undefined);
+  assert.throws(
+    () => centerContainerSettings({ ...config, ARCFORGES_HELLO_RUNTIME: "csharp" }),
+    /requires ARCFORGES_HELLO_RUNTIME=go/u,
+  );
 });

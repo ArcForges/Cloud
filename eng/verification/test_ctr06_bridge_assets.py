@@ -239,6 +239,41 @@ class SecurityBridgeOciAppTreeTest(unittest.TestCase):
 
 
 class SecurityBridgeNativeSelectionTest(unittest.TestCase):
+    def test_materialization_uses_pinned_commits_without_inheriting_current_git_hooks(self):
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name).resolve()
+            env = {"PATH": "fixture"}
+            with mock.patch.object(security_native, "run") as run, \
+                    mock.patch.object(security_native, "verify_checkout") as verify:
+                producer, source = security_native.materialize_checkouts(tmp, env)
+            self.assertEqual((producer, source), (tmp / "producer", tmp / "source"))
+            git = ["git", "--no-replace-objects", "-c", f"core.hooksPath={tmp / 'unused-hooks'}"]
+            self.assertEqual(run.call_args_list, [
+                mock.call(git + ["clone", "--quiet", "--no-local", "--no-checkout", "--",
+                                 str(security_native.ROOT), str(producer)], security_native.ROOT, env),
+                mock.call(git + ["checkout", "--quiet", "--detach", security_native.PRODUCER], producer, env),
+                mock.call(git + ["worktree", "add", "--detach", str(source), security_native.SOURCE], producer, env),
+            ])
+            self.assertEqual(verify.call_args_list, [
+                mock.call(producer, security_native.PRODUCER, security_native.PRODUCER_TREE, env, fresh=True),
+                mock.call(source, security_native.SOURCE, security_native.SOURCE_TREE, env, fresh=True),
+            ])
+
+    def test_checkout_refuses_wrong_owner_commit_tree_or_files(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve()
+            identity = f"{security_native.PRODUCER}\n{security_native.PRODUCER_TREE}"
+            for reports, reason in (
+                ([str(root.parent)], "root differs"),
+                ([str(root), identity.replace(security_native.PRODUCER, security_native.SOURCE)], "commit or tree differs"),
+                ([str(root), identity.replace(security_native.PRODUCER_TREE, security_native.SOURCE_TREE)], "commit or tree differs"),
+                ([str(root), identity, "!! unexpected"], "unexpected files or changes"),
+            ):
+                with self.subTest(reason=reason), mock.patch.object(security_native, "run", side_effect=reports):
+                    with self.assertRaisesRegex(ValueError, reason):
+                        security_native.verify_checkout(root, security_native.PRODUCER,
+                                                        security_native.PRODUCER_TREE, {}, fresh=True)
+
     def test_archive_selection_and_child_environment_fail_closed(self):
         with tempfile.TemporaryDirectory(prefix="security archive ") as tmp:
             archive = Path(tmp) / "go archive.zip"

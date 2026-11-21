@@ -123,8 +123,6 @@ type Config struct {
 	// DisabledFeatures are the gated feature keys the operator of a self-hosted center disabled (ARCFORGES_CENTER_DISABLED_FEATURES):
 	// the built-in default enables every other key. It is empty in official-hosted mode, where the variable is refused.
 	DisabledFeatures []string
-	// Mobile is the mobile surface's configuration (AF-CTR-04 part M): the published Android app identity and the debug app's scheme.
-	Mobile Mobile
 	// CommandKeys are the command-signing keys loaded from ARCFORGES_CENTER_KEY_* (AF-CTR-05 E1a, CTR5-KEY-01; ApplyCommandKeys).
 	CommandKeys []CommandKey
 }
@@ -217,8 +215,11 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	default:
 		return Config{}, invalid("%s must be enabled or disabled", EnvNeonHello)
 	}
-	if config.Mobile, err = loadMobile(lookup, config.Mode); err != nil {
-		return Config{}, err
+	if value, _ := lookup("ARCFORGES_CENTER_ANDROID_APP"); value != "" {
+		return Config{}, invalid("ARCFORGES_CENTER_ANDROID_APP was retired with the mobile surface")
+	}
+	if _, present := lookup("ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT"); present {
+		return Config{}, invalid("ARCFORGES_CENTER_MOBILE_DEBUG_REDIRECT was retired with the mobile surface")
 	}
 	if config.Mail, err = loadMail(lookup); err != nil {
 		return Config{}, err

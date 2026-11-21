@@ -3,8 +3,8 @@
 """Exercise the actual security-bridge producer on this native verification host.
 
 The local event and run identifiers are synthetic and authorize nothing. No artifact
-is uploaded. The producer/source come from a clean local clone of the verified HEAD;
-the bridge source is checked again by the actual producer. The archive is an
+is uploaded. The producer and its source are separate, clean checkouts of the
+reviewed commits; the original producer checks them again. The archive is an
 existing, non-secret Go distribution selected only for this process.
 """
 from __future__ import annotations
@@ -19,7 +19,10 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+PRODUCER = "9b8796eac760982d9814f371b820b736ddd945c4"
+PRODUCER_TREE = "2b35c50007089d6e6c51797f62437334bd2826f3"
 SOURCE = "8e5f6e26aa97b123d9f60b91f780364a094e74cd"
+SOURCE_TREE = "4a315ea6b47d96c3262e8111fcc26ad1957097f2"
 ARCHIVE_ENV = "ARCFORGES_CTR06_SECURITY_GO_ARCHIVE"
 
 
@@ -47,6 +50,35 @@ def run(argv: list[str], cwd: Path, env: dict[str, str], capture: bool = False) 
     return result.stdout.strip() if capture and result.stdout else ""
 
 
+def verify_checkout(directory: Path, commit: str, tree: str, env: dict[str, str],
+                    *, fresh: bool) -> None:
+    git = ["git", "--no-replace-objects"]
+    if Path(run(git + ["rev-parse", "--show-toplevel"], directory, env, True)).resolve() != directory:
+        raise ValueError("historical Git checkout root differs")
+    identity = run(git + ["rev-parse", "HEAD", "HEAD^{tree}"], directory, env, True)
+    if identity.splitlines() != [commit, tree]:
+        raise ValueError("historical Git checkout commit or tree differs")
+    args = git + ["status", "--porcelain=v1", "--untracked-files=all"]
+    if fresh:
+        args.append("--ignored=matching")
+    if run(args, directory, env, True):
+        raise ValueError("historical Git checkout has unexpected files or changes")
+
+
+def materialize_checkouts(tmp: Path, env: dict[str, str]) -> tuple[Path, Path]:
+    producer = tmp / "producer"
+    source = tmp / "source"
+    # Never run a hook from the current Git configuration when materializing a checkout.
+    git = ["git", "--no-replace-objects", "-c", f"core.hooksPath={tmp / 'unused-hooks'}"]
+    run(git + ["clone", "--quiet", "--no-local", "--no-checkout", "--",
+               str(ROOT), str(producer)], ROOT, env)
+    run(git + ["checkout", "--quiet", "--detach", PRODUCER], producer, env)
+    verify_checkout(producer, PRODUCER, PRODUCER_TREE, env, fresh=True)
+    run(git + ["worktree", "add", "--detach", str(source), SOURCE], producer, env)
+    verify_checkout(source, SOURCE, SOURCE_TREE, env, fresh=True)
+    return producer, source
+
+
 def main() -> None:
     platform = "windows" if os.name == "nt" else "linux" if sys.platform.startswith("linux") else ""
     if not platform:
@@ -60,8 +92,8 @@ def main() -> None:
     env.update({"GOTOOLCHAIN": "local", "GOWORK": "off", "GOTELEMETRY": "off",
                 "PYTHONDONTWRITEBYTECODE": "1"})
     if platform == "linux":
-        # The producer runs current tooling; npm only installs the immutable
-        # 8e5 source with its separately preserved historical Node/npm pair.
+        # The reviewed producer uses Node 26; the 8e5 source uses its separately
+        # preserved historical Node/npm pair.
         historical = selected_file(os.environ.get("ARCFORGES_CTR06_HISTORICAL_NODE") or
                                    str(Path.home() / ".local/node/bin/node"), "historical 8e5 Node")
         if run([str(historical), "--version"], ROOT, env, True) != "v24.21.0":
@@ -77,27 +109,25 @@ def main() -> None:
         raise ValueError("invalid verified HEAD")
     with tempfile.TemporaryDirectory(prefix="arcforges-ctr06-security-native-") as name:
         tmp = Path(name).resolve()
-        producer = tmp / "producer"
-        source = tmp / "source"
         runner = tmp / "runner"
         runner.mkdir(mode=0o700)
-        run(["git", "clone", "--quiet", "--no-local", str(ROOT), str(producer)], ROOT, env)
-        run(["git", "checkout", "--quiet", "--detach", head], producer, env)
-        run(["git", "worktree", "add", "--detach", str(source), SOURCE], producer, env)
+        producer, source = materialize_checkouts(tmp, env)
         if platform == "windows":
             npm = run([str(node), "-p", "require('path').join(require('path').dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')"], producer, env, True)
             run([str(node), npm, "ci", "--ignore-scripts"], producer, env)
         else:
             run(["npm", "ci", "--ignore-scripts"], producer, env)
+        verify_checkout(producer, PRODUCER, PRODUCER_TREE, env, fresh=False)
+        verify_checkout(source, SOURCE, SOURCE_TREE, env, fresh=True)
         event = tmp / "synthetic-push.json"
-        event.write_text(json.dumps({"ref": "refs/heads/main", "after": head, "deleted": False,
+        event.write_text(json.dumps({"ref": "refs/heads/main", "after": PRODUCER, "deleted": False,
                                      "repository": {"full_name": "ArcForges/Cloud", "default_branch": "main"}}),
                          encoding="utf-8")
         number = str(10000000000000 + secrets.randbelow(89999999999999))
         env.update({"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "push", "GITHUB_REPOSITORY": "ArcForges/Cloud",
                     "GITHUB_SERVER_URL": "https://github.com", "GITHUB_REF": "refs/heads/main",
                     "GITHUB_REF_PROTECTED": "true", "GITHUB_WORKFLOW_REF": "ArcForges/Cloud/.github/workflows/ci.yml@refs/heads/main",
-                    "GITHUB_WORKFLOW_SHA": head, "GITHUB_SHA": head, "GITHUB_RUN_ID": number,
+                    "GITHUB_WORKFLOW_SHA": PRODUCER, "GITHUB_SHA": PRODUCER, "GITHUB_RUN_ID": number,
                     "GITHUB_RUN_NUMBER": number, "GITHUB_RUN_ATTEMPT": "1", "GITHUB_EVENT_PATH": str(event),
                     "RUNNER_TEMP": str(runner)})
         tag = f"arcforges-ctr06-security-bridge:ci.{number}.1"
@@ -116,7 +146,8 @@ def main() -> None:
             if actual != expected:
                 raise ValueError("synthetic image identity changed before cleanup")
             run(["docker", "image", "rm", tag], producer, env)
-        print(f"Verified synthetic native {platform} security bridge producer for source HEAD {head}.", flush=True)
+        print(f"Verified synthetic native {platform} historical security bridge producer {PRODUCER} "
+              f"for bridge source {SOURCE} while checking current HEAD {head}.", flush=True)
 
 
 if __name__ == "__main__":

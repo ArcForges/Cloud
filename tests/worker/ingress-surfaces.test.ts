@@ -143,49 +143,77 @@ test("FLAGSHIP_SURFACES enables exact generated names only", () => {
   assert.equal(centerSurfaces("identity,pages"), "identity,pages");
   assert.equal(centerSurfaces("identity,pages,operations"), "identity,pages,operations");
   assert.equal(centerSurfaces("identity,pages,fleet"), "identity,pages,fleet");
-  assert.equal(centerSurfaces("identity,pages,fleet,mobile"), "identity,pages,fleet,mobile");
+  assert.equal(centerSurfaces("identity,pages,fleet,mobile"), "none");
   assert.equal(centerSurfaces("identity,commerce"), "identity,commerce");
   assert.deepEqual(
     [...surfaceNames],
-    ["identity", "pages", "operations", "fleet", "mobile", "relay", "nodes", "commerce"],
+    ["identity", "pages", "operations", "fleet", "relay", "nodes", "commerce"],
   );
-  // FleetService's node registry, routed task methods and twelve AF-CTR-06 file/workspace methods are the nodes surface's;
-  // no other FleetService method has a row.
+  const enrollment = "/arcforges.fleet.v1.NodeEnrollmentService/";
   assert.deepEqual(
     surfaceRoutes
-      .filter((route) => route.path.startsWith("/arcforges.fleet.v1.FleetService/"))
-      .map((route) => `${route.path} ${route.surface}`),
+      .filter((route) => route.path.startsWith(enrollment))
+      .map((route) => [route.path.slice(enrollment.length), route.surface]),
     [
-      "ListNodes",
-      "GetNode",
-      "RenameNode",
-      "RevokeNode",
-      "SubmitNodeTask",
-      "GetNodeTask",
-      "ListNodeTasks",
-      "WaitNodeTask",
-      "ReadNodeTaskOutput",
-      "CancelNodeTask",
-      "ReadNodeFile",
-      "WriteNodeFile",
-      "EditNodeFile",
-      "SearchNodeFiles",
-      "ListNodeDirectory",
-      "PlanNodeRemoval",
-      "ExecuteNodeRemoval",
-      "GetNodeFileOperation",
-      "RegisterNodeWorkspace",
-      "UnregisterNodeWorkspace",
-      "ListNodeWorkspaces",
-      "GetNodeWorkspace",
-    ].map((name) => `/arcforges.fleet.v1.FleetService/${name} nodes`),
+      "BeginNodeSignIn",
+      "GetNodeSignInFlow",
+      "ApproveNodeSignIn",
+      "CompleteNodeSignIn",
+      "StartDeviceAuthorization",
+      "PollDeviceAuthorization",
+      "LookupDeviceCode",
+      "ApproveDeviceCode",
+      "RefreshNodeSession",
+      "ReportNodeInfo",
+      "SignOutNode",
+    ].map((name) => [name, "fleet"]),
   );
+  const management = surfaceRoutes.filter((route) => route.surface === "nodes");
+  assert.equal(management.length, 26);
+  for (const route of management)
+    assert.match(route.path, /^\/arcforges\.(management|sandbox)\.v2\./u);
   assert.equal(surfaceTable.size, surfaceRoutes.length);
   for (const route of surfaceRoutes) {
     assert.equal(route.instance, "hello");
     assert.equal(route.requestMeta, true);
     assert.equal(surfaceTable.get(`/api${route.path}`), route);
   }
+});
+
+test("the retired FleetService routes are rejected before forwarding or rate limiting", async () => {
+  const prefix = "/arcforges.fleet.v1.FleetService/";
+  assert(!surfaceRoutes.some((route) => route.path.startsWith(prefix)));
+  const { env, seen, keys } = bindings({ FLAGSHIP_SURFACES: "fleet,nodes" });
+  const formerlyServed = [
+    "ListNodes",
+    "GetNode",
+    "RenameNode",
+    "RevokeNode",
+    "SubmitNodeTask",
+    "GetNodeTask",
+    "ListNodeTasks",
+    "WaitNodeTask",
+    "ReadNodeTaskOutput",
+    "CancelNodeTask",
+    "ReadNodeFile",
+    "WriteNodeFile",
+    "EditNodeFile",
+    "SearchNodeFiles",
+    "ListNodeDirectory",
+    "PlanNodeRemoval",
+    "ExecuteNodeRemoval",
+    "GetNodeFileOperation",
+    "RegisterNodeWorkspace",
+    "UnregisterNodeWorkspace",
+    "ListNodeWorkspaces",
+    "GetNodeWorkspace",
+  ];
+  for (const name of formerlyServed) {
+    const response = await routeRequest(call(prefix + name), env);
+    assert.equal(response.status, 404, name);
+  }
+  assert.deepEqual(seen, []);
+  assert.deepEqual(keys, []);
 });
 
 /** The correlation id a generated reply carries in its slot, as canonical UUID text. */

@@ -9,7 +9,7 @@ using System.Text.Json;
 using ArcForges.Contracts.Hello.V1;
 using Grpc.Core;
 
-namespace ArcForges.Cloud.Tools.Generation;
+namespace ArcForges.Cloud.Consumer;
 
 /// <summary>
 /// The Hello protocol probe (CLOUD.84 S33(3)(b)). It runs the assertions of the retired TypeScript verifyProtocol through the NuGet
@@ -17,12 +17,12 @@ namespace ArcForges.Cloud.Tools.Generation;
 /// below (a call invoker): request and response messages are encoded and decoded by the generated marshallers. Any failed
 /// assertion throws, so the probe exits non-zero.
 /// </summary>
-public static class HelloProbe
+internal static class HelloProbe
 {
     private const string SayHelloPath = "/arcforges.hello.v1.HelloService/SayHello";
     private static readonly TimeSpan Budget = TimeSpan.FromSeconds(20);
 
-    public static async Task<string> RunAsync(string baseUrl, bool worker, CancellationToken cancellation)
+    public static async Task<string> RunAsync(string baseUrl, bool worker, string publishedClient, CancellationToken cancellation)
     {
         using var http = new HttpClient(new SocketsHttpHandler
         {
@@ -98,8 +98,6 @@ public static class HelloProbe
             }
         }
 
-        var identity = JsonDocument.Parse(ContractsIdentity.Read(typeof(ArcForges.Cloud.HelloEndpoint).Assembly));
-        var publishedClient = identity.RootElement.GetProperty("version").GetString();
         return JsonSerializer.Serialize(new
         {
             transport = "binary gRPC-Web",

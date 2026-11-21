@@ -7,10 +7,12 @@ namespace ArcForges.Cloud.Tests;
 
 public sealed class BuildIdentityTests
 {
+    private const string CatalogPath = "eng/version-sources-legacy.json";
+
     private static string Root()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (!File.Exists(Path.Combine(current.FullName, "eng/version-sources.json"))) current = current.Parent!;
+        while (!File.Exists(Path.Combine(current.FullName, CatalogPath))) current = current.Parent!;
         return current.FullName;
     }
 
@@ -18,7 +20,7 @@ public sealed class BuildIdentityTests
     public void NineRealSourceKindsAreIndependentAndDeterministic()
     {
         // Mechanism fixture: these declarations do not claim production format/storage support.
-        var catalog = JsonNode.Parse(File.ReadAllText(Path.Combine(Root(), "eng/version-sources.json")))!.AsObject();
+        var catalog = JsonNode.Parse(File.ReadAllText(Path.Combine(Root(), CatalogPath)))!.AsObject();
         var sources = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var name in BuildIdentity.AxisNames)
         {
@@ -55,7 +57,7 @@ public sealed class BuildIdentityTests
     public void CurrentContractsReceiptShapeResolvesThroughTheHelloSchemaSource()
     {
         const string Hello = "public/proto/arcforges/hello/v1/hello.proto";
-        var catalog = JsonNode.Parse(File.ReadAllText(Path.Combine(Root(), "eng/version-sources.json")))!.AsObject();
+        var catalog = JsonNode.Parse(File.ReadAllText(Path.Combine(Root(), CatalogPath)))!.AsObject();
         var sources = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var name in BuildIdentity.AxisNames)
         {
@@ -105,7 +107,7 @@ public sealed class BuildIdentityTests
     [InlineData("path")]
     public void InvalidSourcesCannotProduceAReport(string mode)
     {
-        var catalog = JsonNode.Parse(File.ReadAllText(Path.Combine(Root(), "eng/version-sources.json")))!.AsObject();
+        var catalog = JsonNode.Parse(File.ReadAllText(Path.Combine(Root(), CatalogPath)))!.AsObject();
         switch (mode)
         {
             case "missing": catalog["axes"]!.AsObject().Remove("AppVersion"); break;

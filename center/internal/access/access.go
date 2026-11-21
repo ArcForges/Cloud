@@ -271,51 +271,6 @@ func Operations() []Operation {
 			Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
 		{Path: routes.NodeChannelV2Path, ID: routes.NodeChannelV2ID, Risk: "R2", Session: true, Scopes: []string{"node"}, Feature: feature.CenterNodes,
 			V2Hosted: true, Group: feature.GroupNodeConnection, Audit: AuditBeforeCall},
-		// The node registry of FleetService (AF-CTR-05 E2a; Plan CTR5-API-02..04, Q20: never gated, so a lapsed account still lists, renames
-		// and revokes its nodes). ListNodes and GetNode admit an account session, and a node credential only as the verified relay of its
-		// own node (C-N6: a bearer token alone reads nothing). RenameNode and RevokeNode are a person's device management (as
-		// DeviceService.Rename and Revoke: a mobile.limited session upgrades first, a restricted account may still use them); RevokeNode
-		// needs step-up evidence of its own class bound to the node it revokes, consumed in its receipt's transaction.
-		{Path: fleetv1connect.FleetServiceListNodesProcedure, ID: "fleet.listNodes", Risk: "R1", Session: true, RelayedScopes: []string{"node"}},
-		{Path: fleetv1connect.FleetServiceGetNodeProcedure, ID: "fleet.getNode", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceRenameNodeProcedure, ID: "fleet.renameNode", Risk: "R2", Session: true, Restricted: true, MobileLimited: Upgrade,
-			Receipt: true, Audit: AuditInTransaction, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceRevokeNodeProcedure, ID: "fleet.revokeNode", Risk: "R3", Session: true, Restricted: true, MobileLimited: Upgrade,
-			StepUp: Evidence, Target: TargetNode, Receipt: true, Audit: AuditInTransaction, Object: ObjectNode},
-		// The routed task methods (AF-CTR-05 E2b; Plan CTR5-SUR-02 as amended by PB-1, PB-2, D0-B1, C-N6; decisions section 5: Design's risk
-		// classes, Submit high, Cancel medium, the reads low). Each admits an account session and a node credential as the verified relay of
-		// its own node, addresses one of the account's live nodes, is gated by its group's key of the routed task control table (submission
-		// center.execute, status and output remote.view, control remote.control), stands behind the routed controls and is audited before
-		// the call. Submit and Cancel are a person's medium or high operations (PB-1): a mobile.limited session upgrades first, and an
-		// account session needs step-up evidence of the row's class bound to the node on every delivery (consumed in the routing record's
-		// admission); a relayed caller carries neither rule. Their routing record is their receipt (Receipt stays false: no
-		// platform.command_receipt row is written for them).
-		{Path: fleetv1connect.FleetServiceSubmitNodeTaskProcedure, ID: "fleet.submitNodeTask", Risk: "R3", Session: true, RelayedScopes: []string{"node"},
-			MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall,
-			Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceGetNodeTaskProcedure, ID: "fleet.getNodeTask", Risk: "R1", Session: true, RelayedScopes: []string{"node"},
-			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceListNodeTasksProcedure, ID: "fleet.listNodeTasks", Risk: "R1", Session: true, RelayedScopes: []string{"node"},
-			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceWaitNodeTaskProcedure, ID: "fleet.waitNodeTask", Risk: "R1", Session: true, RelayedScopes: []string{"node"},
-			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceReadNodeTaskOutputProcedure, ID: "fleet.readNodeTaskOutput", Risk: "R1", Session: true, RelayedScopes: []string{"node"},
-			Feature: feature.RemoteView, Group: feature.GroupStatusAndOutput, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceCancelNodeTaskProcedure, ID: "fleet.cancelNodeTask", Risk: "R2", Session: true, RelayedScopes: []string{"node"},
-			MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.RemoteControl, Group: feature.GroupControl, Audit: AuditBeforeCall,
-			Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceReadNodeFileProcedure, ID: "fleet.readNodeFile", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceWriteNodeFileProcedure, ID: "fleet.writeNodeFile", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceEditNodeFileProcedure, ID: "fleet.editNodeFile", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceSearchNodeFilesProcedure, ID: "fleet.searchNodeFiles", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceListNodeDirectoryProcedure, ID: "fleet.listNodeDirectory", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServicePlanNodeRemovalProcedure, ID: "fleet.planNodeRemoval", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceExecuteNodeRemovalProcedure, ID: "fleet.executeNodeRemoval", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceGetNodeFileOperationProcedure, ID: "fleet.getNodeFileOperation", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceRegisterNodeWorkspaceProcedure, ID: "fleet.registerNodeWorkspace", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceUnregisterNodeWorkspaceProcedure, ID: "fleet.unregisterNodeWorkspace", Risk: "R3", Session: true, RelayedScopes: []string{"node"}, MobileLimited: Upgrade, StepUp: Evidence, Target: TargetNode, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceListNodeWorkspacesProcedure, ID: "fleet.listNodeWorkspaces", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
-		{Path: fleetv1connect.FleetServiceGetNodeWorkspaceProcedure, ID: "fleet.getNodeWorkspace", Risk: "R1", Session: true, RelayedScopes: []string{"node"}, Feature: feature.CenterExecute, Group: feature.GroupSubmission, Audit: AuditBeforeCall, Object: ObjectNode},
 	}
 	for _, method := range slices.Concat(routes.ManagementMethods(), routes.ManagementDataMethods(), routes.ManagementWatchMethods()) {
 		row := Operation{Path: method.Path, ID: "fleet.v2." + method.ReceiptMethod(),

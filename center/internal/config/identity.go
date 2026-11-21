@@ -46,12 +46,6 @@ const SurfaceOperations Surface = "operations"
 // exist (part E3).
 const SurfaceFleet Surface = "fleet"
 
-// SurfaceMobile is the mobile native authorization (AF-CTR-04 part M; Contracts MobileNativeAuth v1): the native JSON routes
-// /session/v1/mobile/begin and /token the app calls, the /mobile/authorize pages where an account approves the app in a Custom Tab,
-// and the two apex routes /.well-known/assetlinks.json and /app/callback. It needs the identity and pages surfaces, is in the
-// self-hosted default (and off with them where the default turns identity off), and production keeps it off until AF-PROD-01.
-const SurfaceMobile Surface = "mobile"
-
 // SurfaceRelay is the node channel (AF-CTR-05 E1a; Plan CTR5-SUR-01, Q10): the WebSocket upgrade route GET /fleet/v1/node, on which a
 // signed-in node holds its one outbound connection to the center. It needs the identity and fleet surfaces (the channel is admitted on
 // the node credential enrollment issues), is in the self-hosted default, and production keeps it off until AF-PROD-01 (proof gains it
@@ -75,14 +69,14 @@ const MaxFleetPublicBaseURLLength = 512 - 50
 
 // KnownSurfaces is every surface name, in generated order.
 func KnownSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceMobile, SurfaceRelay, SurfaceNodes, SurfaceCommerce}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceOperations, SurfaceFleet, SurfaceRelay, SurfaceNodes, SurfaceCommerce}
 }
 
 // DefaultSelfHostedSurfaces are the surfaces a self-hosted center enables when the list is not stated: the account surfaces, node
-// enrollment with its pages (AF-CTR-04 E3, delivery-14), the mobile native authorization (AF-CTR-04 part M) and the node channel
+// enrollment with its pages (AF-CTR-04 E3, delivery-14) and the node channel
 // (AF-CTR-05 E1a, CTR5-SUR-01) with FleetService (AF-CTR-05 E2a), never the operations page.
 func DefaultSelfHostedSurfaces() []Surface {
-	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet, SurfaceMobile, SurfaceRelay, SurfaceNodes}
+	return []Surface{SurfaceIdentity, SurfacePages, SurfaceFleet, SurfaceRelay, SurfaceNodes}
 }
 
 // ClientIPHeader is the one header the hosted Worker sets to the client's address (from cf-connecting-ip, overwriting any client
@@ -581,18 +575,6 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 		return Identity{}, invalid("the %s surface needs a public base URL of at most %d characters: every URL it derives for a node is at most 512", SurfaceFleet,
 			MaxFleetPublicBaseURLLength)
 	}
-	if identity.Enabled(SurfaceMobile) && (!identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfacePages)) {
-		return Identity{}, invalid("the %s surface needs the %s and %s surfaces: the app is approved by an account on the pages", SurfaceMobile, SurfaceIdentity,
-			SurfacePages)
-	}
-	if identity.Enabled(SurfaceMobile) && !ValidMobileIssuer(publicBaseURL) {
-		if get(EnvSurfaces) != "" {
-			return Identity{}, invalid("the %s surface needs a public base URL that is a MobileNativeAuth issuer (https with a host of lower-case letters, "+
-				"digits, hyphens and dots, or http for a loopback host; at most %d characters): every callback names it", SurfaceMobile, MaxMobilePublicBaseURLLength)
-		}
-		// The self-hosted default never refuses to start for the mobile surface: it is left out.
-		identity.Surfaces = slices.DeleteFunc(identity.Surfaces, func(surface Surface) bool { return surface == SurfaceMobile })
-	}
 	if identity.Enabled(SurfaceRelay) && (!identity.Enabled(SurfaceIdentity) || !identity.Enabled(SurfaceFleet)) {
 		return Identity{}, invalid("the %s surface needs the %s and %s surfaces: the node channel is admitted on the node credential enrollment issues",
 			SurfaceRelay, SurfaceIdentity, SurfaceFleet)
@@ -630,9 +612,8 @@ func loadIdentity(get func(string) string, mode Mode, publicBaseURL string, now 
 }
 
 // parseSurfaces reads the surface list: exact generated names, comma-separated, without whitespace or repetition. Official-hosted
-// mode enables none unless listed; self-hosted mode enables the default surfaces (identity, pages, fleet, mobile, relay and nodes, not
-// operations; mobile only for a base URL that is an issuer; relay and nodes only with a command key, ApplyCommandKeys) unless listed,
-// so an explicit list pins the surfaces across upgrades.
+// mode enables none unless listed; self-hosted mode enables the default surfaces unless listed. Relay and nodes need a command
+// key (ApplyCommandKeys), and an explicit list pins the surfaces across upgrades.
 func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 	if value == "" {
 		if mode == SelfHosted {
@@ -645,6 +626,9 @@ func parseSurfaces(value string, mode Mode) ([]Surface, error) {
 	}
 	var surfaces []Surface
 	for item := range strings.SplitSeq(value, ",") {
+		if item == "mobile" {
+			return nil, errors.New("the mobile surface has been retired")
+		}
 		surface := Surface(item)
 		if !slices.Contains(KnownSurfaces(), surface) {
 			return nil, errors.New("not a comma-separated list of known surface names (or none)")

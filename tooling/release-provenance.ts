@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { lstatSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { lstatSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   auditProvenance,
@@ -15,7 +16,7 @@ import {
   text,
   validateRecord,
 } from "./provenance.ts";
-import { root, run, writeJson } from "./process.ts";
+import { gitEnvironment, root, run, writeJson } from "./process.ts";
 
 interface ReleaseProfile {
   schemaVersion: 1;
@@ -60,12 +61,71 @@ interface ReleaseProfile {
   image: {
     baseImage: string;
     buildImage: string;
-    toolImage?: string;
     inputs: Record<string, string>;
     baseLegal: Record<string, string>;
     legalFiles: string[];
-    executables?: string[];
+    executables: ["arcforges-center"];
   };
+}
+
+// HOST-03's reviewed release envelope, separate from the 8e5 source it attests.
+const ctr06Archive = {
+  releaseCommit: "9b8796eac760982d9814f371b820b736ddd945c4",
+  releaseTree: "2b35c50007089d6e6c51797f62437334bd2826f3",
+  profilePath: "eng/provenance/artifact-profiles/cloud-release-r149.json",
+  profileHash: "33cbcda0ad74235d9251322e0f40a913597ffd588615acfea711779cadfa07d8",
+  producerCommit: "5fcfd8e060bbea13f9c7bcc691d924beebdb0962",
+  producerTree: "e2609981bdfe278cc1d577553e4956f800fcac40",
+};
+
+function archiveGit(owner: string, args: string[], input?: string): Buffer {
+  return execFileSync("git", ["--no-replace-objects", ...args], {
+    cwd: owner,
+    env: gitEnvironment(),
+    input,
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: 30_000,
+    windowsHide: true,
+  });
+}
+
+function archiveFiles(owner: string, commit: string, names: string[]): Map<string, Buffer> {
+  const tree = archiveGit(owner, [
+    "ls-tree",
+    "-rz",
+    "--full-tree",
+    commit,
+    "--",
+    ...names.map((name) => `:(literal)${relative(name)}`),
+  ]);
+  const entries = tree.toString("utf8").split("\0").slice(0, -1);
+  const files = new Map<string, string>();
+  for (const entry of entries) {
+    const [, oid, name] = /^100(?:644|755) blob ([a-f0-9]{40})\t(.+)$/u.exec(entry) ?? [];
+    assert(oid && name && names.includes(name) && !files.has(name), "Unexpected archived file");
+    files.set(name, oid);
+  }
+  assert.equal(files.size, names.length, "Missing archived file");
+  const contents = archiveGit(owner, ["cat-file", "--batch"], [...files.values()].join("\n") + "\n");
+  const blobs = new Map<string, Buffer>();
+  let offset = 0;
+  for (const [name, oid] of files) {
+    const lineEnd = contents.indexOf(10, offset);
+    assert(lineEnd >= offset, "Missing archived object header");
+    const [actual, type, length, extra] = contents.toString("ascii", offset, lineEnd).split(" ");
+    assert.equal(actual, oid, "Unexpected archived object");
+    assert(
+      type === "blob" && length && /^[0-9]+$/u.test(length) && extra === undefined,
+      "Invalid archived object",
+    );
+    const start = lineEnd + 1;
+    const end = start + Number(length);
+    assert(end < contents.length && contents[end] === 10, "Invalid archived object length");
+    blobs.set(name, contents.subarray(start, end));
+    offset = end + 1;
+  }
+  assert.equal(offset, contents.length, "Unexpected trailing archived object");
+  return blobs;
 }
 function list(value: unknown): string[] {
   assert(Array.isArray(value) && value.length > 0, "Expected nonempty list");
@@ -95,10 +155,7 @@ export function releaseProfile(owner: string) {
     const kind = text(target.kind);
     kinds.push(kind);
     const worker = kind === "worker-bundle";
-    assert.equal(
-      target.project,
-      worker ? "package.json" : "src/ArcForges.Cloud/ArcForges.Cloud.csproj",
-    );
+    assert.equal(target.project, worker ? "package.json" : "center/go.mod");
     assert.equal(target.package, worker ? "arcforges-cloud-worker" : "arcforges-cloud-container");
     const currentPath = relative(target.profile);
     const currentHash = digest(target.sha256);
@@ -114,7 +171,6 @@ export function releaseProfile(owner: string) {
     "schemaVersion id ownerCommit worker image bridgeAssets securityBridge",
   );
   assert.equal(p.schemaVersion, 1);
-  verifySecurityBridgeProfile(owner, p.securityBridge);
   assert.match(text(p.id), /^cloud-release-r[1-9][0-9]*$/u);
   digest(p.ownerCommit, 40);
   const worker = object(
@@ -123,14 +179,8 @@ export function releaseProfile(owner: string) {
   );
   digest(worker.sha256);
   const image = object(p.image);
-  object(
-    image,
-    "baseImage buildImage inputs baseLegal legalFiles" +
-      (image.toolImage === undefined ? "" : " toolImage") +
-      (image.executables === undefined ? "" : " executables"),
-  );
-  if (image.executables !== undefined)
-    assert.deepEqual(list(image.executables).sort(), ["ArcForges.Cloud", "arcforges-center"]);
+  object(image, "baseImage buildImage inputs baseLegal legalFiles executables");
+  assert.deepEqual(list(image.executables), ["arcforges-center"]);
   for (const inputs of [object(worker.inputs), object(image.inputs)]) {
     assert(Object.keys(inputs).length > 0, "Empty source closure");
     for (const [name, expected] of Object.entries(inputs))
@@ -140,8 +190,52 @@ export function releaseProfile(owner: string) {
         `Changed build input: ${name}`,
       );
   }
+  const archived = verifyArchivedBridgeProfile(owner);
+  assert.deepEqual(p.bridgeAssets, archived.bridgeAssets, "Changed archived bridge asset profile");
+  assert.deepEqual(
+    p.securityBridge,
+    archived.securityBridge,
+    "Changed archived security bridge profile",
+  );
+  for (const field of [worker.outputInputs, worker.legalFiles, image.legalFiles])
+    list(field).forEach(relative);
+  list(worker.externalImports);
+  list(worker.exports);
+  const lock = object(read(owner, "package-lock.json").packages);
+  for (const [name, value] of Object.entries(object(worker.packages))) {
+    const expected = object(value, "version integrity");
+    const installed = read(owner, `node_modules/${relative(name)}/package.json`);
+    const locked = object(lock[`node_modules/${name}`]);
+    assert.equal(installed.version, text(expected.version), `Changed installed generator: ${name}`);
+    assert.equal(locked.version, expected.version);
+    assert.equal(locked.integrity, text(expected.integrity), `Changed package integrity: ${name}`);
+  }
+  const from = normalized(owner, "Dockerfile")
+    .split("\n")
+    .filter((line) => line.startsWith("FROM "));
+  assert.deepEqual(
+    from,
+    [
+      `FROM ${text(image.buildImage)} AS build`,
+      `FROM ${text(image.baseImage)}`,
+    ],
+    "Changed image producer/base",
+  );
+  for (const [name, expected] of Object.entries(object(image.baseLegal))) {
+    assert(
+      name.startsWith("/usr/share/doc/") && name.endsWith("/copyright"),
+      "Unexpected base legal path",
+    );
+    relative(name.slice(1));
+    digest(expected);
+  }
+  const profile = p as unknown as ReleaseProfile;
+  return { profile, profilePath, profileHash, artifacts: artifacts.sort() };
+}
+
+function verifyBridgeAssetInputs(value: unknown, readInput: (name: string) => Buffer): void {
   const bridge = object(
-    p.bridgeAssets,
+    value,
     "sourceCommit sourceTree sourceArchiveSha256 contractsGo carrierSha256 ociManifestDigest inputs assets",
   );
   assert.equal(bridge.sourceCommit, "8e5f6e26aa97b123d9f60b91f780364a094e74cd");
@@ -167,7 +261,7 @@ export function releaseProfile(owner: string) {
   );
   for (const [name, expected] of Object.entries(bridgeInputs))
     assert.equal(
-      hash(readOwned(owner, relative(name)), "lf"),
+      hash(readInput(relative(name)), "lf"),
       digest(expected),
       `Changed bridge asset input: ${name}`,
     );
@@ -182,45 +276,9 @@ export function releaseProfile(owner: string) {
       platform === "linux" ? "released-615.1-oci" : "native-8e5-source-build",
     );
   }
-  for (const field of [worker.outputInputs, worker.legalFiles, image.legalFiles])
-    list(field).forEach(relative);
-  list(worker.externalImports);
-  list(worker.exports);
-  const lock = object(read(owner, "package-lock.json").packages);
-  for (const [name, value] of Object.entries(object(worker.packages))) {
-    const expected = object(value, "version integrity");
-    const installed = read(owner, `node_modules/${relative(name)}/package.json`);
-    const locked = object(lock[`node_modules/${name}`]);
-    assert.equal(installed.version, text(expected.version), `Changed installed generator: ${name}`);
-    assert.equal(locked.version, expected.version);
-    assert.equal(locked.integrity, text(expected.integrity), `Changed package integrity: ${name}`);
-  }
-  const from = normalized(owner, "Dockerfile")
-    .split("\n")
-    .filter((line) => line.startsWith("FROM "));
-  assert.deepEqual(
-    from,
-    [
-      ...(image.toolImage === undefined ? [] : [`FROM ${text(image.toolImage)} AS native-tools`]),
-      `FROM ${text(image.buildImage)} AS build`,
-      `FROM ${text(image.baseImage)}`,
-    ],
-    "Changed image producer/base",
-  );
-  for (const [name, expected] of Object.entries(object(image.baseLegal))) {
-    assert(
-      name.startsWith("/usr/share/doc/") && name.endsWith("/copyright"),
-      "Unexpected base legal path",
-    );
-    relative(name.slice(1));
-    digest(expected);
-  }
-  const profile = p as unknown as ReleaseProfile;
-  return { profile, profilePath, profileHash, artifacts: artifacts.sort() };
 }
 
-/** Admission of the new bootstrap producer inputs; no released successor digest is claimed. */
-export function verifySecurityBridgeProfile(owner: string, value: unknown): void {
+function verifySecurityBridgeInputs(value: unknown, readInput: (name: string) => Buffer): void {
   const security = object(
     value,
     "sourceCommit sourceTree sourceArchiveSha256 compiler linuxArchiveSha256 windowsArchiveSha256 producerInputs",
@@ -286,17 +344,82 @@ export function verifySecurityBridgeProfile(owner: string, value: unknown): void
   );
   for (const [name, expectedHash] of Object.entries(inputs))
     assert.equal(
-      hash(readOwned(owner, relative(name)), "lf"),
+      hash(readInput(relative(name)), "lf"),
       digest(expectedHash),
       `Changed security bridge input: ${name}`,
     );
 }
 
-/** Compare a real release asset with the same active profile as the image and Worker. */
+/** Validate the frozen CTR06 bridges against the independently reviewed producer commit. */
+export function verifyArchivedBridgeProfile(owner: string) {
+  const ownerRoot = realpathSync(owner);
+  const reportedRoot = archiveGit(ownerRoot, ["rev-parse", "--show-toplevel"])
+    .toString("utf8")
+    .trim();
+  assert.equal(
+    path.relative(ownerRoot, realpathSync(reportedRoot)),
+    "",
+    "Expected Cloud repository root",
+  );
+  const { releaseCommit, releaseTree, profilePath, profileHash, producerCommit, producerTree } =
+    ctr06Archive;
+  for (const [commit, tree] of [
+    [releaseCommit, releaseTree],
+    [producerCommit, producerTree],
+  ] as const) {
+    assert.equal(
+      archiveGit(ownerRoot, ["rev-parse", "--verify", `${commit}^{tree}`]).toString("ascii").trim(),
+      tree,
+      "Archived Cloud tree differs",
+    );
+  }
+  const bytes = archiveFiles(ownerRoot, releaseCommit, [profilePath]).get(profilePath);
+  assert(bytes && hash(bytes) === profileHash, "Archived Cloud release profile differs");
+  const archived = object(parseDocument(bytes));
+  assert.equal(archived.schemaVersion, 1);
+  assert.equal(archived.id, "cloud-release-r149");
+  assert.equal(archived.ownerCommit, producerCommit);
+  const bridges = object(archived.bridgeAssets);
+  const security = object(archived.securityBridge);
+  const names = [
+    ...new Set([
+      ...Object.keys(object(bridges.inputs)),
+      ...Object.keys(object(security.producerInputs)),
+    ]),
+  ];
+  const archivedInputs = archiveFiles(ownerRoot, producerCommit, names);
+  const readInput = (name: string) => {
+    const bytes = archivedInputs.get(name);
+    assert(bytes, "Missing archived bridge input");
+    return bytes;
+  };
+  verifyBridgeAssetInputs(bridges, readInput);
+  verifySecurityBridgeInputs(security, readInput);
+  return {
+    bridgeAssets: bridges as unknown as ReleaseProfile["bridgeAssets"],
+    securityBridge: security as unknown as ReleaseProfile["securityBridge"],
+    profileHash,
+  };
+}
+
+/** Verify the supplied profile is the approved frozen producer envelope. */
+export function verifySecurityBridgeProfile(owner: string, value: unknown): void {
+  const { securityBridge } = verifyArchivedBridgeProfile(owner);
+  assert.deepEqual(value, securityBridge, "Changed archived security bridge profile");
+}
+
+/** Require exact reviewed live bytes before actually running the frozen producer. */
+export function verifySecurityBridgeProducer(owner: string): void {
+  const { securityBridge } = verifyArchivedBridgeProfile(owner);
+  verifySecurityBridgeInputs(securityBridge, (name) => readOwned(owner, name));
+}
+
+/** Compare an existing release asset with the frozen envelope. */
 export function verifyBridgeAsset(owner: string, platform: "linux" | "windows", bundle: Buffer) {
-  const { profile, profileHash } = releaseProfile(owner);
-  const asset = profile.bridgeAssets.assets[platform];
-  assert.equal(hash(bundle), asset.sha256, "Bridge asset differs from the active release profile");
+  assert(platform === "linux" || platform === "windows", "Unclassified bridge asset platform");
+  const { bridgeAssets, profileHash } = verifyArchivedBridgeProfile(owner);
+  const asset = bridgeAssets.assets[platform];
+  assert.equal(hash(bundle), asset.sha256, "Bridge asset differs from the archived release profile");
   return { platform, name: asset.name, sha256: asset.sha256, profileHash };
 }
 
@@ -422,7 +545,7 @@ export function stageImageNotices(owner: string, revision: string) {
 export function verifyImageFiles(owner: string, revision: string, directory: string) {
   const { profile } = releaseProfile(owner);
   const expected = [
-    ...(profile.image.executables ?? ["ArcForges.Cloud"]),
+    ...profile.image.executables,
     "LICENSE",
     "notices/provenance.json",
     ...profile.image.legalFiles.map((name) => `notices/${name}`),
@@ -442,7 +565,7 @@ export function verifyImageFiles(owner: string, revision: string, directory: str
   for (const name of expected) members[name] = hash(readOwned(directory, name));
   for (const [name, expectedHash] of Object.entries(receipt.legal))
     assert.equal(members[`notices/${name}`], expectedHash, `Changed image legal text: ${name}`);
-  for (const executable of profile.image.executables ?? ["ArcForges.Cloud"]) {
+  for (const executable of profile.image.executables) {
     assert(
       readOwned(directory, executable)
         .subarray(0, 4)

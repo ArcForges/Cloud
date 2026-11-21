@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The sealed tool of the candidate (CLOUD.84 S33(3)(b), S38(2), S41(1)). The candidate job publishes tools/ArcForges.Cloud.Generation
-// once, self-contained for linux-x64 and NOT single-file, so that no ILLink pack is restored and the committed tool lock stays byte-identical
-// under the locked CI restore. It archives the publish output in a fixed order with fixed metadata as one candidate member and seals the
-// member's SHA-256 in the candidate manifest. The Hello probe (`probe`, tooling/protocol.ts) and the D1 migrator (`migrate`,
-// eng/migrations/shim.ts) both run that one sealed binary. A runner checks the digest against the manifest before it extracts and runs it.
+// The schema-1 sealed tool of the historical D1 candidate. Current Go candidates have no tool archive.
 //
 // This module imports only Node built-ins, so the deploy-time shim can load it without the rest of the tooling.
 import { spawnSync } from "node:child_process";
@@ -23,7 +19,9 @@ export function candidateManifestPath(root: string): string {
 
 /** The SHA-256 of the sealed archive, which must equal the digest that the candidate manifest records for it. */
 export function verifySealedTool(archive: Uint8Array, manifestText: string): void {
-  const manifest = JSON.parse(manifestText) as { files?: Record<string, string> };
+  const manifest = JSON.parse(manifestText) as { schema?: number; files?: Record<string, string> };
+  if (manifest.schema !== 1)
+    throw new Error("the sealed tool requires a historical schema-1 candidate");
   const expected = manifest.files?.[sealedToolName];
   const actual = createHash("sha256").update(archive).digest("hex");
   if (expected === undefined || expected !== actual)

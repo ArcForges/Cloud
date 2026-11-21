@@ -7,7 +7,12 @@ import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { candidateDir, readJson, root, run, wrangler, writeJson } from "./process.ts";
-import { verifyCandidate, type Candidate, type WorkerConfig } from "./project.ts";
+import {
+  assertNoD1Binding,
+  verifyCandidate,
+  type Candidate,
+  type WorkerConfig,
+} from "./project.ts";
 import { proofProcessEnvironment, runSensitive } from "./sensitive-process.ts";
 import { runProbe, waitForHealth } from "./protocol.ts";
 import { neonRuntimeSecret, withNeonRuntimeSecret } from "./neon-runtime.ts";
@@ -21,6 +26,7 @@ import {
   readGate,
   readLiveSlots,
   slotLabel,
+  sourceMigrationVersion,
   type GateRecord,
   withRuntimeCredential,
 } from "./postgres-deploy.ts";
@@ -41,7 +47,7 @@ const deploymentFile = path.join(root, "artifacts", "deployment.json");
 type D1Gate = { target?: string; revision?: string; status?: string };
 type DeploymentWorkerConfig = WorkerConfig & { vars: { ARCFORGES_CENTER_MODE?: string } };
 
-// CLOUD.84 U10: the sealed C# migrator makes the decision. Promotion checks its exact target and commit.
+// The current sealed Go configuration has no D1 binding. Promotion checks the exact gate target and commit.
 function checkD1Gate(
   record: D1Gate | undefined,
   target: "production" | "proof",
@@ -50,8 +56,7 @@ function checkD1Gate(
   assert(record, "the migration step did not run; nothing is promoted");
   assert.equal(record.target, target, "the gate record is for another target");
   assert.equal(record.revision, revision, "the gate record is for another revision");
-  if (record.status !== "passed" && record.status !== "not-applicable")
-    throw new Error("the migration step did not pass; nothing is promoted");
+  assert.equal(record.status, "not-applicable", "the current candidate has no D1 absence receipt");
 }
 
 function requireGatePassed(target: "production" | "proof", revision: string): void {
@@ -67,6 +72,7 @@ function requireGatePassed(target: "production" | "proof", revision: string): vo
 }
 
 function requireFlagshipConfig(config: DeploymentWorkerConfig): void {
+  assertNoD1Binding(config);
   assert.equal(
     config.vars.ARCFORGES_HELLO_RUNTIME,
     "go",
@@ -79,21 +85,6 @@ function requireFlagshipConfig(config: DeploymentWorkerConfig): void {
   );
   assert.equal(config.workers_dev, false, "Official delivery requires workers.dev disabled.");
   assert.equal(config.preview_urls, false, "Official delivery requires preview URLs disabled.");
-}
-
-async function sourceMigrationVersion(): Promise<number> {
-  const entries = (await readdir(path.join(root, "center", "internal", "schema", "migrations")))
-    .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/u.test(name))
-    .sort();
-  assert(entries.length > 0, "The candidate's PostgreSQL migration inventory is empty.");
-  for (const [index, name] of entries.entries()) {
-    assert.equal(
-      Number(name.slice(0, 4)),
-      index + 1,
-      "The candidate's migration history is not contiguous.",
-    );
-  }
-  return entries.length;
 }
 
 export interface DeploymentFixture {
@@ -379,8 +370,7 @@ async function deploy() {
   );
   const runtimeSecret = neonRuntimeSecret(config.vars.ARCFORGES_NEON_HELLO, process.env);
   await requireCurrentMain(candidate.revision);
-  // CLOUD.70: nothing is pushed or promoted unless the gated D1 migration step passed for this very candidate
-  // (a failing or missing step stops promotion; the workflow step before this one writes the record).
+  // Require the D1 absence receipt for the exact sealed candidate before changing PostgreSQL or promoting.
   requireGatePassed("production", candidate.revision);
   // AF-CTR-02: and the PostgreSQL step migrated the production database for this very candidate.
   const runtimeRole = promotionRuntimeRole(

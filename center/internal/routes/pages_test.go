@@ -127,9 +127,8 @@ func TestThePageRoutesAreThePipelinesPlainPathsAndNotTheWorkersOwnRows(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The mobile surface's native JSON and apex routes are tables of their own (AF-CTR-04 part M); every other route is a page row.
-	if len(table.Pages)+len(table.Native)+len(table.Apex) != len(AllPageRoutes())+1 || len(table.Native) != 2 || len(table.Apex) != 2 {
-		t.Fatalf("the Worker table holds %d page, %d native and %d apex routes", len(table.Pages), len(table.Native), len(table.Apex))
+	if len(table.Pages) != len(AllPageRoutes())+1 {
+		t.Fatalf("the Worker table holds %d page routes", len(table.Pages))
 	}
 	portal := table.Pages[len(table.Pages)-1]
 	if portal.Path != "/account/billing/v1/portal" || portal.Method != "POST" || portal.Surface != "commerce" ||
@@ -155,6 +154,39 @@ func TestThePageRoutesAreThePipelinesPlainPathsAndNotTheWorkersOwnRows(t *testin
 	for _, row := range table.SurfaceRows {
 		if row.Surface != SurfaceIdentity && row.Surface != SurfaceFleet && row.Surface != SurfaceNodes && row.Surface != SurfaceCommerce {
 			t.Errorf("an RPC row of the surface %s", row.Surface)
+		}
+	}
+}
+
+func TestRetiredMobilePathsHaveNoCenterRegistration(t *testing.T) {
+	modules, err := Center()
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := Ingress(modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, err := Table(modules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/mobile/authorize", "/mobile/authorize/review", "/mobile/authorize/decision",
+		"/session/v1/mobile/begin", "/session/v1/mobile/token", "/.well-known/assetlinks.json", "/app/callback",
+	} {
+		if registry.IsPlain(path) {
+			t.Errorf("the Center registers retired path %s", path)
+		}
+		for _, row := range table.Pages {
+			if row.Path == path {
+				t.Errorf("the Worker still routes retired path %s", path)
+			}
+		}
+	}
+	for _, path := range []string{"/account/recovery", "/session/v1/web/bootstrap", "/connect", "/activate"} {
+		if !registry.IsPlain(path) {
+			t.Errorf("the Center no longer registers active path %s", path)
 		}
 	}
 }
@@ -208,7 +240,7 @@ func TestTheOperationsRoutesAreTheirOwnSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,mobile,relay,nodes,commerce" {
+	if surfaces := Surfaces(modules); strings.Join(surfaces, ",") != "identity,pages,operations,fleet,relay,nodes,commerce" {
 		t.Fatalf("the surfaces %v", surfaces)
 	}
 	crossed := append([]Module(nil), modules...)
@@ -235,7 +267,7 @@ func TestTheFleetPagesAreTheirOwnSurface(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("the fleet routes:\n%s", strings.Join(got, "\n"))
 	}
-	if strings.Join(PageSurfaces(), ",") != "pages,operations,fleet,mobile,commerce" {
+	if strings.Join(PageSurfaces(), ",") != "pages,operations,fleet,commerce" {
 		t.Fatalf("the page surfaces %v", PageSurfaces())
 	}
 	for name, mutate := range map[string]func([]PageRoute) []PageRoute{

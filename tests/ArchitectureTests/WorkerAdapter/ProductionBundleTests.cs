@@ -61,8 +61,8 @@ public sealed class ProductionBundleTests
             // The production exports are the Container class, the Container proxy and the fetch entry. No proof class is exported.
             var exports = Regex.Match(bundle, @"export\s*\{(?<names>[^}]*)\}").Groups["names"].Value;
             Assert.Equal(["CloudContainer", "ContainerProxy", "index_default as default"], exports.Split(',').Select(name => name.Trim()).Where(name => name.Length > 0).Order().ToArray());
-            // The one outbound host of the production class is ai.internal; no proof host is registered.
-            Assert.Contains("\"ai.internal\"", bundle, StringComparison.Ordinal);
+            // The Go production Container has no legacy Workers AI adapter.
+            Assert.DoesNotContain("\"ai.internal\"", bundle, StringComparison.Ordinal);
         }
         finally
         {
