@@ -1,8 +1,8 @@
 # Contributing
 
-Use an isolated branch/worktree and describe the intended behavior and acceptance checks before changing code. Keep changes scoped to Cloud. Follow [validation policy](docs/validation-policy.md) and [development](docs/development.md).
+Use an isolated branch and worktree. Describe the intended behavior and acceptance checks before changing code, and keep changes scoped to Cloud. [Validation policy](docs/validation-policy.md) · [Development](docs/development.md)
 
-Use the existing pinned toolchains for relevant checks:
+Use the existing pinned toolchains and run the checks relevant to the change.
 
 ```sh
 npm ci --ignore-scripts
@@ -10,16 +10,13 @@ dotnet restore Cloud.slnx --locked-mode
 npm run check
 npm run check:dotnet
 python eng/center.py check
-npm run candidate
 ```
 
 The Go center (`center/`) uses the Go release pinned in `center/toolchain.json` with `GOTOOLCHAIN=local` and read-only modules.
-Linux race/cgo and the image's Native AOT compilation select LLVM and GNU tools from `eng/native-toolchain.json`.
-Provision the separate tools once with `python eng/native_toolchain.py install`; normal checks verify the existing
-installation and never install it implicitly. `ARCFORGES_TOOLCHAIN_ROOT` may name an existing private tool root.
-The image builds the same selected tools in a pinned Python stage and copies only their verified installed prefixes
-into the SDK stage. Original GNU source, generated context patch and full legal terms remain in the tool cache;
-the final product image copies only the two owned executables and their legal bundle.
+Linux Go race/cgo checks select the verified LLVM and GNU tools in `eng/native-toolchain.json`.
+Normal checks verify the existing installation. `ARCFORGES_TOOLCHAIN_ROOT` may name its private tool root.
+The Linux candidate builds the sole application executable, `arcforges-center`, with the verified Go archive
+in the pinned Python builder. It includes the required legal bundle.
 `python eng/center.py check` runs every Go control of the host's leg: module integrity and tidiness, dependency admission
 (`center/dependencies.json`), `gofmt -s`, `go vet`, staticcheck, the tests (with the race detector on Linux), the generated
 Worker table's drift, the fuzz targets (Linux), govulncheck and a native build that is started as a self-hosted center
@@ -39,9 +36,23 @@ is installed elsewhere, set process-local `ARCFORGES_CTR06_BRIDGE_GO` to the abs
 1.27.3 executable; only the bridge check uses it and verifies its version and target. Without either variable its
 corresponding step uses PATH as before. The original bridge source, executable and sealed asset hashes remain fixed.
 
-Every pull request is verified after the push on the owner's two verification hosts, a Windows leg on native Windows and a Linux leg on native Linux, which run these checks and the candidate build and report the commit statuses `arcforges/windows` and `arcforges/linux` that `main` requires (see [AGENTS.md](AGENTS.md), Verification after the push); external pull requests also run the full hosted CI and need no local hook. Runtime commands are local opt-in only (for example `npm run test:d1:entitlement:local`, the Entitlement plans on workerd's D1). The pre-commit hook checks only the staged whitespace and the `gofmt -s` formatting of staged Go files; install it with `python eng/verify.py install`. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
+For formal PR verification, fetch the same pushed GitHub commit in an isolated worktree on each designated host.
+Run `python eng/verify.py run-and-report` in Windows PowerShell and in the native Linux host's SSH session.
+The Linux leg includes the candidate build. The verifier reports `arcforges/windows` and `arcforges/linux` on the tested commit.
+External PRs also run the required hosted checks. [Verification after the push](AGENTS.md#verification-after-the-push-ad-0020)
 
-Update central NuGet versions and regenerate the per-project locks with `dotnet restore Cloud.slnx --force-evaluate`; use `npm install --ignore-scripts` for npm lock changes. Do not hand-edit lock dependency graphs or disable locked mode. The Cloud host explicitly lists Windows/Linux x64 restore targets so its lock is portable between development and production builds.
+Install the pre-commit hook with `python eng/verify.py install` to check staged whitespace and the `gofmt -s` formatting
+of staged Go files. Use `npm run format` and `dotnet format Cloud.slnx` to format intentional changes.
+Runtime diagnostics are local opt-in. For example, `npm run test:d1:entitlement:local` runs the retained Entitlement
+plan fixture on workerd's D1.
+
+`Cloud.slnx` contains the independent published-contract Consumer and ArchitectureTests. Update their central NuGet
+versions and regenerate their project locks with `dotnet restore Cloud.slnx --force-evaluate`. Use
+`npm install --ignore-scripts` for npm lock changes. Keep locked mode and regenerate dependency graphs through the package tools.
+
+The former managed host, generator and D1 tools remain at Cloud commit
+`9b8796eac760982d9814f371b820b736ddd945c4`. Use `npm run check:legacy-cloud-history` to verify the archive and retained
+inputs. Dated evidence continues to describe the revision and scope that produced it. [D1 migration history](docs/d1-physical-schema.md#migrations)
 
 Write meaningful tests for protocol, failure or security behavior changed. Local mocks are unit evidence only. A dependency PR must pass relevant locked compilation and packaging checks; local runtime testing is scoped to the changed behavior.
 
