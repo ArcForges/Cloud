@@ -46,6 +46,50 @@ func TestContractionFreshRuntimeUsesTheContractedReader(t *testing.T) {
 	}
 }
 
+func TestContractionRuntimeReaderRefusesCopiedDatabaseAuthority(t *testing.T) {
+	ctx := t.Context()
+	url, name := pgtest.Database(t)
+	owner := pgtest.Connect(t, url)
+	group := name + "_runtime"
+	build := centerBuild(t)
+	if _, err := Apply(ctx, owner, build, Options{Runner: "isolated-contracted-copy", RuntimeRole: group}); err != nil {
+		t.Fatal(err)
+	}
+	_, runtime := managementRuntime(t, owner, url, group)
+	assertContractedReader(t, ctx, runtime, build)
+	ownerName := owner.Config().User
+	cloneConfig := runtime.Config()
+	cloneConfig.Database = name + "_copied"
+	if err := runtime.Close(ctx); err != nil {
+		t.Fatal(store.Sanitize("close the original runtime fixture", err))
+	}
+	if err := owner.Close(ctx); err != nil {
+		t.Fatal(store.Sanitize("close the original owner fixture", err))
+	}
+	admin := pgtest.Admin(t)
+	clone := pgx.Identifier{cloneConfig.Database}.Sanitize()
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+clone+" TEMPLATE "+pgx.Identifier{name}.Sanitize()+
+		" OWNER "+pgx.Identifier{ownerName}.Sanitize()); err != nil {
+		t.Fatal(store.Sanitize("copy the isolated database as a template", err))
+	}
+	t.Cleanup(func() { pgtest.Drop(t, cloneConfig.Database) })
+	if _, err := admin.Exec(ctx, "GRANT CONNECT ON DATABASE "+clone+" TO "+pgx.Identifier{group}.Sanitize()); err != nil {
+		t.Fatal(store.Sanitize("make the copied runtime connection possible", err))
+	}
+	copiedRuntime, err := pgx.ConnectConfig(ctx, cloneConfig)
+	if err != nil {
+		t.Fatal(store.Sanitize("connect to the isolated copy with the original fixture login", err))
+	}
+	defer copiedRuntime.Close(context.Background())
+	var count int
+	if err := copiedRuntime.QueryRow(ctx, "SELECT count(*) FROM platform.runtime_schema_history").Scan(&count); err != nil || count != 0 {
+		t.Fatal("unadmitted copied database exposed migration history as current")
+	}
+	if _, err := CheckCompatible(ctx, copiedRuntime, build); !errors.Is(err, ErrIncompatible) {
+		t.Fatalf("runtime accepted a checkpoint belonging to the original database: %v", err)
+	}
+}
+
 func TestContractionFromSchema10And11RetainsOriginalIdentitiesAndRestores(t *testing.T) {
 	for _, version := range []int{10, 11} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
@@ -156,6 +200,8 @@ func TestContractionFromSchema10And11RetainsOriginalIdentitiesAndRestores(t *tes
 			if err != nil || status.State != StateCurrent || status.RestoreReceipt != restored.RestoreReceipt {
 				t.Fatalf("restored contracted admission is incomplete: %v", err)
 			}
+			_, restoredRuntime := managementRuntime(t, target, destination.URL, destination.RuntimeRole)
+			assertContractedReader(t, ctx, restoredRuntime, build)
 		})
 	}
 }
@@ -252,29 +298,52 @@ func TestContractionSQLFaultKeepsRollbackCheckpoint(t *testing.T) {
 }
 
 func TestContractionRefusesForeignRetiredRelationReader(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	url, name := pgtest.Database(t)
-	owner := pgtest.Connect(t, url)
-	group := name + "_runtime"
-	build := centerBuild(t)
-	options := Options{Runner: "isolated-foreign-reader-contraction", RuntimeRole: group}
-	if _, err := Apply(ctx, owner, build[:schema.ContractionVersion-1], options); err != nil {
-		t.Fatal(err)
+	for _, mode := range []string{"column-grant", "set-role"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			url, name := pgtest.Database(t)
+			owner := pgtest.Connect(t, url)
+			group := name + "_runtime"
+			build := centerBuild(t)
+			options := Options{Runner: "isolated-foreign-reader-contraction", RuntimeRole: group}
+			if _, err := Apply(ctx, owner, build[:schema.ContractionVersion-1], options); err != nil {
+				t.Fatal(err)
+			}
+			roleName := name + "_retired_reader"
+			role := pgx.Identifier{roleName}.Sanitize()
+			admin := pgtest.Admin(t)
+			if _, err := admin.Exec(ctx, "CREATE ROLE "+role+" NOLOGIN"); err != nil {
+				t.Fatal(store.Sanitize("create isolated foreign reader", err))
+			}
+			if _, err := owner.Exec(ctx, "GRANT CONNECT ON DATABASE "+pgx.Identifier{name}.Sanitize()+" TO "+role); err != nil {
+				t.Fatal(store.Sanitize("give the fixture reader access to its database", err))
+			}
+			if mode == "column-grant" {
+				if _, err := owner.Exec(ctx, "GRANT USAGE ON SCHEMA fleet TO "+role+
+					"; GRANT SELECT (command_id) ON fleet.routed_call TO "+role); err != nil {
+					t.Fatal(store.Sanitize("set up isolated foreign column reader", err))
+				}
+			} else {
+				if _, err := admin.Exec(ctx, "GRANT pg_read_all_data TO "+role+" WITH INHERIT FALSE, SET TRUE"); err != nil {
+					t.Fatal(store.Sanitize("set up isolated assumable reader", err))
+				}
+				var inherited, canAssume bool
+				if err := owner.QueryRow(ctx, "SELECT has_table_privilege($1,'fleet.routed_call','SELECT'), pg_has_role($1,'pg_read_all_data','SET')",
+					roleName).Scan(&inherited, &canAssume); err != nil || inherited || !canAssume {
+					t.Fatal("assumable reader must gain access only through SET ROLE")
+				}
+			}
+			before := contractionHistory(t, ctx, owner)
+			witness := contractionRestoreDestination(t, url, name, "_witness")
+			archive, metadata := contractionBackupPaths(t)
+			_, err := ApplyContraction(ctx, owner, build, options, managementConfig(url, name, group), witness, archive, metadata)
+			if !errors.Is(err, ErrContractionRequired) {
+				t.Fatalf("contraction did not refuse the foreign legacy relation reader: %v", err)
+			}
+			assertContractionCheckpoint(t, ctx, owner, before, group)
+		})
 	}
-	role := pgx.Identifier{name + "_retired_reader"}.Sanitize()
-	if _, err := owner.Exec(ctx, "CREATE ROLE "+role+" NOLOGIN; GRANT USAGE ON SCHEMA fleet TO "+role+
-		"; GRANT SELECT (command_id) ON fleet.routed_call TO "+role); err != nil {
-		t.Fatal(store.Sanitize("set up isolated foreign reader", err))
-	}
-	before := contractionHistory(t, ctx, owner)
-	witness := contractionRestoreDestination(t, url, name, "_witness")
-	archive, metadata := contractionBackupPaths(t)
-	_, err := ApplyContraction(ctx, owner, build, options, managementConfig(url, name, group), witness, archive, metadata)
-	if !errors.Is(err, ErrContractionRequired) {
-		t.Fatalf("contraction did not refuse the foreign legacy relation reader: %v", err)
-	}
-	assertContractionCheckpoint(t, ctx, owner, before, group)
 }
 
 func insertContractionTask(t *testing.T, ctx context.Context, conn *pgx.Conn, fixture namespaceFixture, command platform.ID, state int16) {

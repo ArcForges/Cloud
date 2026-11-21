@@ -29,10 +29,7 @@ func isContraction(migration Migration) bool {
 
 func requireContractionReady(ctx context.Context, q Querier) error {
 	var ready bool
-	err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM management.cutover_receipt c,pg_database d
- WHERE d.datname=current_database() AND c.phase=4 AND c.target_schema=$1
- AND c.database_identity_sha256=sha256(convert_to((SELECT system_identifier::text FROM pg_control_system())||':'||d.oid||':'||d.datdba,'UTF8')))`,
-		schema.ContractionVersion).Scan(&ready)
+	err := q.QueryRow(ctx, "SELECT platform.runtime_contraction_ready()").Scan(&ready)
 	if err != nil || !ready {
 		return ErrContractionRequired
 	}
@@ -168,16 +165,23 @@ func guardContraction(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, options Op
 
 func refuseRetiredReaders(ctx context.Context, q Querier, predecessor string) error {
 	var accessible bool
-	err := q.QueryRow(ctx, `WITH retired AS (
+	err := q.QueryRow(ctx, `WITH RECURSIVE retired AS (
  SELECT c.oid, c.relowner, c.relacl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
  WHERE (n.nspname,c.relname) IN (('fleet','routed_call'),('fleet','routed_file_call'),
- ('fleet','routed_file_target'),('fleet','routed_command_id'),('fleet','refusal_code'),('identity','mobile_authorization')))
+ ('fleet','routed_file_target'),('fleet','routed_command_id'),('fleet','refusal_code'),('identity','mobile_authorization'))
+), reach(actor, effective) AS (
+ SELECT oid,oid FROM pg_roles
+ UNION
+ SELECT reach.actor,m.roleid FROM reach JOIN pg_auth_members m ON m.member=reach.effective WHERE m.set_option
+)
  SELECT EXISTS(SELECT 1 FROM retired c,LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
   WHERE a.grantee=0 AND a.privilege_type='SELECT')
- OR EXISTS(SELECT 1 FROM retired c CROSS JOIN pg_roles r
+ OR EXISTS(SELECT 1 FROM retired c CROSS JOIN reach JOIN pg_roles r ON r.oid=reach.actor
   WHERE r.oid<>c.relowner AND NOT r.rolsuper AND r.rolname !~ '^pg_'
     AND ($1::text='' OR r.rolname NOT IN ($1::text,$1::text||'_a',$1::text||'_b'))
-    AND (has_table_privilege(r.oid,c.oid,'SELECT') OR has_any_column_privilege(r.oid,c.oid,'SELECT')))`, predecessor).Scan(&accessible)
+    AND (has_database_privilege(r.oid,current_database(),'CONNECT') OR EXISTS(
+      SELECT 1 FROM pg_stat_activity a WHERE a.datname=current_database() AND a.usesysid=r.oid))
+    AND (has_table_privilege(reach.effective,c.oid,'SELECT') OR has_any_column_privilege(reach.effective,c.oid,'SELECT')))`, predecessor).Scan(&accessible)
 	if err != nil || accessible {
 		return ErrContractionRequired
 	}

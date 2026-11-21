@@ -10,10 +10,10 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/schema"
 )
 
-const contractionSchema17MigrationSHA = "54c8db682f4f45958cf9aa0d32ae29dab1d1833523d8dec4b89c912ab23288a9"
+const contractionSchema17MigrationSHA = "c47a969fded0473e654178eab94e9092dfe8d5319881cd05eee6bd6ddd0d0bbb"
 
-// Native PostgreSQL 18.7 produced this digest and 428 exact TOC entries.
-const contractionSchema17CatalogueSHA = "bb6bace7ba2534d2a1c7f4f3f55569f67ff08fbc6a8b739e3f48ba09dc874a7b"
+// Native PostgreSQL 18.7 produced this digest and 429 exact TOC entries.
+const contractionSchema17CatalogueSHA = "673aff018a34cc5a7a24eda07c97490dc4407dfe852d0237cc78ea4063192bb7"
 
 const contractionSchema17InventoryRetired = `CONSTRAINT fleet refusal_code refusal_code_pkey
 CONSTRAINT fleet refusal_code refusal_code_unique
@@ -100,7 +100,7 @@ func contractionBackupDefinition() (string, string, error) {
 	if len(objects) != expected {
 		return "", "", errors.New("schema17 backup catalogue does not match the retired object inventory")
 	}
-	objects = append(objects, "VIEW platform runtime_schema_history")
+	objects = append(objects, "FUNCTION platform runtime_contraction_ready()", "VIEW platform runtime_schema_history")
 	slices.Sort(objects)
 	return strings.Join(objects, "\n") + "\n", contractionSchema17CatalogueSHA, nil
 }

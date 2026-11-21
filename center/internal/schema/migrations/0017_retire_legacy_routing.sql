@@ -120,6 +120,17 @@ ALTER TABLE management.cutover_receipt ADD COLUMN contraction_restore_sha256 byt
 
 -- Runtime checks move off the owner-only original migration ledger. An older
 -- executable checking that ledger cannot accept a contracted database.
+CREATE FUNCTION platform.runtime_contraction_ready() RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+    SELECT count(*) = 1
+      FROM management.cutover_receipt c, pg_database d
+      WHERE d.datname = current_database() AND c.target_schema = 17 AND c.phase = 4
+        AND c.database_identity_sha256 = sha256(convert_to(
+            (SELECT system_identifier::text FROM pg_control_system()) || ':' || d.oid || ':' || d.datdba, 'UTF8'));
+$$;
+REVOKE ALL ON FUNCTION platform.runtime_contraction_ready() FROM PUBLIC;
+
 CREATE VIEW platform.runtime_schema_history AS
-    SELECT version, name, sha256, applied_at, applied_by FROM platform.schema_migration;
+    SELECT version, name, sha256, applied_at, applied_by FROM platform.schema_migration
+    WHERE platform.runtime_contraction_ready();
 REVOKE ALL ON platform.runtime_schema_history FROM PUBLIC;

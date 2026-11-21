@@ -90,6 +90,11 @@ func reconcile(ctx context.Context, conn *pgx.Conn, options Options) error {
 			if _, err := tx.Exec(ctx, "GRANT "+strings.Join(privileges, ", ")+" ON TABLE "+table+" TO "+quoted); err != nil {
 				return Sanitize("grant on "+grant.Schema+"."+grant.Table, err)
 			}
+			if grant.Schema == "platform" && grant.Table == "runtime_schema_history" {
+				if _, err := tx.Exec(ctx, "GRANT EXECUTE ON FUNCTION platform.runtime_contraction_ready() TO "+quoted); err != nil {
+					return Sanitize("grant the scoped runtime schema check", err)
+				}
+			}
 		}
 		database := ""
 		if err := tx.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil {
