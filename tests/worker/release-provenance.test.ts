@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { before, test } from "node:test";
@@ -145,6 +153,48 @@ function filesUnder(directory: string, prefix = ""): string[] {
     })
     .sort();
 }
+
+test("repeat image staging isolates old cached legal files and retains their bytes", (t) => {
+  const artifacts = scratchDirectory("cloud-image-notices-repeat-", t);
+  const staged = path.join(artifacts, "image-notices");
+  cpSync(path.join(root, "artifacts/image-notices"), staged, { recursive: true });
+  const expected = filesUnder(staged);
+  const obsolete = [
+    "Contracts.NOTICE.txt",
+    "DotNet.AspNetCore.NOTICES.txt",
+    "DotNet.LICENSE.txt",
+    "DotNet.Runtime.NOTICES.txt",
+    "Grpc.LICENSE.txt",
+    "Npgsql.LICENSE.txt",
+    "Protobuf.LICENSE.txt",
+  ].map((file) => `third-party/${file}`);
+  // Match the failed cache's names without depending on retired live licence files.
+  for (const file of obsolete)
+    writeFileSync(path.join(staged, file), `Cached fixture for ${file}\n`);
+
+  stageImageNotices(root, revision, artifacts);
+  assert.deepEqual(filesUnder(staged), expected);
+  const previous = readdirSync(artifacts).find((name) =>
+    name.startsWith("image-notices-previous-"),
+  );
+  assert(previous);
+  for (const file of obsolete)
+    assert.equal(
+      readFileSync(path.join(artifacts, previous, "image-notices", file), "utf8"),
+      `Cached fixture for ${file}\n`,
+    );
+
+  const provenance = path.join(staged, "provenance.json");
+  const generation = lstatSync(staged, { bigint: true }).ino;
+  const prior = object(parseDocument(readFileSync(provenance)));
+  prior.revision = "a".repeat(40);
+  Object.assign(object(prior.source), { commit: prior.revision, dirty: false });
+  writeFileSync(provenance, `${JSON.stringify(prior, null, 2)}\n`);
+  stageImageNotices(root, revision, artifacts);
+  assert.equal(object(parseDocument(readFileSync(provenance))).revision, revision);
+  assert.equal(lstatSync(staged, { bigint: true }).ino, generation);
+  assert.deepEqual(readdirSync(artifacts).sort(), ["image-notices", previous].sort());
+});
 
 function imageFixture() {
   const directory = scratchDirectory("cloud-image-provenance-");

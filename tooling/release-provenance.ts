@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { lstatSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import {
   auditProvenance,
@@ -499,15 +510,17 @@ export function verifyWorker(owner: string, bundle: Buffer, metadata: unknown) {
   };
 }
 
-function fileTree(directory: string): string[] {
+function fileTree(directory: string, includeDirectories = false): string[] {
   const result: string[] = [];
   const walk = (relativeDirectory: string) => {
     for (const entry of readdirSync(path.join(directory, relativeDirectory))) {
       const name = path.posix.join(relativeDirectory, entry);
       const info = lstatSync(path.join(directory, name));
       assert(!info.isSymbolicLink(), "Linked image notice");
-      if (info.isDirectory()) walk(name);
-      else {
+      if (info.isDirectory()) {
+        if (includeDirectories) result.push(`${name}/`);
+        walk(name);
+      } else {
         assert(info.isFile(), "Non-regular image notice");
         result.push(name);
       }
@@ -534,20 +547,143 @@ function imageReceipt(owner: string, revision: string) {
     baseLegal: profile.image.baseLegal,
   };
 }
-export function stageImageNotices(owner: string, revision: string) {
-  const folder = path.join(owner, "artifacts/image-notices");
-  const { profile } = releaseProfile(owner);
-  for (const file of profile.image.legalFiles) {
-    const target = path.join(folder, file);
-    mkdirSync(path.dirname(target), { recursive: true });
-    writeFileSync(target, normalized(owner, file));
+function readPreviousImageReceipt(
+  directory: string,
+  receipt: ReturnType<typeof imageReceipt>,
+  currentBytes: Buffer,
+): Buffer | undefined {
+  const name = "provenance.json";
+  if (Math.abs(lstatSync(path.join(directory, name)).size - currentBytes.length) > 6) return;
+  const bytes = readOwned(directory, name);
+  if (bytes.equals(currentBytes)) return bytes;
+  let revision: unknown;
+  try {
+    revision = object(parseDocument(bytes)).revision;
+  } catch {
+    return;
   }
-  writeFileSync(path.join(folder, "provenance.json"), json(imageReceipt(owner, revision)));
-  assert.deepEqual(
-    fileTree(folder),
-    [...profile.image.legalFiles, "provenance.json"].sort(),
-    "Unexpected staged image material",
+  const prior = typeof revision === "string" && /^([a-f0-9]{40})(-dirty)?$/u.exec(revision);
+  if (
+    prior &&
+    bytes.equals(
+      json({
+        ...receipt,
+        revision,
+        source: { ...receipt.source, commit: prior[1], dirty: !!prior[2] },
+      }),
+    )
+  )
+    return bytes;
+}
+
+export function stageImageNotices(owner: string, revision: string, artifacts?: string) {
+  if (artifacts === undefined) {
+    artifacts = path.join(realpathSync(owner), "artifacts");
+    mkdirSync(artifacts, { recursive: true });
+  }
+  artifacts = path.resolve(artifacts);
+  assert(
+    lstatSync(artifacts).isDirectory() && realpathSync(artifacts) === artifacts,
+    "Linked image staging directory",
   );
+  const folder = path.join(artifacts, "image-notices");
+  const { profile } = releaseProfile(owner);
+  const materials = profile.image.legalFiles.map((file) => ({
+    file,
+    bytes: Buffer.from(normalized(owner, file)),
+  }));
+  const matchesLegalBytes = (directory: string) =>
+    materials.every(
+      ({ file, bytes }) =>
+        lstatSync(path.join(directory, file)).size === bytes.length &&
+        readOwned(directory, file).equals(bytes),
+    );
+  const expected = [...profile.image.legalFiles, "provenance.json"].sort();
+  const receipt = imageReceipt(owner, revision);
+  const receiptBytes = json(receipt);
+  const temporary = mkdtempSync(path.join(artifacts, "image-notices-stage-"));
+  const fresh = path.join(temporary, "image-notices");
+  let previous: string | undefined;
+  let previousReceipt: string | undefined;
+  try {
+    for (const { file, bytes } of materials) {
+      const target = path.join(fresh, file);
+      assert.equal(hash(bytes), receipt.legal[file], `Changed staged legal text: ${file}`);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, bytes, { flag: "wx" });
+    }
+    writeFileSync(path.join(fresh, "provenance.json"), receiptBytes, { flag: "wx" });
+    const stagedEntries = fileTree(fresh, true);
+    assert.deepEqual(
+      stagedEntries.filter((name) => !name.endsWith("/")),
+      expected,
+      "Unexpected staged image material",
+    );
+
+    const existing = lstatSync(folder, { throwIfNoEntry: false });
+    if (existing) {
+      assert(existing.isDirectory(), "Image notice staging target is not a regular directory");
+      fileTree(folder);
+      const backup = mkdtempSync(path.join(artifacts, "image-notices-previous-"));
+      const saved = path.join(backup, "image-notices");
+      try {
+        renameSync(folder, saved);
+      } catch (error) {
+        rmdirSync(backup);
+        throw error;
+      }
+      previous = saved;
+      assert(
+        lstatSync(saved).isDirectory(),
+        "Image notice staging target is not a regular directory",
+      );
+      const members = fileTree(saved, true);
+      const sameLegalFiles =
+        members.length === stagedEntries.length &&
+        members.every((entry, index) => entry === stagedEntries[index]) &&
+        matchesLegalBytes(saved);
+      const priorBytes = sameLegalFiles && readPreviousImageReceipt(saved, receipt, receiptBytes);
+      if (priorBytes) {
+        const receiptName = "provenance.json";
+        if (!priorBytes.equals(receiptBytes)) {
+          const snapshot = path.join(backup, "previous-provenance.json");
+          writeFileSync(snapshot, priorBytes, { flag: "wx" });
+          try {
+            renameSync(path.join(fresh, receiptName), path.join(saved, receiptName));
+          } catch (error) {
+            unlinkSync(snapshot);
+            throw error;
+          }
+          previousReceipt = snapshot;
+        }
+        assert.deepEqual(fileTree(saved, true), stagedEntries, "Unexpected staged image material");
+        assert(matchesLegalBytes(saved), "Changed staged legal text");
+        assert(readOwned(saved, receiptName).equals(receiptBytes), "Changed staged image receipt");
+        renameSync(saved, folder);
+        previous = undefined;
+        if (previousReceipt) unlinkSync(previousReceipt);
+        rmdirSync(backup);
+        return;
+      }
+    }
+    // Keep the unrecognized prior generation intact in its ignored sibling.
+    renameSync(fresh, folder);
+  } catch (error) {
+    if (previous) {
+      try {
+        if (previousReceipt) renameSync(previousReceipt, path.join(previous, "provenance.json"));
+        if (!lstatSync(folder, { throwIfNoEntry: false })) {
+          renameSync(previous, folder);
+          rmdirSync(path.dirname(previous));
+        }
+      } catch (restoreError) {
+        throw new AggregateError([error, restoreError], "Could not restore previous image staging");
+      }
+    }
+    throw error;
+  } finally {
+    rmSync(temporary, { recursive: true });
+  }
 }
 export function verifyImageFiles(owner: string, revision: string, directory: string) {
   const { profile } = releaseProfile(owner);
