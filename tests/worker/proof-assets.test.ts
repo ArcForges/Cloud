@@ -1730,8 +1730,12 @@ test("main requires actual Git ancestry and admission independently of a valid s
   const admission = path.join(f.directory, "authorized.json");
   const main = { cloud: cloud.directory, web: web.directory, admission };
   const approved = [cloud.published, web.published];
-  const register = (admitted = approved, denied: typeof approved = []) => {
-    writeFileSync(admission, JSON.stringify({ schema: 1, admitted, denied }));
+  const register = (
+    admitted = approved,
+    denied: typeof approved = [],
+    archiveSha256 = f.envelope.archive.sha256,
+  ) => {
+    writeFileSync(admission, JSON.stringify({ schema: 1, admitted, denied, archiveSha256 }));
   };
   f.envelope.qualification = "main";
   f.envelope.producers = approved;
@@ -1741,6 +1745,11 @@ test("main requires actual Git ancestry and admission independently of a valid s
   assert.throws(
     () => verifySelfHostCohort({ ...f.options, main }),
     /Missing cohort member: cohort.json/u,
+  );
+  register(approved, [], "5".repeat(64));
+  assert.throws(
+    () => verifySelfHostCohort({ ...f.options, main }),
+    /Cohort archive is not currently admitted/u,
   );
   register(approved, [cloud.published]);
   assert.throws(() => verifySelfHostCohort({ ...f.options, main }), /Producer is withdrawn/u);

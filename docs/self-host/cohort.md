@@ -15,9 +15,11 @@ The staging tools use the repository's pinned Node.js version.
 Use clean Cloud and Web producer checkouts, with the exact Git commits and
 trees identified by the verified producer inputs. For Cloud, obtain the
 original sealed candidate directory and the Go executable extracted from that
-candidate's image. The assembler runs the checkout's stock candidate verifier
-and checks the executable against the verified image receipt. Keep the input
-candidate and its sealed manifest available for provenance review.
+candidate's image. The assembler uses the stock verifier from a private copy
+of the exact producer commit and checks the executable against the verified
+image receipt. Service definitions and notices come from the producer's Git
+tree. Keep the input candidate and its sealed manifest available for
+provenance review.
 
 For Web, verify the GitHub Actions artifact against its approved workflow run,
 producer commit and raw ZIP SHA-256. Extract the single published
@@ -55,11 +57,14 @@ Main qualification also requires an independently maintained admission
 document and local copies of the actual Cloud and Web `origin/main` history.
 Fetch and validate those references through the existing repository trust
 process before offline verification. The admission document uses
-`{"schema":1,"admitted":[...],"denied":[...]}` with the exact currently
-authorized Cloud and Web `{repo,commit,tree}` rows in that order. Include a
-withdrawn producer revision in `denied`. The verifier also checks each
-producer's actual Git tree and ancestry. Use `--qualification main --admission
-"$ADMISSION"` only with the authorized admission record.
+`{"schema":1,"admitted":[...],"denied":[...],"archiveSha256":"..."}` with
+the currently authorized Cloud and Web `{repo,commit,tree}` rows in that
+order and the independently approved SHA-256 of the exact cohort archive.
+Record withdrawn producer revisions in `denied`. The archive pin prevents a
+withdrawn package with the same source identity from being selected. The
+verifier also checks each producer's Git tree and ancestry. Use
+`--qualification main --admission "$ADMISSION"` with the authorized
+admission record.
 
 ## Verify and stage
 

@@ -14,6 +14,7 @@ import {
   rmdir,
   writeFile,
 } from "node:fs/promises";
+import { devNull, tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -170,15 +171,15 @@ function checkout(directory: string, repo: Repository): Producer {
   assert.equal(git(directory, "status", "--porcelain"), "", "Producer checkout is dirty");
   return producer({
     repo,
-    commit: git(directory, "rev-parse", "HEAD"),
-    tree: git(directory, "rev-parse", "HEAD^{tree}"),
+    commit: git(directory, "--no-replace-objects", "rev-parse", "HEAD"),
+    tree: git(directory, "--no-replace-objects", "rev-parse", "HEAD^{tree}"),
   });
 }
 
 function verifyMain(producers: Producer[], authority: MainAuthority) {
   const registry = object(
     parseDocument(readBounded(authority.admission, maxMetadata)),
-    "schema admitted denied",
+    "schema admitted denied archiveSha256",
   );
   assert.equal(registry.schema, 1, "Unsupported admission record");
   assert(
@@ -216,6 +217,79 @@ function verifyMain(producers: Producer[], authority: MainAuthority) {
         windowsHide: true,
       },
     );
+  }
+  return digest(registry.archiveSha256);
+}
+
+function sourceBlob(directory: string, source: Producer, name: string, limit: number): Buffer {
+  return execFileSync(
+    "git",
+    ["--no-replace-objects", "cat-file", "blob", `${source.commit}:${name}`],
+    {
+      cwd: directory,
+      env: gitEnvironment(),
+      maxBuffer: limit,
+      timeout: 30000,
+      windowsHide: true,
+    },
+  );
+}
+
+async function verifyCloudCandidate(
+  directory: string,
+  source: Producer,
+  candidateDirectory: string,
+) {
+  // Checkout trusted Git objects into an owned directory. The producer's mutable working files
+  // and index flags cannot affect the stock verifier or any of its imports.
+  const temporary = await mkdtemp(path.join(tmpdir(), "arcforges-cohort-verifier-"));
+  const verifier = path.join(temporary, "cloud");
+  const hooks = path.join(temporary, "hooks");
+  const env = { ...gitEnvironment(), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: devNull };
+  const gitPrivate = (cwd: string, ...args: string[]) =>
+    execFileSync("git", ["--no-replace-objects", ...args], {
+      cwd,
+      env,
+      timeout: 120000,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  try {
+    await mkdir(hooks);
+    gitPrivate(
+      temporary,
+      "clone",
+      "--quiet",
+      "--shared",
+      "--no-checkout",
+      `--template=${hooks}`,
+      "--",
+      path.resolve(directory),
+      verifier,
+    );
+    gitPrivate(verifier, "config", "core.hooksPath", hooks);
+    gitPrivate(verifier, "config", "core.autocrlf", "false");
+    gitPrivate(verifier, "config", "core.fsmonitor", "false");
+    gitPrivate(verifier, "remote", "set-url", "origin", "https://github.com/ArcForges/Cloud.git");
+    const main = digest(
+      git(directory, "--no-replace-objects", "rev-parse", "refs/remotes/origin/main"),
+      40,
+    );
+    gitPrivate(verifier, "update-ref", "refs/remotes/origin/main", main);
+    gitPrivate(verifier, "checkout", "--quiet", "--detach", source.commit);
+    assert.deepEqual(
+      checkout(verifier, source.repo),
+      source,
+      "Verifier checkout differs from the producer",
+    );
+    const stock = (await import(
+      pathToFileURL(path.join(verifier, "tooling/project.ts")).href
+    )) as typeof import("./project.ts");
+    const result = await stock.verifyCandidate(path.resolve(candidateDirectory));
+    assert.deepEqual(checkout(verifier, source.repo), source, "Verifier source changed");
+    return result;
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
   }
 }
 
@@ -419,7 +493,11 @@ export function verifySelfHostCohort(options: VerifyOptions) {
       options.main,
       "Main qualification requires a trusted admission record and Git producer repositories",
     );
-    verifyMain(envelope.producers, options.main);
+    assert.equal(
+      envelope.archive.sha256,
+      verifyMain(envelope.producers, options.main),
+      "Cohort archive is not currently admitted",
+    );
   } else {
     assert(options.allowCandidate, "Candidate is allowed only for explicit private qualification");
   }
@@ -503,14 +581,12 @@ export async function assembleSelfHostCohort(options: AssembleOptions) {
     "Center schema differs from the cohort's supported schema",
   );
   const producers = [cloud, web];
+  let admittedArchive: string | undefined;
   if (options.qualification === "main") {
     assert(options.main, "Main qualification requires independently admitted producers");
-    verifyMain(producers, options.main);
+    admittedArchive = verifyMain(producers, options.main);
   }
-  const stock = (await import(
-    pathToFileURL(path.resolve(options.cloud, "tooling/project.ts")).href
-  )) as typeof import("./project.ts");
-  const candidate = await stock.verifyCandidate(path.resolve(options.candidate));
+  const candidate = await verifyCloudCandidate(options.cloud, cloud, options.candidate);
   assert.equal(candidate.revision, cloud.commit, "Cloud candidate belongs to another checkout");
   assert.equal(candidate.dirty, false, "Cloud candidate is dirty");
   const candidateManifest = readBounded(path.join(options.candidate, "manifest.json"), maxMetadata);
@@ -545,14 +621,14 @@ export async function assembleSelfHostCohort(options: AssembleOptions) {
   for (const name of configFiles) {
     entries.set(
       `setup/${name}`,
-      readBounded(path.join(options.cloud, "deploy/self-host", name), maxMetadata),
+      sourceBlob(options.cloud, cloud, `deploy/self-host/${name}`, maxMetadata),
     );
   }
   for (const [name, source] of Object.entries(cloudFiles)) {
-    entries.set(name, readBounded(path.join(options.cloud, source), 4 * 1024 * 1024));
+    entries.set(name, sourceBlob(options.cloud, cloud, source, 4 * 1024 * 1024));
   }
   for (const [name, source] of Object.entries(webFiles)) {
-    entries.set(name, readBounded(path.join(options.web, source), 4 * 1024 * 1024));
+    entries.set(name, sourceBlob(options.web, web, source, 4 * 1024 * 1024));
   }
   for (const name of candidateFiles) {
     const bytes = readBounded(path.join(options.candidate, name), 4 * 1024 * 1024);
@@ -562,13 +638,20 @@ export async function assembleSelfHostCohort(options: AssembleOptions) {
   assert.deepEqual(checkout(options.cloud, cloud.repo), cloud, "Cloud checkout changed");
   assert.deepEqual(checkout(options.web, web.repo), web, "Web checkout changed");
   const archive = makeTar(entries);
+  const archiveSha256 = hash(archive);
+  if (admittedArchive !== undefined)
+    assert.equal(
+      archiveSha256,
+      admittedArchive,
+      "Assembled cohort archive is not currently admitted",
+    );
   const envelope: Envelope = {
     schema: 1,
     kind: "self-host",
     rid: "linux-x64",
     qualification: options.qualification,
     producers,
-    archive: { name: archiveName, length: archive.length, sha256: hash(archive) },
+    archive: { name: archiveName, length: archive.length, sha256: archiveSha256 },
   };
   validatePayload(readTar(archive), envelope);
   const target = path.join(path.resolve(options.output), archiveName);
