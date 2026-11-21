@@ -237,26 +237,6 @@ func (h *harness) connect(node *enrolled) *nodetest.Channel {
 	return channel
 }
 
-// connectFiles uses a separate explicit fixture capability: ordinary old-node tests still advertise only routed.v1.
-func (h *harness) connectFiles(node *enrolled) *nodetest.Channel {
-	h.t.Helper()
-	channel, err := h.dial(node.access, nil)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	signature := node.node.SignMessage(channel.HelloMessage(publicBaseURL, node.node.ID, node.result.InstallationID), true)
-	if err := channel.SendHelloCapabilities(ctx, node.node.ID, node.result.InstallationID, signature, []string{"routed.v1", hub.FilesCapability}); err != nil {
-		h.t.Fatal(err)
-	}
-	if _, err := channel.Accept(ctx); err != nil {
-		h.t.Fatal(err)
-	}
-	h.t.Cleanup(func() { _ = channel.WS.CloseNow() })
-	return channel
-}
-
 // answer keeps a channel alive in the background (answers every heartbeat) until it closes, and returns how it closed.
 func answer(channel *nodetest.Channel) <-chan nodetest.Closed {
 	done := make(chan nodetest.Closed, 1)
