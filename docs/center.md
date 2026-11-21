@@ -319,11 +319,11 @@ authentication, target ownership, authorization, applicable resource controls an
 `ENTITLEMENT/hosted_access_required`. A self-hosted operator service limit uses the published `RESOURCE/overloaded` error
 with state reason `operator_limit`. Historical entitlement records keep their original keys and validity intervals.
 
-| Key              | Group               | Gates                                                   |
-| ---------------- | ------------------- | ------------------------------------------------------- |
-| `remote.control` | `control`           | Node grant, Sandbox, Run, resource and data mutations   |
-| `remote.view`    | `status_and_output` | Node, Sandbox, Run, resource and data reads and watches |
-| `center.nodes`   | `node_connection`   | node connection                                         |
+| Key              | Group               | Gates                                             |
+| ---------------- | ------------------- | ------------------------------------------------- |
+| `remote.control` | `control`           | Sandbox, Run, resource and data mutations         |
+| `remote.view`    | `status_and_output` | Sandbox, Run, resource and data reads and watches |
+| `center.nodes`   | `node_connection`   | node connection                                   |
 
 The V2 watches cover Run output, Node events and resource usage. Ordinary routed unary requests allow up to 253,952 framed
 bytes, with replies capped at 1 MiB. The framed limit is 2 MiB for `WriteImport` requests and `ReadExport` replies. Routed
