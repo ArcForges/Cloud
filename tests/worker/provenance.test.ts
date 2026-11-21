@@ -706,6 +706,7 @@ test("the secret-scan allowlist holds exactly its reviewed blocks and the exact 
     ["eng/policy/dependency-reviews/afv2-mig-01-r3.json", /^AFV2-MIG-01: /u],
     ["eng/policy/dependency-reviews/afv2-mig-01-r4.json", /^AFV2-MIG-01: /u],
     ["eng/policy/dependency-reviews/afv2-mig-01-r5.json", /^AFV2-MIG-01: /u],
+    ["eng/policy/dependency-reviews/afv2-mig-01-r6.json", /^AFV2-MIG-01: /u],
   ]);
   const files = [
     "eng/policy/dependency-policy.json",
