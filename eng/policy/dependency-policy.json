@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "repository": "Cloud",
-  "sourceCommit": "50fce91a14eea3c1a3b6cc7fc5443a9810269118",
+  "sourceCommit": "124cf616f9bff47aaaec2003f8d3aab7b44babf9",
   "manifests": ["package.json"],
   "inputs": {
     ".dockerignore": "56a8c2a51a8ac982a72114b76a89d8843a837b1aa0b96c04e17c775344b2058f",
     ".github/workflows/ci.yml": "6b945cf940c9d825e867d225b0c4be4a115e1a870ca1136cdeec4479745ee43a",
     ".gitignore": "3f4b2e7b8f7c7f0e7b1bc4888d5ab5855f4d11639669e534d8cd5f5b02ef00e0",
-    ".gitleaks.toml": "2b3c936f10c393b8e948146ef20c7581f014ec4603f8f448af40a9bdf1f367b0",
+    ".gitleaks.toml": "5580ccf20703aaa89511bd3d966de556723d084d69a3291f76845a8b1555ee54",
     ".node-version": "5c293036fc0a61ad76e15d85f454c3c7cec157e181e035b69f95058a2c239144",
     ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
     ".python-version": "673e2ba07f95bfcfe0a543258b8e267954e403d1f466481c546f467f86b31d46",
@@ -239,7 +239,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
     "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
     "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-    "eng/provenance/files.json": "9e8b042f267871a2c16e42c357e5c84b282c8a625c46b40b175bdce5f65c993f",
+    "eng/provenance/files.json": "9b94510f08ae689844e66008def11e8b50088be8a68ef8567600c200b93d3779",
     "eng/provenance/records/afv2-center-01-management-storage-r1.json": "0ec5d5aadbedb3c1dd54741f2e1df4711852a9b8b42acbb5246a42401548215f",
     "eng/provenance/records/afv2-center-01-management-storage-r2.json": "5f9910beb89d51add566f63af9822011250bd5b374fd9214ff09acfeb62d4ea6",
     "eng/provenance/records/afv2-center-01-management-storage-r3.json": "84a30e4eea501632e65292e9d441449ae8bbd440287b2607ebbdfc1859d010b8",
@@ -541,7 +541,7 @@
     "tests/worker/docker-context.test.ts": "e6949c97cf5c78e36a11c2b3220fc7e95c423ec0182e784fc876f976aff6c938",
     "tests/worker/postgres-deploy.test.ts": "51af666b7dd57cbca88c498f0cc8b7c35ff68090273cf6716d186a4bc75a8cf8",
     "tests/worker/proof-gate.test.ts": "83b320bf48091b6638164cbe032bddb8a2a9e9069403d63ce68c4851d2dc3b6e",
-    "tests/worker/provenance.test.ts": "406c8ed5e207b5af37eb85351d5adef6df68ad9137672042e759a29b05478219",
+    "tests/worker/provenance.test.ts": "1d374b9470f2c3c0a29e81eb7dc8731d02d61c6fbf02e1fc4161cf0c8c27fd74",
     "tests/worker/release-provenance.test.ts": "dc6e1e0782e51dda080a89e0fcea36a122fde035ffcf7c065ff33c3e389052ab",
     "tests/worker/support/ctr06-bootstrap-mock.ts": "aa369367046fa25269231b36b814ecef4cb68533398b355c74b2919b55a546e1",
     "tests/worker/support/ctr06-bootstrap-production-driver.ts": "9f8ca433063dd3f1715862a8691119095ecafb8b05115b6941b1e3cb0ee3cf64",
@@ -581,12 +581,12 @@
     "owner": "Cloud dependency maintainer",
     "reviewer": "candidate_audit",
     "date": "2026-11-22",
-    "rationale": "AFV2-MIG-02 binds the independently reviewed PostgreSQL contraction and historical fixture helper to the exact Cloud source. The measured Worker artifact, shared bridge and security bridge artifacts, historic legal records, public digest scan proof, and reviewed package closure are preserved.",
+    "rationale": "AFV2-DIST-01 binds the exact source inventory for the signed self-host assembly tooling and the accompanying operator runbook.",
     "inputs": {
       ".dockerignore": "56a8c2a51a8ac982a72114b76a89d8843a837b1aa0b96c04e17c775344b2058f",
       ".github/workflows/ci.yml": "6b945cf940c9d825e867d225b0c4be4a115e1a870ca1136cdeec4479745ee43a",
       ".gitignore": "3f4b2e7b8f7c7f0e7b1bc4888d5ab5855f4d11639669e534d8cd5f5b02ef00e0",
-      ".gitleaks.toml": "2b3c936f10c393b8e948146ef20c7581f014ec4603f8f448af40a9bdf1f367b0",
+      ".gitleaks.toml": "5580ccf20703aaa89511bd3d966de556723d084d69a3291f76845a8b1555ee54",
       ".node-version": "5c293036fc0a61ad76e15d85f454c3c7cec157e181e035b69f95058a2c239144",
       ".npmrc": "857e18055c0f5d75719d253033954c10511c4b16ae5bd68bc45bb75d93a411bc",
       ".python-version": "673e2ba07f95bfcfe0a543258b8e267954e403d1f466481c546f467f86b31d46",
@@ -818,7 +818,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
       "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
       "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-      "eng/provenance/files.json": "9e8b042f267871a2c16e42c357e5c84b282c8a625c46b40b175bdce5f65c993f",
+      "eng/provenance/files.json": "9b94510f08ae689844e66008def11e8b50088be8a68ef8567600c200b93d3779",
       "eng/provenance/records/afv2-center-01-management-storage-r1.json": "0ec5d5aadbedb3c1dd54741f2e1df4711852a9b8b42acbb5246a42401548215f",
       "eng/provenance/records/afv2-center-01-management-storage-r2.json": "5f9910beb89d51add566f63af9822011250bd5b374fd9214ff09acfeb62d4ea6",
       "eng/provenance/records/afv2-center-01-management-storage-r3.json": "84a30e4eea501632e65292e9d441449ae8bbd440287b2607ebbdfc1859d010b8",
@@ -1120,7 +1120,7 @@
       "tests/worker/docker-context.test.ts": "e6949c97cf5c78e36a11c2b3220fc7e95c423ec0182e784fc876f976aff6c938",
       "tests/worker/postgres-deploy.test.ts": "51af666b7dd57cbca88c498f0cc8b7c35ff68090273cf6716d186a4bc75a8cf8",
       "tests/worker/proof-gate.test.ts": "83b320bf48091b6638164cbe032bddb8a2a9e9069403d63ce68c4851d2dc3b6e",
-      "tests/worker/provenance.test.ts": "406c8ed5e207b5af37eb85351d5adef6df68ad9137672042e759a29b05478219",
+      "tests/worker/provenance.test.ts": "1d374b9470f2c3c0a29e81eb7dc8731d02d61c6fbf02e1fc4161cf0c8c27fd74",
       "tests/worker/release-provenance.test.ts": "dc6e1e0782e51dda080a89e0fcea36a122fde035ffcf7c065ff33c3e389052ab",
       "tests/worker/support/ctr06-bootstrap-mock.ts": "aa369367046fa25269231b36b814ecef4cb68533398b355c74b2919b55a546e1",
       "tests/worker/support/ctr06-bootstrap-production-driver.ts": "9f8ca433063dd3f1715862a8691119095ecafb8b05115b6941b1e3cb0ee3cf64",
@@ -1166,7 +1166,7 @@
       "framework-posture"
     ],
     "runtimeAssessment": "Preserve locked Go and npm dependencies with existing managed compatibility fixtures. ArcForges Cloud now prepares a sealed Go-only service image. Existing historical CTR06 producer and D1 artifacts stay anchored to their original checkout and do not enter current deployment.",
-    "maintenance": "Retain previous release and bridge evidence. Verify admitted bytes on the designated native hosts."
+    "maintenance": "Validate signed cohort installation under the admitted producer identities and retain the reviewed dependency inputs."
   },
   "closure": {
     "node_modules/@arcforges/ai-internal": {
@@ -1979,7 +1979,7 @@
   "buildToolPrereleases": {
     "unenv": "2.0.0-rc.24"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/afv2-mig-02-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/afv2-dist-01-r1.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
