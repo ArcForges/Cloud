@@ -16,11 +16,11 @@ https://{$ARCFORGES_CENTER_HOST} {
 				uri strip_prefix /api
 				@native_grpc header_regexp Content-Type "(?i)^application/grpc([+]proto)?([[:space:]]*;|$)"
 				reverse_proxy @native_grpc h2c://127.0.0.1:8081 {
-					header_up ArcForges-Client-IP {remote_host}
+					header_up X-Arcforges-Client-Ip {remote_host}
 					flush_interval 100ms
 				}
 				reverse_proxy 127.0.0.1:8080 {
-					header_up ArcForges-Client-IP {remote_host}
+					header_up X-Arcforges-Client-Ip {remote_host}
 					flush_interval 100ms
 				}
 			}

@@ -3,8 +3,9 @@
 // (CLOUD.71), and the WEB.40 profile bundle: the pinned digest, the strict reader, the served layout, the pages, the
 // policies and the headers. No network, no deployment and no release download.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -21,6 +22,8 @@ import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { isProofPath } from "../../worker/foundation/proof-routes.ts";
+import { gitEnvironment } from "../../tooling/process.ts";
+import { stageSelfHostCohort, verifySelfHostCohort } from "../../tooling/self-host-cohort.ts";
 import { selfHostStaticOrigin } from "../../tooling/self-host-static-origin.ts";
 import {
   buildProofConfig as buildProofConfigWithKey,
@@ -351,6 +354,33 @@ async function selfHostStaticFixture(t: TestContext) {
   };
 }
 
+test("self-host proxies replace the Center client address header and use loopback upstreams", () => {
+  const config = readFileSync(
+    new URL("../../center/internal/config/identity.go", import.meta.url),
+    "utf8",
+  );
+  const header = /^const ClientIPHeader = "([^"]+)"$/mu.exec(config)?.[1];
+  assert(header);
+
+  const environment = readFileSync(
+    new URL("../../deploy/self-host/center.env.example", import.meta.url),
+    "utf8",
+  );
+  assert.equal(/^ARCFORGES_CENTER_CLIENT_IP_HEADER=(\S+)$/mu.exec(environment)?.[1], header);
+  assert.match(environment, /^ARCFORGES_CENTER_TRUSTED_PROXIES=127\.0\.0\.1\/32$/mu);
+
+  const caddy = readFileSync(new URL("../../deploy/self-host/Caddyfile", import.meta.url), "utf8");
+  const proxies = [
+    ...caddy.matchAll(
+      /^[\t ]*reverse_proxy ([^\r\n]+) \{\r?\n[\t ]*header_up (\S+) \{remote_host\}$/gmu,
+    ),
+  ].map((match) => [match[1], match[2]]);
+  assert.deepEqual(proxies, [
+    ["@native_grpc h2c://127.0.0.1:8081", header],
+    ["127.0.0.1:8080", header],
+  ]);
+});
+
 test("self-host static publication verifies one digest release and checks every selected byte", async (t) => {
   const fixture = await selfHostStaticFixture(t);
   const built = profileBundle();
@@ -419,6 +449,150 @@ test("self-host static publication verifies one digest release and checks every 
     selfHostStaticOrigin("verify", archive, built.digest, releases),
     /missing expected entries/u,
   );
+});
+
+const dashboardActivity = "_framework/arcforges-dashboard-activity.a1b2c3d4e5.js";
+
+test("self-host Dashboard stages the verified shell on only its declared document routes", async (t) => {
+  const fixture = await selfHostStaticFixture(t);
+  const shell = profileShell.replace(
+    "<title>ArcForges</title>",
+    "<title>ArcForges Dashboard</title>",
+  );
+  const built = profileBundle({ shell, files: { [dashboardActivity]: "export {};" } });
+  const archive = await fixture.archivePath(built);
+  const dashboard = { centerOrigin: "https://center.example.test:8443/", name: "Private Center" };
+  const legacy = await selfHostStaticOrigin("stage", archive, built.digest, fixture.releases);
+  const release = await selfHostStaticOrigin(
+    "stage",
+    archive,
+    built.digest,
+    fixture.releases,
+    dashboard,
+  );
+  assert.notEqual(release, legacy);
+  assert.match(path.basename(release), /^dashboard-[a-f0-9]{64}$/u);
+  assert.equal(
+    await selfHostStaticOrigin("verify", archive, built.digest, fixture.releases, dashboard),
+    release,
+  );
+  assert.equal(await readFile(path.join(release, "site", "account", "index.html"), "utf8"), shell);
+
+  const fragment = await readFile(path.join(release, "static-origin.caddy"), "utf8");
+  const matcher = fragment.match(
+    /@af_static_dashboard \{\n {2}method GET HEAD\n {2}expression `\{orig_uri\} == \{orig_path\} \+ \{orig_\?query\} && \(\{orig_path\} in (\[[^\n]+\]) \|\| \{orig_path\}\.matches\(("[^"]+")\)\)`\n\}/u,
+  );
+  assert(matcher?.[1] && matcher[2]);
+  const documents = JSON.parse(matcher[1]) as string[];
+  const deviceDocument = new RegExp(JSON.parse(matcher[2]) as string, "u");
+  assert.deepEqual(documents, [
+    "/overview",
+    "/devices",
+    "/security",
+    "/account",
+    "/account/subscription",
+  ]);
+  const device = "/devices/77bfe61e-b5ea-4a5b-8c22-3ab49787a10e";
+  const item = "99b6f777-c1ed-4385-aa31-32df881ea31b";
+  for (const suffix of [
+    "",
+    "/resources",
+    "/sandboxes",
+    `/sandboxes/${item}`,
+    "/runs",
+    `/runs/${item}`,
+  ])
+    assert(deviceDocument.test(device + suffix), suffix);
+  for (const near of [
+    "/",
+    "/Overview",
+    "/overview/",
+    "/devices/",
+    "/devices/not-a-guid",
+    "/devices//77bfe61e-b5ea-4a5b-8c22-3ab49787a10e",
+    "/devices/77BFE61E-B5EA-4A5B-8C22-3AB49787A10E",
+    `${device}/unknown`,
+    `${device}/sandboxes/`,
+    `${device}/sandboxes/../runs`,
+    `${device}/runs/not-a-guid`,
+    `${device}/resources/${item}`,
+    "/account/",
+    "/account/billing",
+    "/account/index.html",
+    "/chat",
+    "/api",
+    "/api/account/recovery",
+    "/readyz",
+    "/metrics",
+  ])
+    assert(!documents.includes(near) && !deviceDocument.test(near), near);
+  assert(fragment.includes("rewrite * /account/index.html"));
+  assert(fragment.includes(`Content-Security-Policy "${policyOf(shell)}"`));
+  assert(!fragment.includes("af_static_chat") && !fragment.includes("try_files"));
+  assert.match(
+    fragment,
+    /@af_static_dashboard_settings \{\n {2}method GET HEAD\n {2}expression `[^\n]+ in \["\/appsettings\.json"\]`\n\}/u,
+  );
+  assert.match(
+    fragment,
+    /route @af_static_dashboard_settings \{\n {2}header Cache-Control "no-store"\n/u,
+  );
+
+  const settings = path.join(release, "site", "appsettings.json");
+  const expected = {
+    Dashboard: {
+      CenterOrigin: "https://center.example.test:8443",
+      Mode: "self-hosted",
+      Name: "Private Center",
+    },
+  };
+  assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), expected);
+  const renamed = { ...dashboard, name: "Second Center" };
+  assert.notEqual(
+    await selfHostStaticOrigin("stage", archive, built.digest, fixture.releases, renamed),
+    release,
+  );
+  assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), expected);
+  const originalSettings = await readFile(settings, "utf8");
+  await writeFile(settings, originalSettings.replace("Private Center", "Another Center"));
+  await assert.rejects(
+    selfHostStaticOrigin("verify", archive, built.digest, fixture.releases, dashboard),
+    /Staged bytes differ/u,
+  );
+});
+
+test("self-host Dashboard refuses old profiles and invalid public settings before staging", async (t) => {
+  const fixture = await selfHostStaticFixture(t);
+  const old = profileBundle();
+  const oldArchive = await fixture.archivePath(old);
+  await assert.rejects(
+    selfHostStaticOrigin("stage", oldArchive, old.digest, fixture.releases, {
+      centerOrigin: "https://center.example.test",
+    }),
+    /compiled Dashboard lifecycle module/u,
+  );
+
+  const built = profileBundle({ files: { [dashboardActivity]: "export {};" } });
+  const archive = await fixture.archivePath(built);
+  for (const centerOrigin of [
+    "http://center.example.test",
+    "https://user:password@center.example.test",
+    "https://center.example.test/api",
+    "https://center.example.test?test=1",
+    "https://center.example.test/#part",
+  ])
+    await assert.rejects(
+      selfHostStaticOrigin("stage", archive, built.digest, fixture.releases, { centerOrigin }),
+      /canonical HTTPS origin/u,
+    );
+  await assert.rejects(
+    selfHostStaticOrigin("stage", archive, built.digest, fixture.releases, {
+      centerOrigin: "https://center.example.test",
+      name: "a".repeat(4096),
+    }),
+    /byte limit/u,
+  );
+  assert.deepEqual(await readdir(fixture.releases), []);
 });
 
 test("self-host static admission leaves the release store empty after malformed or mismatched archives", async (t) => {
@@ -1449,4 +1623,166 @@ test("staging replaces the stale content of an earlier staging and leaves the di
   } finally {
     await rm(parent, { recursive: true, force: true });
   }
+});
+
+const emptyCohortTar = Buffer.alloc(1024);
+const testCohortProducers = [
+  { repo: "ArcForges/Cloud", commit: "1".repeat(40), tree: "2".repeat(40) },
+  { repo: "ArcForges/Web", commit: "3".repeat(40), tree: "4".repeat(40) },
+];
+
+function cohortFixture(t: TestContext) {
+  const directory = mkdtempSync(path.join(tmpdir(), "arcforges-cohort-test-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const archive = path.join(directory, "arcforges-self-host-linux-x64.tar");
+  const publicKey = path.join(directory, "public.pem");
+  const keys = generateKeyPairSync("ed25519");
+  writeFileSync(publicKey, keys.publicKey.export({ format: "pem", type: "spki" }));
+  writeFileSync(archive, emptyCohortTar);
+
+  const envelope = {
+    schema: 1,
+    kind: "self-host",
+    rid: "linux-x64",
+    qualification: "candidate",
+    archive: {
+      name: path.basename(archive),
+      length: emptyCohortTar.length,
+      sha256: sha(emptyCohortTar),
+    },
+    producers: testCohortProducers,
+  };
+  function authenticate(bytes: Buffer) {
+    writeFileSync(`${archive}.manifest.json`, bytes);
+    writeFileSync(`${archive}.manifest.sig`, sign(null, bytes, keys.privateKey));
+  }
+  function seal() {
+    authenticate(Buffer.from(JSON.stringify(envelope)));
+  }
+  seal();
+  return {
+    options: { archive, publicKey, allowCandidate: true },
+    envelope,
+    directory,
+    authenticate,
+    seal,
+  };
+}
+
+test("the cohort authenticates exact manifest bytes and a separate key before archive inspection", (t) => {
+  const f = cohortFixture(t);
+  const supplied = JSON.stringify(f.envelope);
+  writeFileSync(`${f.options.archive}.manifest.json`, `${supplied}\n`);
+  assert.throws(() => verifySelfHostCohort(f.options), /Invalid cohort signature/u);
+  f.seal();
+  const unrelated = generateKeyPairSync("ed25519").publicKey;
+  writeFileSync(f.options.publicKey, unrelated.export({ format: "pem", type: "spki" }));
+  assert.throws(() => verifySelfHostCohort(f.options), /Invalid cohort signature/u);
+});
+
+test("a genuine signature still requires explicit candidate admission and the exact architecture", (t) => {
+  const f = cohortFixture(t);
+  assert.throws(
+    () => verifySelfHostCohort({ ...f.options, allowCandidate: false }),
+    /explicit private qualification/u,
+  );
+  f.envelope.rid = "linux-arm64";
+  f.seal();
+  assert.throws(() => verifySelfHostCohort(f.options), /Unsupported cohort architecture/u);
+  f.envelope.rid = "linux-x64";
+  f.authenticate(
+    Buffer.from(JSON.stringify(f.envelope).replace('"schema":1', '"schema":1,"schema":1')),
+  );
+  assert.throws(() => verifySelfHostCohort(f.options), /Duplicate JSON key/u);
+});
+
+test("the archive digest is enforced before reading its member table or changing files", async (t) => {
+  const f = cohortFixture(t);
+  // This valid TAR terminator reaches payload validation, where the required manifest is absent.
+  assert.throws(() => verifySelfHostCohort(f.options), /Missing cohort member: cohort.json/u);
+  const differentBytes = Buffer.from(emptyCohortTar);
+  differentBytes[0] = 1;
+  writeFileSync(f.options.archive, differentBytes);
+  assert.throws(() => verifySelfHostCohort(f.options), /Cohort archive integrity mismatch/u);
+  const staging = path.join(f.directory, "stage");
+  mkdirSync(staging);
+  const platform = process.platform === "linux" && process.arch === "x64";
+  await assert.rejects(
+    stageSelfHostCohort(f.options, staging),
+    platform ? /Cohort archive integrity mismatch/u : /requires Linux x86-64/u,
+  );
+  assert.deepEqual(readdirSync(staging), []);
+});
+
+function cohortGitFixture(parent: string, name: string) {
+  const repo = `ArcForges/${name}`;
+  const directory = path.join(parent, name);
+  mkdirSync(directory);
+  const git = (...args: string[]) =>
+    execFileSync("git", args, {
+      cwd: directory,
+      env: gitEnvironment(),
+      encoding: "utf8",
+      timeout: 10000,
+      windowsHide: true,
+    }).trim();
+  git("init", "-q", "--initial-branch=main");
+  git("remote", "add", "origin", `https://github.com/${repo}.git`);
+  const commit = (message: string) => {
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgSign=false",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      message,
+    );
+    return { repo, commit: git("rev-parse", "HEAD"), tree: git("rev-parse", "HEAD^{tree}") };
+  };
+  const published = commit("Approved main");
+  git("update-ref", "refs/remotes/origin/main", published.commit);
+  const branchOnly = commit("Unmerged candidate");
+  return { directory, published, branchOnly };
+}
+
+test("main requires actual Git ancestry and admission independently of a valid signature", (t) => {
+  const f = cohortFixture(t);
+  const cloud = cohortGitFixture(f.directory, "Cloud");
+  const web = cohortGitFixture(f.directory, "Web");
+  const admission = path.join(f.directory, "authorized.json");
+  const main = { cloud: cloud.directory, web: web.directory, admission };
+  const approved = [cloud.published, web.published];
+  const register = (
+    admitted = approved,
+    denied: typeof approved = [],
+    archiveSha256 = f.envelope.archive.sha256,
+  ) => {
+    writeFileSync(admission, JSON.stringify({ schema: 1, admitted, denied, archiveSha256 }));
+  };
+  f.envelope.qualification = "main";
+  f.envelope.producers = approved;
+  f.seal();
+  assert.throws(() => verifySelfHostCohort(f.options), /requires a trusted admission record/u);
+  register();
+  assert.throws(
+    () => verifySelfHostCohort({ ...f.options, main }),
+    /Missing cohort member: cohort.json/u,
+  );
+  register(approved, [], "5".repeat(64));
+  assert.throws(
+    () => verifySelfHostCohort({ ...f.options, main }),
+    /Cohort archive is not currently admitted/u,
+  );
+  register(approved, [cloud.published]);
+  assert.throws(() => verifySelfHostCohort({ ...f.options, main }), /Producer is withdrawn/u);
+  register([cloud.branchOnly, web.published]);
+  assert.throws(() => verifySelfHostCohort({ ...f.options, main }), /not currently admitted/u);
+  f.envelope.producers = [cloud.branchOnly, web.published];
+  f.seal();
+  assert.throws(() => verifySelfHostCohort({ ...f.options, main }), /merge-base --is-ancestor/u);
 });
