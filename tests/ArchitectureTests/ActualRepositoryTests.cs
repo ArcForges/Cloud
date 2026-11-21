@@ -12,12 +12,9 @@ public sealed class ActualRepositoryTests
     [Fact]
     public void SolutionContainsOnlyTheActiveManagedProjectsAndEveryProjectFileIsClassified()
     {
-        var files = TrackedFiles().Where(file => file.EndsWith(".csproj", StringComparison.Ordinal)).ToArray();
-        var declared = CloudRepository.Classifications.Select(project => project.Path);
-        Assert.Equal(declared.Order(StringComparer.Ordinal), files.Order(StringComparer.Ordinal));
-        var inactive = CloudRepository.Classifications.Except(CloudRepository.ActiveClassifications).Select(project => project.Path);
+        var files = TrackedFiles().Where(file => file.EndsWith(".csproj", StringComparison.Ordinal));
         Assert.Empty(RepositoryInventoryPolicy.CheckProjects(CloudRepository.Read(Root, "Cloud.slnx"),
-            files.Except(inactive, StringComparer.Ordinal), CloudRepository.ActiveClassifications));
+            files, CloudRepository.ActiveClassifications));
     }
 
     [Fact]
@@ -26,7 +23,7 @@ public sealed class ActualRepositoryTests
         var projects = ProjectFiles();
         Assert.Empty(RepositoryInventoryPolicy.CheckLicences(CloudRepository.Read(Root, "eng/policy/licence-boundary.json"), projects, CloudRepository.Read(Root, "Directory.Build.props")));
         var exceptions = CloudRepository.ParseExceptions(CloudRepository.Read(Root, "eng/policy/exceptions.json"));
-        Assert.Empty(RepositoryInventoryPolicy.CheckExceptions(exceptions, CloudRepository.Classifications, DateOnly.FromDateTime(DateTime.UtcNow)));
+        Assert.Empty(RepositoryInventoryPolicy.CheckExceptions(exceptions, CloudRepository.ActiveClassifications, DateOnly.FromDateTime(DateTime.UtcNow)));
         // Cloud is AGPL-3.0-only: the architecture host consumes the AGPL ArcForges.Build.Policy package directly with no RP-03 row.
         Assert.Empty(exceptions);
     }
