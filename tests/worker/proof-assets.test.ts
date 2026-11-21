@@ -245,11 +245,15 @@ test("the generated acceptance config refuses the retired proof's assets", () =>
     account: "0".repeat(32),
     imageDigest: `registry.example/arcforges-cloud@sha256:${"a".repeat(64)}`,
     revision: "b".repeat(40),
-    main: "./candidate/worker.js",
+    main: "./candidate/proof-worker.js",
   };
   const before = JSON.stringify(wrangler);
   assert.equal(buildProofConfig(wrangler, options).env.proof.assets, undefined);
   assert.equal(JSON.stringify(wrangler), before, "the input is not mutated");
+  assert.throws(
+    () => buildProofConfig(wrangler, { ...options, main: "./candidate/worker.js" }),
+    /Only the sealed Go proof bundle/u,
+  );
   const withAssets = structuredClone(wrangler);
   withAssets.env.proof.assets = {
     directory: `./${proofAssetsDirName}`,
