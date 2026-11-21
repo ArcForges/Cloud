@@ -49,6 +49,8 @@ commands:
                                    expand checked schema10/11 in offline maintenance with a verified backup and writer fence
   migrate lifecycle --archive <new path> --metadata <new path>
                                    expand checked schema12 to13 with a verified backup, seven-schema fence and new runtime roles
+  migrate contract --archive <new path> --metadata <new path> --witness-database <new database> --witness-role <new role>
+                                   verify an isolated predecessor restore before retiring drained legacy database objects
   admin ensure-database            create the center's database if it does not exist
   admin backup-logical --archive <new path> --metadata <new path>
                                    capture a checked logical backup and its trusted snapshot metadata
@@ -114,6 +116,9 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 	}
 	if len(arguments) >= 2 && arguments[0] == "migrate" && arguments[1] == "lifecycle" {
 		return transitionCommand(arguments[2:], lookup, stdout, stderr, true)
+	}
+	if len(arguments) >= 2 && arguments[0] == "migrate" && arguments[1] == "contract" {
+		return contractionCommand(arguments[2:], lookup, stdout, stderr)
 	}
 	command := "serve"
 	if len(arguments) > 0 {

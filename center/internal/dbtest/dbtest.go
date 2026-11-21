@@ -42,17 +42,27 @@ type Database struct {
 // It is not a substitute for the finite predecessor/restore migration drills.
 func New(t *testing.T) *Database {
 	t.Helper()
-	url, name := pgtest.Database(t)
-	group := name + "_runtime"
+	return newDatabase(t, fixtureMigrations(t))
+}
+
+func fixtureMigrations(t *testing.T) []migrate.Migration {
+	t.Helper()
 	build, err := migrate.Load(schema.Migrations())
 	if err != nil {
 		t.Fatal(err)
 	}
+	return build
+}
+
+func newDatabase(t *testing.T, build []migrate.Migration) *Database {
+	t.Helper()
+	url, name := pgtest.Database(t)
+	group := name + "_runtime"
 	// A native Windows run against remote TLS PostgreSQL took about 44s to migrate and 16s to rotate.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	migration := pgtest.Connect(t, url)
-	if _, err = migrate.Apply(ctx, migration, build, migrate.Options{Runner: "test", RuntimeRole: group}); err != nil {
+	if _, err := migrate.Apply(ctx, migration, build, migrate.Options{Runner: "test", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
 	rotation, err := provision.Rotate(ctx, pgtest.Connect(t, url), provision.Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test", ProbeTimeout: 10 * time.Second})
@@ -62,14 +72,14 @@ func New(t *testing.T) *Database {
 	return &Database{T: t, Migration: migration, Runtime: store.New(pgtest.Pool(t, rotation.RuntimeURL, 8)), URL: url, RuntimeURL: rotation.RuntimeURL, Name: name}
 }
 
-// NewLegacyRouting is only the retained V1 routing regression fixture. It uses
-// real current PostgreSQL schema, account authority and cryptography, but its
-// test owner removes exactly the three retirement triggers so historical V1
-// dispatch can still be exercised. It proves neither V2 route availability nor
-// the production retirement/migration boundary. Ordinary/security tests use New.
+// NewLegacyRouting is the retained V1 routing regression fixture. Its disposable
+// PostgreSQL database uses the exact schema 16 predecessor and native runtime
+// credentials. Its test owner verifies and removes the three known retirement
+// triggers to exercise historical routing storage with real account authority.
 func NewLegacyRouting(t *testing.T) *Database {
 	t.Helper()
-	d := New(t)
+	const legacyRoutingSchemaVersion = 16
+	d := newDatabase(t, fixtureMigrations(t)[:legacyRoutingSchemaVersion])
 	ctx := context.Background()
 	for _, item := range [][2]string{{"routed_call", "legacy_task_frozen"}, {"routed_file_call", "legacy_file_frozen"}, {"routed_file_target", "legacy_target_frozen"}} {
 		var owned bool

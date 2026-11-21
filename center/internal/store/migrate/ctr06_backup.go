@@ -102,9 +102,12 @@ func ctr06ArchiveInventory(raw []byte, objects []ctr06BackupLargeObject) error {
 }
 
 func ctr06ArchiveInventoryFor(raw []byte, inventory string, objects []ctr06BackupLargeObject) error {
-	if len(raw) == 0 || len(raw) > restoreTOCMax ||
-		!strings.Contains(string(raw), "\n;     Format: CUSTOM\n") ||
-		!regexp.MustCompile(`(?m)^;     Dumped by pg_dump version: 18[.][0-9]+([^\n]*)$`).Match(raw) {
+	if len(raw) == 0 || len(raw) > restoreTOCMax {
+		return errors.New("archive inventory or custom PostgreSQL 18 format is unsupported")
+	}
+	header := bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+	if !bytes.Contains(header, []byte("\n;     Format: CUSTOM\n")) ||
+		!regexp.MustCompile(`(?m)^;     Dumped by pg_dump version: 18[.][0-9]+([^\n]*)$`).Match(header) {
 		return errors.New("archive inventory or custom PostgreSQL 18 format is unsupported")
 	}
 	expected := make(map[string]int)
@@ -519,6 +522,7 @@ func ctr06ArchiveFacts(ctx context.Context, tool string, env []string, archive *
 	const copyHeader = "COPY platform.schema_migration (version, name, sha256, applied_at, applied_by, duration_ms, runner) FROM stdin;"
 	inCopy, ended, count := false, false, 0
 	for _, line := range strings.Split(string(migrationSQL), "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if line == copyHeader {
 			if inCopy || ended {
 				return nil, errors.New("the archived migration history is ambiguous")
@@ -546,7 +550,7 @@ func ctr06ArchiveFacts(ctx context.Context, tool string, env []string, archive *
 	if err != nil {
 		return nil, errors.New("the archived sequence state is unreadable")
 	}
-	pattern := regexp.MustCompile(`(?m)^SELECT pg_catalog[.]setval\('platform[.]outbox_sequence_seq', (-?[0-9]+), (true|false)\);$`)
+	pattern := regexp.MustCompile(`(?m)^SELECT pg_catalog[.]setval\('platform[.]outbox_sequence_seq', (-?[0-9]+), (true|false)\);\r?$`)
 	matches := pattern.FindAllStringSubmatch(string(sequenceSQL), -1)
 	if len(matches) != 1 {
 		return nil, errors.New("the archived sequence state is missing or ambiguous")

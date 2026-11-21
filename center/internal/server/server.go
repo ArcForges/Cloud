@@ -45,7 +45,6 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/management"
-	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/pages"
 	"github.com/ArcForges/Cloud/center/internal/platform"
@@ -94,11 +93,12 @@ type Center struct {
 	drain func(context.Context) error
 	// schemaVersion is the database's migration version seen by the last readiness check (-1 before one succeeded), and
 	// buildVersion the number of migrations of this build.
-	schemaVersion atomic.Int64
-	buildVersion  int
-	pulse         pulseSampler
-	httpSlots     *slots
-	grpcSlots     *slots
+	schemaVersion  atomic.Int64
+	databaseSchema func(context.Context) error
+	buildVersion   int
+	pulse          pulseSampler
+	httpSlots      *slots
+	grpcSlots      *slots
 	// startedAt is the process start instant the definitions fact is stamped with (store-1), captured once by Run before the first
 	// attempt and used unchanged by every retry, so a late retry never displaces a newer start's fact.
 	startedAt time.Time
@@ -189,13 +189,14 @@ func New(cfg config.Config, logger *slog.Logger, options Options) (*Center, erro
 		center.pools = append(center.pools, namedPool{"runtime", pool})
 		center.Store = store.New(pool)
 		center.Entitlements = entitlement.NewService(center.Store, center.FeatureConfiguration, nil, options.Clock)
-		center.ready = append(center.ready, component{"database", pool.Ping}, component{"databaseSchema", func(ctx context.Context) error {
+		center.databaseSchema = func(ctx context.Context) error {
 			version, err := migrate.CheckCompatible(ctx, pool, build)
 			if err == nil {
 				center.schemaVersion.Store(int64(version))
 			}
 			return err
-		}})
+		}
+		center.ready = append(center.ready, component{"database", pool.Ping}, component{"databaseSchema", center.databaseSchema})
 		if cfg.HelloFromDatabase {
 			greeting, backend = hello.Database(pool), BackendRuntime
 		}
@@ -342,7 +343,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants,
 		// Remediation still cancels preserved approvals from the retired mobile surface. Registration order keeps the existing lock order.
-		AccountParticipants: append(fleet.AccountParticipants(), mobileauth.ApprovalParticipant{})})
+		AccountParticipants: fleet.AccountParticipants()})
 	c.drain = service.Drain
 	// The per-account resource controls stand in front of every gated row (AF-CTR-05 E0, CTR5-GATE-05): a gated row without one
 	// refuses the composition.
@@ -840,6 +841,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	defer center.Close()
+	if err := center.awaitRuntimeSchema(ctx); err != nil {
+		return err
+	}
 	// Development definitions may be recorded only on a store without a merchant environment.
 	if err := center.checkCommerceFixtureStore(ctx); err != nil {
 		return err
@@ -952,6 +956,31 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	center.stopServing(servers, routes.ShutdownMilliseconds*time.Millisecond)
 	logger.Info("center stopped")
 	return result
+}
+
+// awaitRuntimeSchema lets a configured store recover during a bounded startup
+// window. Only a compatible store may reach listeners or background writers.
+func (c *Center) awaitRuntimeSchema(ctx context.Context) error {
+	if c.databaseSchema == nil {
+		return nil
+	}
+	startup, stop := context.WithTimeout(ctx, 10*time.Second)
+	defer stop()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		check, cancel := context.WithTimeout(startup, 2*time.Second)
+		err := c.databaseSchema(check)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-startup.Done():
+			return fmt.Errorf("the configured runtime database was not admitted: %w", err)
+		case <-ticker.C:
+		}
+	}
 }
 
 // stopServing is the shutdown sequence of Run: the listeners stop, then the identity surface's deliveries drain, all within one

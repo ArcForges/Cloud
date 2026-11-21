@@ -39,13 +39,17 @@ class InventoryModelTests(unittest.TestCase):
         applied = None if version is None else [dict(entry) for entry in self.source[:version]]
         results = [{"kind": "transaction", "read_only": True, "other_sessions": 0, "migration_locks": 0, "owned_tables": owned},
                    {"kind": "ledger", "rows": applied}]
-        if version in {10, 11, 16}:
+        if version in {10, 11, 16, 17}:
             counts = counts or {}
             defaults = {name: 0 for name in preflight.COUNTS}
             if version == 10:
                 defaults.update(dict.fromkeys(preflight.SCHEMA11_COUNTS))
             if version == 16:
                 defaults.update(dict.fromkeys(preflight.CURRENT_COUNTS, 0))
+            if version == 17:
+                defaults.update(dict.fromkeys(preflight.LEGACY_SOURCE_COUNTS & defaults.keys()))
+                defaults.update(dict.fromkeys(preflight.CONTRACTED_COUNTS, 0))
+                defaults.update(ready_contraction_receipts=1, retired_relations_present=0)
             defaults.update(counts)
             results.extend({"kind": "count", "name": name, "value": value} for name, value in defaults.items())
         return results
@@ -80,13 +84,27 @@ class InventoryModelTests(unittest.TestCase):
         report = self.inventory(self.rows(16, counts=counts))
         self.assertEqual("center16", report["classification"])
         self.assertTrue(report["migration_ledger_matches_source"])
-        self.assertEqual(self.source, report["source_migrations"])
-        self.assertEqual(self.source, report["applied_migrations"])
+        self.assertEqual(self.source[:16], report["source_migrations"])
+        self.assertEqual(self.source[:16], report["applied_migrations"])
         self.assertIn("0001..0016", report["prerequisites"][-1])
         self.assertIn("deployment_cohort_backup_and_authority_qualification_required", report["blockers"])
         for name, value in counts.items():
             self.assertEqual(value, report["counts"][name])
             self.assertIn(name, report["blockers"])
+
+    def test_contraction_requires_retired_relations_absent_and_ready_record(self):
+        report = self.inventory(self.rows(17, counts={"runtime_floor_rows": 1, "restore_admission_rows": 1}))
+        self.assertEqual("center17", report["classification"])
+        self.assertEqual(self.source, report["applied_migrations"])
+        self.assertIn("0001..0017", report["prerequisites"][-1])
+        self.assertIsNone(report["counts"]["unsettled_routed_calls"])
+        self.assertEqual(0, report["counts"]["retired_relations_present"])
+        for counts in ({"retired_relations_present": 1}, {"ready_contraction_receipts": 0},
+                       {"ready_contraction_receipts": 2}):
+            with self.subTest(counts=counts):
+                invalid = self.inventory(self.rows(17, counts=counts))
+                self.assertEqual("unknown", invalid["classification"])
+                self.assertIn("contracted_schema_identity_unproven", invalid["blockers"])
 
     def test_fresh_or_unledgered_objects(self):
         self.assertEqual("fresh", self.inventory(self.rows(None, owned=0))["classification"])
@@ -100,8 +118,8 @@ class InventoryModelTests(unittest.TestCase):
                 report = self.inventory(self.rows(version))
                 self.assertEqual("unknown", report["classification"])
                 self.assertIn("unsupported_or_incomplete_migration_baseline", report["blockers"])
-        future = self.rows(16)
-        future[1]["rows"].append({"version": 17, "name": "0017_fixture.sql", "sha256": "a" * 64})
+        future = self.rows(17)
+        future[1]["rows"].append({"version": 18, "name": "0018_fixture.sql", "sha256": "a" * 64})
         self.assertEqual("newer", self.inventory(future)["classification"])
 
     def test_mismatched_migration_and_missing_current_table_are_unknown(self):
@@ -144,7 +162,7 @@ class InventoryModelTests(unittest.TestCase):
         self.assertTrue(sql.startswith("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;\n"))
         self.assertTrue(sql.endswith("ROLLBACK;\n"))
         self.assertIn("SET LOCAL search_path=pg_catalog", sql)
-        self.assertIn("ORDER BY version LIMIT 17", sql)
+        self.assertIn("ORDER BY version LIMIT 18", sql)
         self.assertIn("AND relkind='r'", sql)
         for table in ("fleet.routed_call", "fleet.routed_file_call"):
             self.assertIn(f"FROM {table} WHERE state = 7;", sql)
@@ -238,7 +256,7 @@ class PostgresInventoryTests(unittest.TestCase):
     def test_newer(self):
         self.fixture(11)
         self.run_sql("INSERT INTO platform.schema_migration (version,name,sha256,duration_ms,runner) "
-                     "VALUES (17,'0017_fixture.sql',repeat('a',64),0,'fixture')")
+                     "VALUES (18,'0018_fixture.sql',repeat('a',64),0,'fixture')")
         self.assertEqual("newer", self.inventory()["classification"])
 
     def test_checksum_drift(self):
