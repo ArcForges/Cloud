@@ -421,6 +421,150 @@ test("self-host static publication verifies one digest release and checks every 
   );
 });
 
+const dashboardActivity = "_framework/arcforges-dashboard-activity.a1b2c3d4e5.js";
+
+test("self-host Dashboard stages the verified shell on only its declared document routes", async (t) => {
+  const fixture = await selfHostStaticFixture(t);
+  const shell = profileShell.replace(
+    "<title>ArcForges</title>",
+    "<title>ArcForges Dashboard</title>",
+  );
+  const built = profileBundle({ shell, files: { [dashboardActivity]: "export {};" } });
+  const archive = await fixture.archivePath(built);
+  const dashboard = { centerOrigin: "https://center.example.test:8443/", name: "Private Center" };
+  const legacy = await selfHostStaticOrigin("stage", archive, built.digest, fixture.releases);
+  const release = await selfHostStaticOrigin(
+    "stage",
+    archive,
+    built.digest,
+    fixture.releases,
+    dashboard,
+  );
+  assert.notEqual(release, legacy);
+  assert.match(path.basename(release), /^dashboard-[a-f0-9]{64}$/u);
+  assert.equal(
+    await selfHostStaticOrigin("verify", archive, built.digest, fixture.releases, dashboard),
+    release,
+  );
+  assert.equal(await readFile(path.join(release, "site", "account", "index.html"), "utf8"), shell);
+
+  const fragment = await readFile(path.join(release, "static-origin.caddy"), "utf8");
+  const matcher = fragment.match(
+    /@af_static_dashboard \{\n {2}method GET HEAD\n {2}expression `\{orig_uri\} == \{orig_path\} \+ \{orig_\?query\} && \(\{orig_path\} in (\[[^\n]+\]) \|\| \{orig_path\}\.matches\(("[^"]+")\)\)`\n\}/u,
+  );
+  assert(matcher?.[1] && matcher[2]);
+  const documents = JSON.parse(matcher[1]) as string[];
+  const deviceDocument = new RegExp(JSON.parse(matcher[2]) as string, "u");
+  assert.deepEqual(documents, [
+    "/overview",
+    "/devices",
+    "/security",
+    "/account",
+    "/account/subscription",
+  ]);
+  const device = "/devices/77bfe61e-b5ea-4a5b-8c22-3ab49787a10e";
+  const item = "99b6f777-c1ed-4385-aa31-32df881ea31b";
+  for (const suffix of [
+    "",
+    "/resources",
+    "/sandboxes",
+    `/sandboxes/${item}`,
+    "/runs",
+    `/runs/${item}`,
+  ])
+    assert(deviceDocument.test(device + suffix), suffix);
+  for (const near of [
+    "/",
+    "/Overview",
+    "/overview/",
+    "/devices/",
+    "/devices/not-a-guid",
+    "/devices//77bfe61e-b5ea-4a5b-8c22-3ab49787a10e",
+    "/devices/77BFE61E-B5EA-4A5B-8C22-3AB49787A10E",
+    `${device}/unknown`,
+    `${device}/sandboxes/`,
+    `${device}/sandboxes/../runs`,
+    `${device}/runs/not-a-guid`,
+    `${device}/resources/${item}`,
+    "/account/",
+    "/account/billing",
+    "/account/index.html",
+    "/chat",
+    "/api",
+    "/api/account/recovery",
+    "/readyz",
+    "/metrics",
+  ])
+    assert(!documents.includes(near) && !deviceDocument.test(near), near);
+  assert(fragment.includes("rewrite * /account/index.html"));
+  assert(fragment.includes(`Content-Security-Policy "${policyOf(shell)}"`));
+  assert(!fragment.includes("af_static_chat") && !fragment.includes("try_files"));
+  assert.match(
+    fragment,
+    /@af_static_dashboard_settings \{\n {2}method GET HEAD\n {2}expression `[^\n]+ in \["\/appsettings\.json"\]`\n\}/u,
+  );
+  assert.match(
+    fragment,
+    /route @af_static_dashboard_settings \{\n {2}header Cache-Control "no-store"\n/u,
+  );
+
+  const settings = path.join(release, "site", "appsettings.json");
+  const expected = {
+    Dashboard: {
+      CenterOrigin: "https://center.example.test:8443",
+      Mode: "self-hosted",
+      Name: "Private Center",
+    },
+  };
+  assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), expected);
+  const renamed = { ...dashboard, name: "Second Center" };
+  assert.notEqual(
+    await selfHostStaticOrigin("stage", archive, built.digest, fixture.releases, renamed),
+    release,
+  );
+  assert.deepEqual(JSON.parse(await readFile(settings, "utf8")), expected);
+  const originalSettings = await readFile(settings, "utf8");
+  await writeFile(settings, originalSettings.replace("Private Center", "Another Center"));
+  await assert.rejects(
+    selfHostStaticOrigin("verify", archive, built.digest, fixture.releases, dashboard),
+    /Staged bytes differ/u,
+  );
+});
+
+test("self-host Dashboard refuses old profiles and invalid public settings before staging", async (t) => {
+  const fixture = await selfHostStaticFixture(t);
+  const old = profileBundle();
+  const oldArchive = await fixture.archivePath(old);
+  await assert.rejects(
+    selfHostStaticOrigin("stage", oldArchive, old.digest, fixture.releases, {
+      centerOrigin: "https://center.example.test",
+    }),
+    /compiled Dashboard lifecycle module/u,
+  );
+
+  const built = profileBundle({ files: { [dashboardActivity]: "export {};" } });
+  const archive = await fixture.archivePath(built);
+  for (const centerOrigin of [
+    "http://center.example.test",
+    "https://user:password@center.example.test",
+    "https://center.example.test/api",
+    "https://center.example.test?test=1",
+    "https://center.example.test/#part",
+  ])
+    await assert.rejects(
+      selfHostStaticOrigin("stage", archive, built.digest, fixture.releases, { centerOrigin }),
+      /canonical HTTPS origin/u,
+    );
+  await assert.rejects(
+    selfHostStaticOrigin("stage", archive, built.digest, fixture.releases, {
+      centerOrigin: "https://center.example.test",
+      name: "a".repeat(4096),
+    }),
+    /byte limit/u,
+  );
+  assert.deepEqual(await readdir(fixture.releases), []);
+});
+
 test("self-host static admission leaves the release store empty after malformed or mismatched archives", async (t) => {
   const fixture = await selfHostStaticFixture(t);
   const built = profileBundle();
