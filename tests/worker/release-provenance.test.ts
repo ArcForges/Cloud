@@ -153,7 +153,6 @@ function imageFixture() {
   });
   cpSync(path.join(root, "LICENSE"), path.join(directory, "LICENSE"));
   // An explicitly synthetic ELF prefix tests legal packaging only; Docker tests execute the real binary.
-  writeFileSync(path.join(directory, "ArcForges.Cloud"), Buffer.from([127, 69, 76, 70, 1]));
   writeFileSync(path.join(directory, "arcforges-center"), Buffer.from([127, 69, 76, 70, 2]));
   const cleanup = () => {
     assert.equal(path.dirname(directory), os.tmpdir());
@@ -180,25 +179,25 @@ test("complete image legal fixture validates and binds source and concrete membe
     f.cleanup();
   }
 });
-for (const change of [
-  "missing licence",
-  "changed notice",
-  "extra resource",
-  "wrong source",
-  "same-length changed source",
-])
+for (const [change, refusal] of [
+  ["missing licence", /Unclassified or missing image member/u],
+  ["changed notice", /Changed image legal text: NOTICE/u],
+  ["extra resource", /Unclassified or missing image member/u],
+  ["retired C# executable", /Unclassified or missing image member/u],
+  ["wrong source", /Changed image source receipt/u],
+  ["same-length changed source", /Changed image source receipt/u],
+] as const)
   test(`reject image with ${change}`, () => {
     const f = imageFixture();
     try {
       if (change === "missing licence")
-        rmSync(path.join(f.directory, "notices/third-party/Protobuf.LICENSE.txt"));
+        rmSync(path.join(f.directory, "notices/third-party/Go.LICENSE.txt"));
       if (change === "changed notice")
-        writeFileSync(
-          path.join(f.directory, "notices/third-party/DotNet.Runtime.NOTICES.txt"),
-          "MIT\n",
-        );
+        writeFileSync(path.join(f.directory, "notices/NOTICE"), "MIT\n");
       if (change === "extra resource")
         writeFileSync(path.join(f.directory, "unreviewed.js"), "extra");
+      if (change === "retired C# executable")
+        writeFileSync(path.join(f.directory, "ArcForges.Cloud"), Buffer.from([127, 69, 76, 70, 1]));
       if (change === "wrong source")
         writeFileSync(path.join(f.directory, "notices/provenance.json"), "{}\n");
       if (change === "same-length changed source") {
@@ -208,7 +207,7 @@ for (const change of [
         bytes.writeUInt8(bytes.readUInt8(offset) ^ 1, offset);
         writeFileSync(file, bytes);
       }
-      assert.throws(() => verifyImageFiles(root, revision, f.directory));
+      assert.throws(() => verifyImageFiles(root, revision, f.directory), refusal);
     } finally {
       f.cleanup();
     }
@@ -232,6 +231,7 @@ test("distribution cannot omit legal text or substitute a source receipt", () =>
     const legal = legalBundle(root, revision);
     write("legal-notices.json", legal);
     verifyReleaseFiles(root, candidate, revision, imageId);
+    assert(Object.hasOwn(legal.files, "third-party/Containers.LICENSE.txt"));
     delete legal.files["third-party/Containers.LICENSE.txt"];
     write("legal-notices.json", legal);
     assert.throws(
@@ -246,7 +246,7 @@ test("distribution cannot omit legal text or substitute a source receipt", () =>
   }
 });
 
-test("reject a missing or non-native Go executable in the dual-runtime image", () => {
+test("reject a missing or non-native executable in the Go image", () => {
   const fixture = imageFixture();
   try {
     writeFileSync(path.join(fixture.directory, "arcforges-center"), "not an ELF executable");
