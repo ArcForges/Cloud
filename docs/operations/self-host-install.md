@@ -110,7 +110,7 @@ unset binding
   "$CENTER" migrate apply
   "$CENTER" admin register-signing-key --purpose command --kid selfhost-command-01 \
     --public-key-file "$KEY_DIR/command-public.pem" --secret-binding ARCFORGES_CENTER_KEY_SELFHOST \
-    --not-before "$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)" \
+    --not-before "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --not-after "$(date -u -d '+180 days' +%Y-%m-%dT%H:%M:%SZ)"
   export ARCFORGES_CENTER_RUNTIME_SECRET_FILE="$KEY_DIR/runtime-01.json"
   "$CENTER" admin rotate-runtime-credential
