@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// CLOUD.84 S40(1): the C# generator is the only generator of the storage plans, and the TypeScript test-support helpers in
-// eng/verification/storage-plans.ts are kept only so that the remaining suites can build a manifest. This parity test makes the two
-// impossible to drift apart: the manifest built here must carry the same hash and the same plans as the C# outputs.
+// CLOUD.84 S40(1): the TypeScript test-support manifest must match the archived C# generator output
+// and the Worker plan dictionary.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { readD1Reference } from "../../eng/verification/physical-schema.ts";
 import { buildManifest, type PlanDefinition } from "../../eng/verification/storage-plans.ts";
 import { manifestHash, plans } from "../../worker/storage/plans.generated.ts";
 import { repositoryRoot } from "./support/sqlite-d1.ts";
@@ -15,7 +15,7 @@ const byIdentity = (a: { id: string; version: number }, b: { id: string; version
   a.id === b.id ? a.version - b.version : a.id < b.id ? -1 : 1;
 
 const manifest = buildManifest(repositoryRoot);
-const csharpManifest = read("src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs");
+const csharpManifest = readD1Reference("plan");
 const csharpHash = /public const string Hash = "([0-9a-f]{64})";/u.exec(csharpManifest)?.[1];
 
 test("the TypeScript test-support manifest has the C# manifest hash and the Worker dictionary hash", () => {

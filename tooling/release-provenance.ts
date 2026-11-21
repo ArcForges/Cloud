@@ -786,7 +786,7 @@ export function verifyReleaseFiles(
     "notices/provenance.json": hash(json(expected)),
   };
   for (const [file, value] of Object.entries(expected.legal)) known[`notices/${file}`] = value;
-  const executables = releaseProfile(owner).profile.image.executables ?? ["ArcForges.Cloud"];
+  const executables = releaseProfile(owner).profile.image.executables;
   assert.deepEqual(Object.keys(members).sort(), [...Object.keys(known), ...executables].sort());
   for (const executable of executables) digest(members[executable]);
   for (const [file, value] of Object.entries(known))

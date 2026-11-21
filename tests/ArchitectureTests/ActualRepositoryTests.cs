@@ -10,11 +10,11 @@ public sealed class ActualRepositoryTests
     private static readonly string Root = CloudRepository.FindRoot();
 
     [Fact]
-    public void SolutionProjectFilesAndRolesAreTheSameClassifiedProjects()
+    public void SolutionContainsOnlyTheActiveManagedProjectsAndEveryProjectFileIsClassified()
     {
-        var files = TrackedFiles().Where(file => file.EndsWith(".csproj", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(CloudRepository.Classifications.Count, files.Length);
-        Assert.Empty(RepositoryInventoryPolicy.CheckProjects(CloudRepository.Read(Root, "Cloud.slnx"), files, CloudRepository.Classifications));
+        var files = TrackedFiles().Where(file => file.EndsWith(".csproj", StringComparison.Ordinal));
+        Assert.Empty(RepositoryInventoryPolicy.CheckProjects(CloudRepository.Read(Root, "Cloud.slnx"),
+            files, CloudRepository.ActiveClassifications));
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public sealed class ActualRepositoryTests
         var projects = ProjectFiles();
         Assert.Empty(RepositoryInventoryPolicy.CheckLicences(CloudRepository.Read(Root, "eng/policy/licence-boundary.json"), projects, CloudRepository.Read(Root, "Directory.Build.props")));
         var exceptions = CloudRepository.ParseExceptions(CloudRepository.Read(Root, "eng/policy/exceptions.json"));
-        Assert.Empty(RepositoryInventoryPolicy.CheckExceptions(exceptions, CloudRepository.Classifications, DateOnly.FromDateTime(DateTime.UtcNow)));
+        Assert.Empty(RepositoryInventoryPolicy.CheckExceptions(exceptions, CloudRepository.ActiveClassifications, DateOnly.FromDateTime(DateTime.UtcNow)));
         // Cloud is AGPL-3.0-only: the architecture host consumes the AGPL ArcForges.Build.Policy package directly with no RP-03 row.
         Assert.Empty(exceptions);
     }
@@ -37,9 +37,9 @@ public sealed class ActualRepositoryTests
     }
 
     [Fact]
-    public void TheNativeAotServiceDeclaresItsPostureInTheProjectFile()
+    public void TheLegacyNativeAotProjectFilePreservesItsReviewedPosture()
     {
-        Assert.Empty(CloudAotPolicy.CheckProject(CloudRepository.Read(Root, CloudRepository.Service), CloudRepository.Read(Root, "Directory.Build.props")));
+        Assert.Empty(CloudAotPolicy.CheckProject(ArchivedManagedSource.Read(CloudRepository.Service), ArchivedManagedSource.Read("Directory.Build.props")));
     }
 
     [Fact]

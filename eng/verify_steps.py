@@ -192,7 +192,9 @@ CANDIDATE = (
 # therefore removed first, so each verification compiles every project once, as CI does; restore output and the RID
 # outputs of the candidate's tool publish stay.
 FRESH_INTERMEDIATES = (
-    "set -o pipefail; find src tests tools -type f -regextype posix-extended "
+    "set -o pipefail; managed_intermediate_roots=(src tests); "
+    "if [ -d tools ]; then managed_intermediate_roots+=(tools); fi; "
+    "find \"${managed_intermediate_roots[@]}\" -type f -regextype posix-extended "
     "-regex '.*/obj/(Debug|Release)/net[0-9.]+/((ref|refint)/)?[^/]+[.](dll|pdb)' -print -delete | wc -l "
     "| sed 's/$/ intermediate assemblies removed/'"
 )

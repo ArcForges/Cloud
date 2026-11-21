@@ -5,19 +5,20 @@
 // batch whose statements run in the fixed order under D1's immediate foreign-key enforcement (the user row before its credential and
 // workspace), the whole-batch rollback of a false guard, and simultaneous writers through the binding (several "Containers" enrolling
 // or linking the same credential, revoking a user's last two credentials) committing exactly once.
-// Transcript mode (CLOUD.72): the identity store's plan calls exactly as C# built them, recorded with the SQLite oracle's answers by
-// tests/ArcForges.Cloud.Tests/Identity/IdentityStoreTranscriptTests.cs into tests/ArcForges.Cloud.Tests/Identity/Vectors/
-// identity-store-transcript.json, are executed in order through the same production Worker executor on a fresh workerd D1, and each
-// answer (status, changes, rows) and the row counts after each step are compared with the recorded ones generically; a concurrent group
+// Transcript mode (CLOUD.72): the frozen Cloud 9b8796e identity-store-transcript.json contains the identity store's C# plan calls
+// and the SQLite oracle's answers, recorded by IdentityStoreTranscriptTests.cs. These calls run through the same production
+// Worker executor on a fresh workerd D1. Each answer (status, changes, rows) and the row counts after each step are compared
+// with the recorded values generically; a concurrent group
 // is executed simultaneously and compared as a multiset. The transcript carries no TypeScript business assertion: what the calls mean is
 // decided and asserted in C#; this run only shows that workerd's D1 answers C#-built calls as the oracle did.
 // It is NOT a Cloudflare provider result: no deployed D1, no network path, no provider limit and no REST batch are exercised (the
 // provider's REST batch atomicity stays a deferred live check under the RES-cloud-deployment lease, and CLOUD.70 owns the deployment
 // migration step). Never CI; it starts local workerd, reads no credential and writes an evidence file under artifacts/.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import type { D1Scalar, ExecutePlanResponse } from "@arcforges/ai-internal";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { loadCatalog } from "../migrations/catalog.ts";
@@ -131,15 +132,6 @@ function addCall(account: Account, subject: string, userRevision: number) {
 // ---------------------------------------------------------------------------------------------------------------------------
 // Transcript mode: C#-built calls replayed generically
 // ---------------------------------------------------------------------------------------------------------------------------
-
-export const transcriptPath = path.join(
-  root,
-  "tests",
-  "ArcForges.Cloud.Tests",
-  "Identity",
-  "Vectors",
-  "identity-store-transcript.json",
-);
 
 export interface TranscriptCall {
   plan: string;
@@ -272,6 +264,19 @@ export async function replayTranscript(db: D1Like, transcript: Transcript): Prom
 export async function main(): Promise<void> {
   assert.notEqual(process.env.CI, "true", "The local D1 run is opt-in, never CI.");
   const started = new Date().toISOString();
+  const transcriptBytes = execFileSync(
+    "python",
+    [
+      "-E",
+      "-s",
+      "eng/verification/check_legacy_cloud_history.py",
+      "--d1-reference",
+      "identity-transcript",
+    ],
+    { cwd: root, maxBuffer: 512 * 1024, timeout: 30_000 },
+  );
+  const transcript = parseTranscript(transcriptBytes.toString("utf8"));
+  const transcriptSha256 = createHash("sha256").update(transcriptBytes).digest("hex");
   const mf = new Miniflare(
     convertV4MiniflareOptions({
       modules: true,
@@ -458,12 +463,8 @@ export async function main(): Promise<void> {
       return `${rounds} rounds of two simultaneous revocations of a user's only two credentials: one committed, one refused, one credential always remained; the last credential is refused`;
     });
 
-    await scenario(
-      "the-csharp-store-transcript-replays-on-workerd-d1-as-on-the-oracle",
-      async () => {
-        const transcript = parseTranscript(await readFile(transcriptPath, "utf8"));
-        return replayTranscript((await database(mf, "TRANSCRIPT")) as never, transcript);
-      },
+    await scenario("the-csharp-store-transcript-replays-on-workerd-d1-as-on-the-oracle", async () =>
+      replayTranscript((await database(mf, "TRANSCRIPT")) as never, transcript),
     );
   } finally {
     await mf.dispose();
@@ -476,9 +477,7 @@ export async function main(): Promise<void> {
     kind: "local-emulation",
     cloudflareResult: false,
     sourceRevision: compat.sourceRevision,
-    transcriptSha256: createHash("sha256")
-      .update(await readFile(transcriptPath))
-      .digest("hex"),
+    transcriptSha256,
     emulated: "workerd D1 (SQLite) under Miniflare through the production Worker plan executor",
     notEmulated:
       "Cloudflare provider network path, REST batch semantics, real D1 limits and latency, a deployed database",

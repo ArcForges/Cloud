@@ -64,17 +64,23 @@ The user already has the paid Workers plan. Use the same account that owns `arcf
 1. In Cloudflare, create a scoped API token with **Account → Workers Scripts → Edit**, **Account → Containers → Edit**, **Zone → Workers Routes → Edit**, and **Zone → Zone → Read**. Some interfaces label Edit as Write. Limit account resources to the ArcForges hosting account and zone resources to `arcforges.com`. No DNS edit, Workers AI or R2 permission is needed for Hello. Zone Read lets Wrangler resolve the configured zone name. Container image publication needs Containers permission; an older Web-only token may lack it.
 2. In [Cloud repository environments](https://github.com/ArcForges/Cloud/settings/environments), use the repository's **cloudflare** environment. Environments and their secrets are not automatically shared from Web/AI.
 3. Add environment variable `CLOUDFLARE_ACCOUNT_ID` with the real 32-character account ID. Add environment secret `CLOUDFLARE_API_TOKEN` with the token from step 1. Never place the token in Variables, source, a browser client or chat.
-4. Restrict the environment to deployments from branch `main`. No manual reviewer is required for the requested automatic pipeline.
-5. Add environment secret `NEON_DATABASE_URL_DIRECT`: the direct (unpooled, not `-pooler`) URL of the Neon owner role, which is the migration role of the PostgreSQL store, with `sslmode=require` and `channel_binding=require` ([PostgreSQL store](postgres-store.md#deployment)). The existing secret `NEON_DATABASE_URL` (the Hello's pooled URL) stays for the C# rollback path. The runtime role's credential is not a GitHub secret: the deployment generates and rotates it and uploads it as the Worker secret `ARCFORGES_CENTER_DATABASE_URL`.
-6. Merge the verified PR. `CI / Deploy Cloudflare` will run after all required checks. There is no deploy-enable variable.
+4. Restrict the environment to deployments from branch `main`.
+5. Add environment secret `NEON_DATABASE_URL_DIRECT` for the PostgreSQL migration role. It is the direct, unpooled URL of the Neon owner role,
+   with `sslmode=require` and `channel_binding=require` ([PostgreSQL store](postgres-store.md#deployment)).
+   Keep `NEON_DATABASE_URL` for the separate pooled Hello role. The production deployment validates it when Neon Hello is enabled,
+   and the Worker forwards it to Go Hello only when no Center store URL is configured. The deployment generates and rotates the
+   Center runtime role's pooled credential and uploads it as the Worker secret `ARCFORGES_CENTER_DATABASE_URL`.
+6. The protected `CI / Deploy Cloudflare` job remains disabled. A verified merge supplies the candidate for the guarded release process.
 
 The agent can create the environment and set the already known Account ID. The account owner enters the secret in GitHub. Placeholder names in this guide are not working credentials and must not be installed as fake secrets.
 
 ## Pipeline and evidence
 
-PR checks use no cloud credentials. Main builds a versioned Linux Native AOT image and Worker candidate, with static/offline checks and legal/provenance inspection. The application is not executed by CI.
+PR checks use no cloud credentials. The main-push candidate job builds a versioned Linux Go image and seals it with the Worker
+bundle. The image's sole application executable and entrypoint is `/app/arcforges-center`. The candidate job checks the image
+and legal provenance through a stopped container and verifies the bundle offline.
 
-Publication consumes the candidate by its workflow artifact ID. Before anything is pushed or promoted, the gated PostgreSQL step runs the sealed image's own `arcforges-center migrate` with the migration role (`tooling/postgres-deploy.ts`, [PostgreSQL store](postgres-store.md#deployment)) and records `artifacts/postgres-gate-production.json`. The deployment entry point then performs one promotion identity/integrity check, requires both gate records (D1 and PostgreSQL) for this candidate, loads the image and checks the Docker image ID. It pushes that image, reads the live Worker version's runtime slot from Cloudflare (its version message `runtime-slot=<slot>`), rotates the other slot with the image's `admin rotate-runtime-credential` (proved directly and through the pooled endpoint, never printed), deploys the same bundled Worker with it using the returned registry digest and the new slot's label and, only after that deployment succeeded, records the slot as promoted with `admin confirm-runtime-credential` ([runtime credential rotation](postgres-store.md#runtime-credential-rotation)). Publication does not rebuild. Deployments serialize and reject superseded main commits.
+Publication consumes the candidate by its workflow artifact ID. Before anything is pushed or promoted, the gated PostgreSQL step runs the sealed image's own `arcforges-center migrate` with the migration role (`tooling/postgres-deploy.ts`, [PostgreSQL store](postgres-store.md#deployment)) and records `artifacts/postgres-gate-production.json`. The deployment entry point checks promotion identity and integrity, requires the D1 absence receipt (`not-applicable`) and the PostgreSQL gate for this candidate, loads the image and checks the Docker image ID. It pushes that image, reads the live Worker version's runtime slot from Cloudflare (its version message `runtime-slot=<slot>`), rotates the other slot with the image's `admin rotate-runtime-credential` (proved directly and through the pooled endpoint, never printed), deploys the same bundled Worker with it using the returned registry digest and the new slot's label and, only after that deployment succeeded, records the slot as promoted with `admin confirm-runtime-credential` ([runtime credential rotation](postgres-store.md#runtime-credential-rotation)). Publication does not rebuild. Deployments serialize and reject superseded main commits.
 
 `artifacts/deployment.json` records the source, version and image/digest after the provider operation succeeds, and the configured surfaces: those the deployed Worker version starts the Go center with (`center.configuredSurfaces`, as `ARCFORGES_CENTER_SURFACES` states them; the acceptance deployment's `artifacts/proof-deployment.json` records the same field). The field is computed from the version's configuration, not observed from the running center ([start environment](#start-environment-after-a-deployment)). A prerelease preserves the candidate and deployment record. There is no automatic health/RPC/readiness polling, browser test or public archive download. A successful deployment is reported as deployment completion, not live runtime acceptance.
 
@@ -84,8 +90,9 @@ See [validation policy](validation-policy.md) for the retained checks and post-m
 
 ### The proof deployment gate
 
-A `proof: deploy` dispatch of `CI` on `main` (owner decision of 2026-11-04) validates nothing again and builds no candidate: no
-`Source`, `quality`, CodeQL, candidate or `Verify` job runs. Its `proof-gate` job (`node eng/verification/proof-gate.ts gate`; no
+The proof deployment workflow is disabled. Its preserved gate for a `proof: deploy` dispatch of `CI` on `main`
+(owner decision of 2026-11-04) uses the already verified candidate. No `Source`, `quality`, CodeQL, candidate or `Verify`
+job runs. Its `proof-gate` job (`node eng/verification/proof-gate.ts gate`; no
 secret, no environment, read-only `contents`, `statuses`, `actions` and `pull-requests`) proves through the GitHub API, failing on any
 doubt:
 
@@ -99,15 +106,16 @@ doubt:
    was created by the User `deku2026` (login and numeric id), has no target URL and the description `eng/verify.py` writes after a
    passed full leg (`<n> steps passed in <s>s on <host> (profile full)`).
 4. **The candidate.** The one successful main-push run of `ci.yml` for the commit exists, its `Native AOT image and Worker build` job
-   succeeded, and its artifact `cloud-candidate-<run>-<attempt>` is unexpired and was uploaded by that run for that commit.
+   succeeded, and its artifact `cloud-candidate-<run>-<attempt>` is unexpired and was uploaded by that run for that commit. The proof
+   gate matches this exact workflow job name. Its current artifact contains the Go image and Worker bundle.
 
 `deploy-proof` needs the gate and `proof-access`. Instead of a candidate of its own run it runs
 `node eng/verification/proof-gate.ts fetch`: it reads the artifact again by its ID, downloads it with the job's token (`actions: read`), checks the archive's SHA-256
 against the API's artifact digest, refuses an entry that is not a plain file name, unpacks it into `artifacts/candidate` and checks
 that `manifest.json` (revision, clean, the version `0.1.0-ci.<run number>.<attempt>` of the main-push run, every member's digest),
 `build-identity.json` (source commit, run id, attempt and pipeline URL of that run) and `image-provenance.json` (revision, image ID)
-name exactly the dispatched commit, and that the checkout is that commit and tree. Only then do the two migration steps and
-`npm run deploy:proof` run, unchanged and with their own checks (`verifyCandidate`, the release provenance, both migration gates, the
+name exactly the dispatched commit, and that the checkout is that commit and tree. The D1 absence check, PostgreSQL migration and
+`npm run deploy:proof` then run with their own checks (`verifyCandidate`, the release provenance, both gate records and the
 newest-main check). `tooling/build-identity.ts` accepts the candidate's producer run, which the job names in `ARCFORGES_CANDIDATE_RUN_ID`,
 `_RUN_NUMBER` and `_RUN_ATTEMPT` from the gate's outputs, on a dispatch only; a main push refuses them. Production and proof therefore
 run the same bytes of one commit (before: production `0.1.0-ci.540.1` and proof `0.1.0-ci.542.1` for `2686a73`).
@@ -123,18 +131,27 @@ still runs is refused until that run completed; a candidate past its 30-day rete
 
 ## Ingress pipeline
 
-Every public call crosses the deny-by-default method table of the Worker and the admission pipeline of the host before any
+Every public call crosses the deny-by-default method table of the Worker and the Center's admission pipeline before any
 business code runs; the Container port is never published and a server stream is passed through frame by frame, never
 buffered. The route table, credential and CSRF rules, the frame guard, the proof-only probe and the checks that exist are in
-[cloud ingress](cloud-ingress.md). Merging changes the production Worker bundle and Container image through this same
-pipeline, but the production route table still serves only the anonymous Hello method; the probe and every session method
-existed only in the `proof` environment. Since AF-CTR-02 the `proof` Worker (deployed only by the manual dispatch on `main`) is the
-Go center's acceptance environment: official-hosted mode with the development fixtures of the plan configuration, its own
-PostgreSQL database and runtime role, and the C# proof routes no longer deployed ([PostgreSQL store](postgres-store.md#acceptance-environment)).
+[cloud ingress](cloud-ingress.md). The production route configuration serves the anonymous Hello method. The checked-in
+`proof` configuration selects the Go acceptance environment in official-hosted mode, with development plan fixtures, its own
+PostgreSQL database and runtime role. The C# proof routes belong to the historical release record.
+See the [PostgreSQL store](postgres-store.md#acceptance-environment).
 
 ## Runtime configuration and cost
 
-The production Container runs the Go center (`/app/arcforges-center`, [center](center.md)); `wrangler.json` selects it with `ARCFORGES_HELLO_RUNTIME=go` and states its explicit mode and public base URL (`ARCFORGES_CENTER_MODE=official-hosted`, `ARCFORGES_CENTER_PUBLIC_BASE_URL=https://arcforges.com/api`), which the Container class passes through unchanged; the center refuses to start without them. In official-hosted mode no gated feature is enabled until the plan configuration exists (AF-CTR-03); Hello and health are not gated. The runtime secrets are the runtime role's pooled URL `ARCFORGES_CENTER_DATABASE_URL`, rotated by every deployment and passed to the Go center, which reads the Hello greeting through it, and the Hello's pooled `NEON_DATABASE_URL`, which only the C# rollback path receives (`tooling/neon-runtime.ts`). The migration role's `NEON_DATABASE_URL_DIRECT` stays in the deployment job and never reaches the Worker or the Container. The deployment token is a GitHub CI credential, not an application credential and not forwarded into the Container. The C# Native AOT executable stays in the image as its default entrypoint for historical Hello proof. New official deployments require the Go runtime.
+The production Container runs `/app/arcforges-center` ([center](center.md)). `wrangler.json` selects the Go runtime with
+`ARCFORGES_HELLO_RUNTIME=go` and sets `ARCFORGES_CENTER_MODE=official-hosted` and
+`ARCFORGES_CENTER_PUBLIC_BASE_URL=https://arcforges.com/api`. The Container class passes the mode and URL through unchanged.
+The Center requires both at startup. Official-hosted gated features need a valid plan configuration (AF-CTR-03). Hello and
+health remain available independently of the plan configuration.
+
+The rotated `ARCFORGES_CENTER_DATABASE_URL` connects the Center to PostgreSQL through its pooled runtime role. When
+`ARCFORGES_NEON_HELLO=enabled`, Go Hello reads its greeting through that same role if the Center store is configured.
+Without a Center store URL, the Worker forwards the separate pooled `NEON_DATABASE_URL` for Go Hello
+(`worker/foundation/cloud-container.ts`, `tooling/neon-runtime.ts`). The direct `NEON_DATABASE_URL_DIRECT` credential
+belongs to the migration role and stays in the protected deployment job. The Cloudflare token stays in the job as well.
 
 The `identity` surface (AF-CTR-03, [accounts, sessions and devices](center-identity.md#surface-switch)) is switched by
 `FLAGSHIP_SURFACES`: production carries `""` (no surface; Hello only, so no account page is served there), the checked-in acceptance
@@ -192,7 +209,7 @@ the acceptance database with 400-day validity, subject to the seven-day successo
 the exact binding, purpose, algorithm, validity, retirement and full public-key hash. The registry stores no private key. Only after
 registration and inspection does the deploy combine the private command key and the alternate database credential in a short-lived
 runner-local secrets file for Wrangler. The generated config names only the selected binding. The Go proof entry forwards that exact
-secret only with `relay` enabled; production, C# and relay-disabled paths forward none. Candidate verification and its nested Git
+secret only with `relay` enabled in the proof configuration. Candidate verification and its nested Git
 commands receive no provider or database credential. The child receives the non-secret dispatch and gated producer-run identity needed
 to independently verify the sealed main-push candidate; missing, malformed or inconsistent context fails before image promotion.
 The main-head query gets only the GitHub token, Docker load/inspect no such credentials, Wrangler only the Cloudflare token, and center
@@ -251,7 +268,7 @@ test of the credential).
   `center/internal/config/mail.go` and a test compares them). A name is copied only when its value is a non-empty string. The provider unset,
   empty or `disabled` passes nothing, even when a token is present in the Worker's environment (Wrangler keeps secrets that a deployment
   does not list, so a stale one is expected); any other value, including one that is not a string, makes the Worker throw a fixed error
-  (`Unknown mail provider.`) before a Container starts. The C# runtime receives none. The passthrough does not depend on the store and does
+  (`Unknown mail provider.`) before a Container starts. The passthrough does not depend on the store and does
   not touch the egress switch: `enableInternet` is already on wherever the identity surface runs, because the store is a TCP connection.
 - **Rotation and removal** follow the start digest below: the digest covers every variable, so a rotated token, a changed sender or a provider
   switched off restarts the center before the next request.
@@ -323,9 +340,9 @@ what the deployed version starts the center with, computed from its configuratio
 `center.surfaces` and compares it with the actual deployment evidence (`none` on production; the E3 proof target is
 `identity,pages,operations,fleet,mobile,relay,nodes` after that deployment).
 
-A rollback to a Worker version from before AF-CTR-03 part A1b (`wrangler rollback` or the dashboard, which reach only the
-immediately previous version) brings back a Container class without the start digest. The running center keeps the start
-environment of the newer version (its surfaces, client-address header, identity policy and runtime credential) until it has been
+For an H-03-approved rollback to an admitted Worker version from before AF-CTR-03 part A1b, the historical Container class lacks
+the start digest. The running center keeps the start environment of the newer version (its surfaces, client-address header,
+identity policy and runtime credential) until it has been
 idle for `sleepAfter` (60 s); only its next start takes the rolled-back version's variables. Meanwhile its health can state other
 surfaces than the rolled-back Worker forwards, and on proof an identity call can be answered by a center whose surfaces differ from
 the Worker's. The operator step after such a rollback: read `/api/healthz` `center.surfaces`; while it differs from the rolled-back
@@ -340,11 +357,15 @@ deployment does.
 
 - A failed upload/provisioning does not necessarily mean nothing changed. Inspect the recorded workflow logs and Cloudflare Worker/Container state before retrying.
 - Diagnose an actual provider failure before a scoped retry. On a network failure, report the exact operation and stop; do not change proxy settings or blindly rerun.
-- For a source regression, revert the offending main commit with a PR. The normal pipeline builds, checks and deploys the reverted behavior under a new identity/version.
+- For a source regression, revert the offending main commit with a PR. The candidate pipeline builds and checks the reverted Go
+  behavior under a new identity and version. Deployment follows the guarded approval flow.
 - For urgent containment, remove only `arcforges.com/api/*` from `arcforges-cloud` routes or disable this Worker. Preserve `arcforges-web` and the apex Custom Domain. The Web connection page will show unavailable instead of fabricated success.
 - Retain candidate release archives and referenced registry images. Do not delete an image still used by a current/previous deployment.
 - The PostgreSQL store never migrates down: a rollback is an application revert on `main` over an expanded schema (expand and contract), and its data is recovered from Neon's history or a logical backup ([PostgreSQL store](postgres-store.md#recovery)). A Cloudflare version rollback (`wrangler rollback` or the dashboard) works only to the immediately previous version: an older version carries a runtime slot password that has since been rotated, and a version rollback also reverts the version's secrets. A failed migration rolls back completely and stops the deployment before promotion; the running revision is untouched.
-- Use the previously admitted Worker version and image for an H-03-approved rollback only after verifying their exact identities, current schema compatibility and live runtime credential slot. Keep the historical Hello proof and referenced image bytes for verification and recovery. Check the [official preflight](operations/official-preflight.md) before proposing a new Go deployment.
+- H-03 rollback compatibility applies to the exact previously admitted Worker version and image. Verify their identities, current schema
+  compatibility and live runtime credential slot before using that pair under an H-03 approval. Keep the historical Hello proof and
+  referenced image bytes for verification and recovery. Use the Go candidate and the [official preflight](operations/official-preflight.md)
+  when proposing a new deployment.
 - Durable Object migrations are append-only and must start from the tag the live script records. A build that was later discarded from `main` (CLOUD.07, PR #72) was deployed to production and applied migration `capacity-pacer-v1`, adding the class `CapacityJobPacer`; the baseline list lacked that tag, so Wrangler replayed `v1` and Cloudflare refused it (error 10074). The production list therefore keeps `v1`, records `capacity-pacer-v1` exactly as applied, and retires the class with `retire-capacity-pacer-v1` (`deleted_classes`). The class held only scheduling hints, was never enabled in production, has no binding, export or code here, and its storage is discarded by the deletion. Never edit or reuse these tags; any later class change is a new appended tag. The proof environment never applied it.
 - The same discarded builds registered a production cron schedule `* * * * *` for that work. Wrangler replaces a Worker's schedules only when `triggers.crons` is declared, so the production configuration declares `"triggers": {"crons": []}` to remove it; the baseline Worker has no `scheduled` handler and production needs no schedule. Environments inherit top-level `triggers`, so the proof environment declares `"triggers": {}` and keeps its schedules untouched (it never had one). A later task that needs a production schedule declares it here.
 - Cloudflare refuses to upload a Worker that a queue still names as its consumer when the Worker has no `queue` handler (code 11001). The retired C# proof bundle consumed `arcforges-proof-wake` and `arcforges-proof-wake-dlq`, so `npm run deploy:proof` detaches exactly those consumers of the proof script before the upload and refuses any proof-script consumer, cron schedule or Durable Object migration tag that the generated proof configuration does not declare; the queues stay, unconsumed, until AF-CTR-09 ([PostgreSQL store](postgres-store.md#acceptance-environment)).

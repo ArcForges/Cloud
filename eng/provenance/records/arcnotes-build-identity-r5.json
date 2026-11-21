@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "id": "arcnotes-build-identity-r5",
+  "kind": "source",
+  "sourceRepository": "https://github.com/ArcForges/ArcNotes",
+  "sourceCommit": "0c797e30690a10d8798ddca19ca7f37b16cecf01",
+  "sourcePaths": [
+    "src/ArcForges.ArcNotes.Core/BuildIdentity.cs",
+    "tests/ArcForges.ArcNotes.Tests/BuildIdentityTests.cs",
+    "eng/version-sources.json",
+    "eng/ArcForges.Repository/IdentityEvidence.cs"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "6f1e622c82a380075843bb084a7ec3b1f1d12a4a02526d75e78b0924a860aa75",
+        "finding": "Pinned ArcNotes and Cloud retain the identical complete AGPL-3.0-only licence."
+      },
+      {
+        "path": "src/ArcForges.ArcNotes.Core/BuildIdentity.cs",
+        "sha256": "2a1c184214d4b5c49e4f1affa96cc5741d1c1b34b3892477e0c97d31eccb5bc5",
+        "finding": "Own AGPL-3.0-only header retained. No third-party implementation imported."
+      },
+      {
+        "path": "tests/ArcForges.ArcNotes.Tests/BuildIdentityTests.cs",
+        "sha256": "ae11ceb972227aa8e0cc810852e42ffdeebc71493cd07546a59d752ceeb0c444",
+        "finding": "Own AGPL-3.0-only header retained. No third-party implementation imported."
+      },
+      {
+        "path": "eng/version-sources.json",
+        "sha256": "381adf427140f65717901bb81dff340511831e7414a31eec897e4eb6ef9535f5",
+        "finding": "AGPL repository-owned catalog; adapt service applicability and package inputs."
+      },
+      {
+        "path": "eng/ArcForges.Repository/IdentityEvidence.cs",
+        "sha256": "73510ff86c7b6e5b86baeebd95a7df2c7cb355531a265e2a20b67bdcf39e3215",
+        "finding": "The AGPL PE AssemblyMetadata inspection algorithm is adapted into an owner-specific xUnit test."
+      }
+    ],
+    "scope": "Current Go and historical HOST-03 build identity catalogs with retained source attribution.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Copyright ArcForges contributors. Adapted from ArcNotes support identity under AGPL-3.0-only."
+  ],
+  "targets": [
+    {
+      "path": "eng/version-sources.json",
+      "sha256": "e566176a5a1636d87cb38cc2dbc869d3bda86940f68fc9ff3bf5364ec812cf2c",
+      "normalization": "lf"
+    },
+    {
+      "path": "eng/version-sources-legacy.json",
+      "sha256": "9a848f211b5b64ce5b75ff398e991e16adc5f20fa716c5b46ccc71ddab210766",
+      "normalization": "lf"
+    }
+  ],
+  "artifactTargets": [],
+  "disposition": "Rewrite",
+  "verification": {
+    "kind": "transformation",
+    "command": "Read the current Go catalog and the retained HOST-03 catalog. Compare both LF-normalized bytes to the exact target digests in arcnotes-build-identity-r4 and verify the original copied material and source attribution through its preserved record.",
+    "expected": "Both retained catalogs have the same verified bytes and origin as their predecessor. The withdrawn managed implementation and its test targets remain recorded in the immutable predecessor.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Copyright ArcForges contributors. Cloud adapts ArcNotes build identity under AGPL-3.0-only; full licence and corresponding source remain available.",
+    "files": [
+      "LICENSE",
+      "NOTICE",
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "The complete AGPL licence and source attribution ship in existing image and Worker legal bundles."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": null,
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "host01_review",
+    "reviewedOn": "2026-11-21",
+    "decision": "approved",
+    "rationale": "Withdraw the retired managed build-identity targets and keep the current and historical version catalogs under their existing source attribution.",
+    "baselineCommit": "3884466179d5f1dc50c3f28007e51598931e40d2",
+    "reconciliation": false
+  },
+  "supersedes": "arcnotes-build-identity-r4"
+}

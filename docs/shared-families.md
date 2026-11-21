@@ -2,6 +2,10 @@
 
 This document describes what CLOUD.06 (Design WP-21.05, generic engine and fixed module lock order only) delivers, the checks that enforce it, what each check proves and what it does not. The binding rules are the Design [D1 execution profile](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/04-d1-execution-profile.md) (section 4, "Shared family plans and the guard table") and the shared units of work [SU-01 to SU-07](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/00-data-model-overview.md#611-shared-units-of-work).
 
+The plan files, expanded SQL and reference data remain frozen for the D1 proof. `npm run check:plans` verifies them
+against the reviewed archive. The former C# generator, engine and authoring procedure documented below live in the
+historical checkout. [Shared-family history](https://github.com/ArcForges/Cloud/blob/9b8796eac760982d9814f371b820b736ddd945c4/docs/shared-families.md) · [Current Go PostgreSQL store](postgres-store.md)
+
 ## Decision in one sentence
 
 A shared transaction family is one named plan, one fixed `D1Database.batch()`, whose guard statements are generated from five primitives, whose statements run in the fixed SU-04 module order, and whose failure is a precondition that rolled everything back; the C# side seals the typed contributions of the participating modules into one plan call and rereads only after a false guard.
@@ -78,12 +82,16 @@ The adapter (`src/ArcForges.Cloud.Storage.D1/FamilyBinding`, bound by `ModuleFam
 
 ## How a module task adds its family
 
+Historical authoring procedure from the reviewed Cloud revision.
+
 1. Append the family to `storage/plans/families.json` (the participants come from SU-01; a participant not in the closed list is an Architecture Owner decision).
 2. Write `storage/plans/families/<family>.<name>.sql` with its guards and mutations in SU-04 order; run `dotnet run --project tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj -c Release -- plans generate` and commit the regenerated Worker dictionary, C# manifest and `families.expanded.json`; read the expanded SQL in the diff.
 3. Contribute each module's statements through `FamilyGuards` and `FamilyUnitOfWork`, execute with `FamilyExecutor`, and map the outcomes to the module's own typed refusals. A module project does this through the [module family port](#the-module-family-port-cloud72).
 4. The manifest hash changes, so regenerate after every rebase (RES-cloud-storage-plans). Migrations are numbered by the integration owner at merge (RES-cloud-d1-migrations), and `platform_command_guard` is migration 0022 as numbered here.
 
 ## Checks
+
+Historical CLOUD.06 verification and evidence.
 
 | Check                                                                                                                                                                                                                                          | Where                           |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |

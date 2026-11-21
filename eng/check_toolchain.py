@@ -53,7 +53,7 @@ def check(tools: list[str]) -> dict:
         version = json.loads((ROOT / "global.json").read_text())["sdk"]["version"]
         exact(invoke(["dotnet", "--version"]), version, "dotnet SDK")
         root = sdk_root(invoke(["dotnet", "--list-sdks"]), version)
-        output = invoke(["dotnet", "msbuild", "src/ArcForges.Cloud/ArcForges.Cloud.csproj", "-nologo",
+        output = invoke(["dotnet", "msbuild", "tests/ArcForges.Cloud.Consumer/ArcForges.Cloud.Consumer.csproj", "-nologo",
                          "-getProperty:NETCoreSdkVersion,MSBuildToolsPath,MSBuildSDKsPath"])
         actual = json.loads(output)["Properties"]
         exact(actual["NETCoreSdkVersion"], version, "evaluated SDK")

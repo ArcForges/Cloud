@@ -14,16 +14,9 @@ namespace ArcForges.Cloud.ArchitectureTests;
 public sealed partial class IdentityStoreArchitectureTests
 {
     private const string Project = "ArcForges.Cloud.Modules.Identity";
+    private const string ArchivedProject = "src/" + Project;
 
     private static string Src => Path.Combine(CloudRepository.FindRoot(), "src");
-
-    private static string[] Sources(string directory) =>
-        [.. Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories)
-            .Where(file => !file.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                && !file.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            .Order(StringComparer.Ordinal)];
-
-    private static (string Path, string Text)[] Read(IEnumerable<string> files) => [.. files.Select(file => (file, File.ReadAllText(file)))];
 
     [GeneratedRegex(@"ArcForges\.Cloud\.(?:Storage|Hmac|Foundation|Ingress|Composition|Generation)\b", RegexOptions.CultureInvariant)]
     private static partial Regex HostNamespace();
@@ -65,7 +58,7 @@ public sealed partial class IdentityStoreArchitectureTests
     [Fact]
     public void TheIdentityProjectReferencesOnlyTheAbstractionsProject()
     {
-        var project = File.ReadAllText(Path.Combine(Src, Project, Project + ".csproj"));
+        var project = ArchivedManagedSource.Read(ArchivedProject + "/" + Project + ".csproj");
         var references = Regex.Matches(project, @"<ProjectReference\s+Include=""([^""]+)""").Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(["../ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj"], references);
         Assert.DoesNotContain("PackageReference", project, StringComparison.Ordinal);
@@ -75,7 +68,7 @@ public sealed partial class IdentityStoreArchitectureTests
     public void TheIdentitySourcesReachStorageOnlyThroughTheAbstractionsPorts()
     {
         var root = Path.Combine(Src, Project);
-        var files = Read(Sources(root));
+        var files = ArchivedManagedSource.CSharpUnder(ArchivedProject);
         Assert.Contains(files, file => file.Path.EndsWith(Path.Combine("Persistence", "D1IdentityStore.cs"), StringComparison.Ordinal));
         Assert.Empty(Findings(root, files));
     }
@@ -83,11 +76,10 @@ public sealed partial class IdentityStoreArchitectureTests
     [Fact]
     public void ThePersistenceTypesAreInternalToTheModuleInTheirInfrastructureNamespace()
     {
-        var files = Sources(Path.Combine(Src, Project, "Persistence"));
-        Assert.Equal(["D1IdentityStore.cs", "IdentityPlans.cs", "IdentityRowCodec.cs", "RandomIdentityIdSource.cs"], files.Select(Path.GetFileName));
-        foreach (var file in files)
+        var files = ArchivedManagedSource.CSharpUnder(ArchivedProject + "/Persistence");
+        Assert.Equal(["D1IdentityStore.cs", "IdentityPlans.cs", "IdentityRowCodec.cs", "RandomIdentityIdSource.cs"], files.Select(file => Path.GetFileName(file.Path)));
+        foreach (var (_, text) in files)
         {
-            var text = File.ReadAllText(file);
             Assert.Contains("namespace ArcForges.Cloud.Modules.Identity.Persistence.Infrastructure;", text, StringComparison.Ordinal);
             Assert.DoesNotMatch(@"(?m)^\s*public\s+(?:sealed\s+|static\s+|abstract\s+)*(?:partial\s+)?(?:class|record|struct|interface|enum)\b", text);
         }
@@ -96,7 +88,7 @@ public sealed partial class IdentityStoreArchitectureTests
     [Fact]
     public void TheIdentityStoreIsImplementedOnlyByTheD1StoreAcrossTheProductionSources()
     {
-        var implementers = Read(Sources(Src))
+        var implementers = ArchivedManagedSource.CSharpUnder("src")
             .Where(file => StoreImplementation().IsMatch(file.Text))
             .Select(file => Path.GetRelativePath(Src, file.Path).Replace('\\', '/'))
             .Order(StringComparer.Ordinal)
@@ -108,7 +100,7 @@ public sealed partial class IdentityStoreArchitectureTests
     public void TheScannerFindsEveryPlantedViolationWhateverTheOrderTheFilesystemReturns()
     {
         var root = Path.Combine(Src, Project);
-        var files = Read(Sources(root));
+        var files = ArchivedManagedSource.CSharpUnder(ArchivedProject);
         (string, string)[] planted =
         [
             (Path.Combine(root, "Persistence", "Planted1.cs"), "using ArcForges.Cloud.Storage.ModuleBinding;"),

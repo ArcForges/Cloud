@@ -22,18 +22,22 @@ internal static class CloudRepository
     public const string ModuleAbstractions = "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj";
     public const string StorageD1 = "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj";
 
+    /// <summary>The independently built published client probe and repository policy host.</summary>
+    public static IReadOnlyList<ProjectClassification> ActiveClassifications { get; } =
+    [
+        new(Consumer, ProjectRole.Test, Owner, Production: false, Aot: false),
+        new(Host, ProjectRole.Test, Owner, Production: false, Aot: false),
+    ];
+
     /// <summary>
-    /// Cloud is one Native AOT host project and composition root. It is classified as the shell rather than an adapter on purpose: the
-    /// shared engine then rejects every provider SDK call in it (Cloud holds no provider adapter; Cloudflare is reached only through
-    /// the signed Worker facade) and does not apply the RPC-adapter entry-point rule to its implicitly declared record members.
-    /// Roles are declared here, never inferred from names, so a new project fails the inventory test until its role is reviewed.
+    /// The full on-disk inventory during retirement. The reviewed legacy host, its modules and tooling remain
+    /// available for source-only checks until historical preservation is complete. Only the active set builds.
     /// </summary>
     public static IReadOnlyList<ProjectClassification> Classifications { get; } =
     [
+        .. ActiveClassifications,
         new(Service, ProjectRole.Shell, Owner, Production: true, Aot: true),
         new(ServiceTests, ProjectRole.Test, Owner, Production: false, Aot: false),
-        new(Consumer, ProjectRole.Test, Owner, Production: false, Aot: false),
-        new(Host, ProjectRole.Test, Owner, Production: false, Aot: false),
         // CLOUD.84 (ADP-07 supporting inventory row, S35(1)): the non-published generator of the Worker tables and the Contracts identity (D3).
         new("tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj", ProjectRole.BuildTool, Owner, Production: false, Aot: false),
         // CLOUD.02 (ADP-07 inventory binding): the shared boundary types, the named-plan bridge and the nineteen module boundaries.
@@ -276,4 +280,65 @@ internal static class CloudRepository
         .FirstOrDefault(element => element.Name.LocalName == "license" && element.Attribute("type")?.Value == "expression")?.Value.Trim();
 
     private static PolicyFinding Finding(string rule, string message) => new(rule, "artifacts/evidence/naming.json", message);
+}
+
+/// <summary>The legacy C# source inputs used only by the historical architecture assertions.</summary>
+internal static class ArchivedManagedSource
+{
+    private static readonly string Root = CloudRepository.FindRoot();
+    private static readonly Lazy<Dictionary<string, string>> Sources = new(Load);
+
+    public static string Read(string relativePath) => Sources.Value[relativePath];
+
+    public static IEnumerable<string> ModuleProjects => Sources.Value.Keys
+        .Where(path => path.StartsWith("src/ArcForges.Cloud.Modules.", StringComparison.Ordinal)
+            && path.EndsWith(".csproj", StringComparison.Ordinal))
+        .Select(Path.GetFileNameWithoutExtension)
+        .OfType<string>()
+        .Order(StringComparer.Ordinal);
+
+    /// <summary>Absolute file names for the scanners' path logic and verified archive text for their input.</summary>
+    public static (string Path, string Text)[] CSharpUnder(string directory)
+    {
+        var sources = Sources.Value
+            .Where(file => file.Key.StartsWith(directory + "/", StringComparison.Ordinal)
+                && file.Key.EndsWith(".cs", StringComparison.Ordinal))
+            .OrderBy(file => file.Key, StringComparer.Ordinal)
+            .Select(file => (Path.GetFullPath(Path.Combine(Root, file.Key)), file.Value))
+            .ToArray();
+        return sources.Length > 0 ? sources : throw new InvalidOperationException("Missing reviewed C# sources: " + directory);
+    }
+
+    private static Dictionary<string, string> Load()
+    {
+        var start = new ProcessStartInfo("python")
+        {
+            WorkingDirectory = Root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (string argument in new[] { "-E", "-s", "eng/verification/check_legacy_cloud_history.py", "--managed-sources" })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("The managed source archive reader did not start.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("The managed source archive reader timed out.");
+        }
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException("The managed source archive was refused: " + error.GetAwaiter().GetResult());
+        }
+
+        return JsonSerializer.Deserialize<Dictionary<string, string>>(output.GetAwaiter().GetResult())
+            ?? throw new InvalidOperationException("The managed source archive returned no inputs.");
+    }
 }

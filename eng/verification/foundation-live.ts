@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Explicit local opt-in run of the foundation scenarios against the DEPLOYED proof environment.
-// PRF.07 held the resource lease RES-cloud-deployment for its run; leases and claims are retired under
-// serial delivery (ArcForges/Plan execution-policy.md), so none is taken now. Never CI. The evidence file records results, never a secret.
+// Historical Foundation proof driver retained for the proof-deployment tests.
+// The original CLI drivers and C# host are in Cloud at 9b8796eac760982d9814f371b820b736ddd945c4.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { manifestHash } from "../../worker/storage/plans.generated.ts";
 import { runScenarios, type Target } from "./foundation-scenarios.ts";
 import { loadOperatorKey, signOperatorRequest } from "./proof-operator.ts";
@@ -74,6 +72,3 @@ export async function main() {
   );
   console.log(`Foundation scenarios passed: ${evidence.map((item) => item.scenario).join(", ")}`);
 }
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  await main();

@@ -35,18 +35,12 @@ public sealed partial class LayeredModuleGuardTests
 
     private static List<(string Module, string Source)> ActualSources()
     {
-        var result = new List<(string, string)>();
-        var src = Path.Combine(CloudRepository.FindRoot(), "src");
-        foreach (var directory in Directory.GetDirectories(src, ModulePrefix + "*"))
+        var result = new List<(string Module, string Source)>();
+        foreach (var project in ArchivedManagedSource.ModuleProjects)
         {
-            var module = Path.GetFileName(directory)[ModulePrefix.Length..];
+            var module = project[ModulePrefix.Length..];
             if (module == "Abstractions") continue;
-            foreach (var file in Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(directory, file).Replace('\\', '/');
-                if (relative.StartsWith("obj/", StringComparison.Ordinal) || relative.StartsWith("bin/", StringComparison.Ordinal)) continue;
-                result.Add((module, File.ReadAllText(file)));
-            }
+            result.AddRange(ArchivedManagedSource.CSharpUnder("src/" + project).Select(file => (module, file.Text)));
         }
 
         return result;
