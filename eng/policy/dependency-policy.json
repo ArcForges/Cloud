@@ -233,7 +233,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
     "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
     "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-    "eng/provenance/files.json": "1cf377805059d4d96ca5130fcec1e5af334067565bb4eee92d38992be12286f1",
+    "eng/provenance/files.json": "3d1077289c4c468e25fd7d9c9efb910db738ca26d2efe61cc862056a5e8be842",
     "eng/provenance/records/afv2-center-01-management-storage-r1.json": "0ec5d5aadbedb3c1dd54741f2e1df4711852a9b8b42acbb5246a42401548215f",
     "eng/provenance/records/afv2-center-01-management-storage-r2.json": "5f9910beb89d51add566f63af9822011250bd5b374fd9214ff09acfeb62d4ea6",
     "eng/provenance/records/afv2-center-01-management-storage-r3.json": "84a30e4eea501632e65292e9d441449ae8bbd440287b2607ebbdfc1859d010b8",
@@ -616,7 +616,7 @@
   },
   "review": {
     "owner": "Cloud dependency maintainer",
-    "reviewer": "web02_independent_review (exact Go source anchor review; final combined metadata and profiles independently verified before merge)",
+    "reviewer": "host01_review (independent review of the corrected source and remeasured inputs)",
     "date": "2026-11-21",
     "rationale": "AFV2-MIG-01 binds the Go-only Center image, exact Worker closure, the retained managed build fixture inputs, and deleted retired route tests at source 684381a07aeebf22b1cad2de5fb4a44de2ed0907. Existing dependencies and all original archived receipts retain their previously reviewed coordinates and bytes.",
     "inputs": {
@@ -849,7 +849,7 @@
       "eng/provenance/artifact-profiles/cloud-release-r97.json": "90af89ab0759071a491c8536dad85ae1c2fdcf225c65410c06928f79f93de026",
       "eng/provenance/artifact-profiles/cloud-release-r98.json": "ee30639dcc826ff95a3d0765812966169b8121f2eebeb571f2d2490fc5bdf656",
       "eng/provenance/artifact-profiles/cloud-release-r99.json": "5751564e623ce4ecc442d9faa29faa3978add74dad0b826aae29a781233e2a22",
-      "eng/provenance/files.json": "1cf377805059d4d96ca5130fcec1e5af334067565bb4eee92d38992be12286f1",
+      "eng/provenance/files.json": "3d1077289c4c468e25fd7d9c9efb910db738ca26d2efe61cc862056a5e8be842",
       "eng/provenance/records/afv2-center-01-management-storage-r1.json": "0ec5d5aadbedb3c1dd54741f2e1df4711852a9b8b42acbb5246a42401548215f",
       "eng/provenance/records/afv2-center-01-management-storage-r2.json": "5f9910beb89d51add566f63af9822011250bd5b374fd9214ff09acfeb62d4ea6",
       "eng/provenance/records/afv2-center-01-management-storage-r3.json": "84a30e4eea501632e65292e9d441449ae8bbd440287b2607ebbdfc1859d010b8",
@@ -2053,7 +2053,7 @@
   "buildToolPrereleases": {
     "unenv": "2.0.0-rc.24"
   },
-  "reviewRecord": "eng/policy/dependency-reviews/afv2-mig-01-r1.json",
+  "reviewRecord": "eng/policy/dependency-reviews/afv2-mig-01-r2.json",
   "dependencyClasses": {
     "build-inputs": "Complete exact npm lock inventory; licence metadata is preserved, not inferred as a redistribution grant. Existing transitive development prereleases are named build-only migration inputs and cannot enter runtime/stable closures.",
     "runtime": "Only the independently enforced existing shipped artifact records admit runtime inputs and legal scopes.",
