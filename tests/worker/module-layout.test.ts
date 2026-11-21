@@ -131,8 +131,6 @@ const allowed: Record<string, string> = {
     "removes it in a finally block, also when the test body throws",
   "tests/worker/commit-tail.test.ts":
     "removes it in a finally block, also when the test body throws",
-  "tests/worker/d1-migration-shim.test.ts":
-    "removes it in a finally block, also when the test body throws",
   "tests/worker/d1-physical-schema.test.ts":
     "removes it in a finally block, also when the test body throws",
   "tests/worker/identity-core-oracle.test.ts": "removes its directory with t.after (Cloud #136)",
