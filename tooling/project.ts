@@ -2,7 +2,20 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { lstatSync } from "node:fs";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -112,9 +125,9 @@ function verifyGoImage(image: ImageInfo, revision: string) {
   assert.equal(image.Config.Labels["org.opencontainers.image.revision"], revision);
 }
 
-export async function verifyCandidate(): Promise<Candidate> {
-  assert((await lstat(candidateDir)).isDirectory(), "Invalid candidate directory");
-  const manifest = path.join(candidateDir, "manifest.json");
+export async function verifyCandidate(directory = candidateDir): Promise<Candidate> {
+  assert((await lstat(directory)).isDirectory(), "Invalid candidate directory");
+  const manifest = path.join(directory, "manifest.json");
   assert((await lstat(manifest)).isFile(), "Invalid candidate manifest");
   const candidate = await readJson<Candidate>(manifest);
   assert.deepEqual(Object.keys(candidate).sort(), [
@@ -138,17 +151,17 @@ export async function verifyCandidate(): Promise<Candidate> {
     assert.equal(candidate.dirty, false);
   }
   assert.deepEqual(
-    (await readdir(candidateDir)).sort(),
+    (await readdir(directory)).sort(),
     [...goCandidateFiles, "manifest.json"].sort(),
   );
   assert.deepEqual(Object.keys(candidate.files).sort(), [...goCandidateFiles].sort());
   for (const file of goCandidateFiles) {
-    const member = path.join(candidateDir, file);
+    const member = path.join(directory, file);
     assert((await lstat(member)).isFile(), `Invalid candidate member: ${file}`);
     assert.equal(await sha256(member), candidate.files[file], `Candidate changed: ${file}`);
   }
   const config = await readJson<WorkerConfig & { env?: { proof?: unknown } }>(
-    path.join(candidateDir, "wrangler.json"),
+    path.join(directory, "wrangler.json"),
   );
   assertNoD1Binding(config);
   assertNoD1Binding(config.env?.proof);
@@ -163,8 +176,8 @@ export async function verifyCandidate(): Promise<Candidate> {
   assert.equal(config.containers[0]?.image, candidate.image);
   assert.equal(config.containers[0]?.max_instances, 1);
   assert.equal(config.no_bundle, true);
-  verifyReleaseFiles(root, candidateDir, candidate.revision, candidate.imageId);
-  verifyIdentity(await readJson(path.join(candidateDir, "build-identity.json")), candidate.version);
+  verifyReleaseFiles(root, directory, candidate.revision, candidate.imageId);
+  verifyIdentity(await readJson(path.join(directory, "build-identity.json")), candidate.version);
   assert.equal(
     config.vars.BUILD_IDENTITY,
     JSON.stringify(expectedIdentity(candidate.version).build),
@@ -486,6 +499,56 @@ export function dockerBuildNetwork(environment: NodeJS.ProcessEnv = process.env)
   return ["--network", "host"];
 }
 
+export async function stageCandidateDirectory<T>(
+  artifacts: string,
+  prepare: (directory: string) => Promise<T>,
+): Promise<T> {
+  assert(
+    (await lstat(artifacts)).isDirectory() && (await realpath(artifacts)) === artifacts,
+    "Linked candidate staging directory",
+  );
+  const destination = path.join(artifacts, "candidate");
+  const staged = await mkdtemp(path.join(artifacts, "candidate-stage-"));
+  let saved: string | undefined;
+  try {
+    const result = await prepare(staged);
+    const existing = lstatSync(destination, { throwIfNoEntry: false });
+    if (existing) {
+      assert(existing.isDirectory(), "Candidate destination is not a regular directory");
+      const archive = await mkdtemp(path.join(artifacts, "candidate-previous-"));
+      const previous = path.join(archive, "candidate");
+      try {
+        await rename(destination, previous);
+      } catch (error) {
+        await rmdir(archive);
+        throw error;
+      }
+      saved = previous;
+      assert(
+        (await lstat(saved)).isDirectory(),
+        "Candidate destination changed during publication",
+      );
+    }
+    await rename(staged, destination);
+    return result;
+  } catch (error) {
+    try {
+      if (saved) {
+        assert(
+          !lstatSync(destination, { throwIfNoEntry: false }),
+          "Candidate destination changed during publication",
+        );
+        await rename(saved, destination);
+        await rmdir(path.dirname(saved));
+      }
+      await rm(staged, { recursive: true, force: true });
+    } catch (restoreError) {
+      throw new AggregateError([error, restoreError], "Could not restore candidate staging");
+    }
+    throw error;
+  }
+}
+
 async function buildCandidate() {
   await writeJson(path.join(root, "artifacts/evidence/licence-boundary.json"), auditLicences(root));
   const head = await run("git", ["rev-parse", "HEAD"], true);
@@ -498,16 +561,15 @@ async function buildCandidate() {
   const version = `0.1.0-${suffix}`;
   const identity = expectedIdentity(version);
   const image = `arcforges-cloud:${suffix}`;
-  await mkdir(candidateDir, { recursive: true });
   await writeJson(
     path.join(root, "artifacts/evidence/source-provenance.json"),
     auditProvenance(root),
   );
   stageImageNotices(root, revision);
-  await writeJson(path.join(candidateDir, "legal-notices.json"), legalBundle(root, revision));
   const network = dockerBuildNetwork();
   if (network.length > 0)
     console.log("Local verification: the image build fetches over the host network.");
+  const existingTag = await run("docker", ["image", "ls", "--quiet", image], true);
   await run("docker", [
     "build",
     ...network,
@@ -522,13 +584,63 @@ async function buildCandidate() {
     image,
     ".",
   ]);
-  const imageInfo = await inspectImage(image);
+  let imageInfo: ImageInfo | undefined;
+  try {
+    const builtImage = await inspectImage(image);
+    imageInfo = builtImage;
+    const candidate = await stageCandidateDirectory(path.dirname(candidateDir), (directory) =>
+      prepareCandidate(directory, {
+        revision,
+        dirty,
+        version,
+        identity,
+        image,
+        imageInfo: builtImage,
+      }),
+    );
+    console.log(`Verified candidate ${version}: ${candidate.imageId}`);
+  } catch (error) {
+    if (!existingTag && imageInfo) {
+      try {
+        assert.equal(
+          (await inspectImage(image)).Id,
+          imageInfo.Id,
+          "Candidate image tag now names another image",
+        );
+        await run("docker", ["image", "rm", image]);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "Could not remove the failed candidate image",
+        );
+      }
+    }
+    throw error;
+  }
+}
+
+async function prepareCandidate(
+  directory: string,
+  build: {
+    revision: string;
+    dirty: boolean;
+    version: string;
+    identity: Identity;
+    image: string;
+    imageInfo: ImageInfo;
+  },
+): Promise<Candidate> {
+  const { revision, dirty, version, identity, image, imageInfo } = build;
   verifyGoImage(imageInfo, revision);
   const imageId = imageInfo.Id;
+  await writeJson(path.join(directory, "legal-notices.json"), legalBundle(root, revision));
   // Inspect legal contents through a stopped container; never execute the application in CI.
   const provenance = await verifyStoredImage(image, imageId, revision);
-  await writeJson(path.join(candidateDir, "image-provenance.json"), provenance);
-  await writeJson(path.join(candidateDir, "build-identity.json"), identity);
+  await writeJson(path.join(directory, "image-provenance.json"), provenance);
+  await writeJson(path.join(directory, "build-identity.json"), identity);
+  const bundles = path.join(directory, "bundles");
+  const main = path.join(bundles, "worker");
+  const proof = path.join(bundles, "proof");
   await run(process.execPath, [
     wrangler,
     "deploy",
@@ -536,18 +648,12 @@ async function buildCandidate() {
     "--containers-rollout",
     "none",
     "--outdir",
-    "artifacts/worker-bundle",
+    main,
     "--metafile",
-    "artifacts/worker-bundle/bundle-meta.json",
+    path.join(main, "bundle-meta.json"),
   ]);
-  await copyFile(
-    path.join(root, "artifacts/worker-bundle/bundle-meta.json"),
-    path.join(candidateDir, "worker-meta.json"),
-  );
-  await copyFile(
-    path.join(root, "artifacts/worker-bundle/index.js"),
-    path.join(candidateDir, "worker.js"),
-  );
+  await copyFile(path.join(main, "bundle-meta.json"), path.join(directory, "worker-meta.json"));
+  await copyFile(path.join(main, "index.js"), path.join(directory, "worker.js"));
   // CLOUD.84 D1: the proof bundle is built from its own entry (worker/proof/entry.ts) and sealed with the candidate. The dry-run needs
   // the proof asset directory to exist; its contents are uploaded only at deploy time and are not part of this bundle.
   await mkdir(path.join(root, "artifacts", "proof-assets"), { recursive: true });
@@ -560,18 +666,16 @@ async function buildCandidate() {
     "--containers-rollout",
     "none",
     "--outdir",
-    "artifacts/worker-bundle-proof",
+    proof,
     "--metafile",
-    "artifacts/worker-bundle-proof/bundle-meta.json",
+    path.join(proof, "bundle-meta.json"),
   ]);
   await copyFile(
-    path.join(root, "artifacts/worker-bundle-proof/bundle-meta.json"),
-    path.join(candidateDir, "proof-worker-meta.json"),
+    path.join(proof, "bundle-meta.json"),
+    path.join(directory, "proof-worker-meta.json"),
   );
-  await copyFile(
-    path.join(root, "artifacts/worker-bundle-proof/entry.js"),
-    path.join(candidateDir, "proof-worker.js"),
-  );
+  await copyFile(path.join(proof, "entry.js"), path.join(directory, "proof-worker.js"));
+  await rm(bundles, { recursive: true });
   const config = await readJson<WorkerConfig>(path.join(root, "wrangler.json"));
   delete config.$schema;
   config.main = "./worker.js";
@@ -579,11 +683,11 @@ async function buildCandidate() {
   config.vars.SOURCE_REVISION = revision;
   config.vars.BUILD_IDENTITY = JSON.stringify(identity.build);
   config.containers[0].image = image;
-  await writeJson(path.join(candidateDir, "wrangler.json"), config);
-  await run("docker", ["save", "--output", "artifacts/candidate/docker-image.tar", image]);
+  await writeJson(path.join(directory, "wrangler.json"), config);
+  await run("docker", ["save", "--output", path.join(directory, "docker-image.tar"), image]);
   const files: Record<string, string> = {};
-  for (const file of goCandidateFiles) files[file] = await sha256(path.join(candidateDir, file));
-  await writeJson(path.join(candidateDir, "manifest.json"), {
+  for (const file of goCandidateFiles) files[file] = await sha256(path.join(directory, file));
+  await writeJson(path.join(directory, "manifest.json"), {
     schema: 2,
     runtime: "go",
     revision,
@@ -593,8 +697,7 @@ async function buildCandidate() {
     imageId,
     files,
   });
-  await verifyCandidate();
-  console.log(`Verified candidate ${version}: ${imageId}`);
+  return verifyCandidate(directory);
 }
 
 export async function verifyToolchain(nodeVersion: string, npmVersion: string) {

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -24,6 +25,9 @@ import {
   verifyWorker,
 } from "../../tooling/release-provenance.ts";
 import { root } from "../../tooling/process.ts";
+import { expectedIdentity } from "../../tooling/build-identity.ts";
+import { goCandidateFiles } from "../../tooling/proof-candidate.ts";
+import { stageCandidateDirectory, verifyCandidate } from "../../tooling/project.ts";
 import { scratchDirectory } from "./support/scratch.ts";
 
 let worker: Buffer;
@@ -211,6 +215,96 @@ function imageFixture() {
   };
   return { directory, cleanup };
 }
+
+test("candidate staging preserves the cached generation until the exact Go bundle verifies", async (t) => {
+  const artifacts = realpathSync(scratchDirectory("cloud-candidate-repeat-", t));
+  const destination = path.join(artifacts, "candidate");
+  const retired = "arcforges-tool.tar";
+  const oldArchive = Buffer.from("original cached managed tool fixture\n");
+  const oldManifest = Buffer.from('{"runtime":"native-aot"}\n');
+  mkdirSync(destination);
+  writeFileSync(path.join(destination, retired), oldArchive);
+  writeFileSync(path.join(destination, "manifest.json"), oldManifest);
+
+  const fixture = imageFixture();
+  t.after(fixture.cleanup);
+  const version = "0.1.0-local.1";
+  const image = "arcforges-cloud:local.1";
+  const imageId = `sha256:${"a".repeat(64)}`;
+  const identity = expectedIdentity(version);
+  const imageReceipt = {
+    schemaVersion: 1,
+    imageId,
+    ...verifyImageFiles(root, revision, fixture.directory),
+  };
+  function prepare(directory: string) {
+    const write = (file: string, value: unknown) =>
+      writeFileSync(path.join(directory, file), JSON.stringify(value));
+    write("build-identity.json", identity);
+    write("image-provenance.json", imageReceipt);
+    write("legal-notices.json", legalBundle(root, revision));
+    write("worker-meta.json", metadata);
+    writeFileSync(path.join(directory, "worker.js"), worker);
+    // Docker and the proof Worker are represented by explicit fixture bytes; the verifier binds their hashes.
+    writeFileSync(path.join(directory, "docker-image.tar"), "synthetic image archive");
+    writeFileSync(path.join(directory, "proof-worker.js"), "export {};");
+    write("proof-worker-meta.json", {});
+    write("wrangler.json", {
+      name: "arcforges-cloud",
+      main: "./worker.js",
+      no_bundle: true,
+      vars: {
+        SOURCE_REVISION: revision,
+        BUILD_IDENTITY: JSON.stringify(identity.build),
+        ARCFORGES_HELLO_RUNTIME: "go",
+      },
+      containers: [{ image, max_instances: 1 }],
+      env: { proof: {} },
+    });
+    write("manifest.json", {
+      schema: 2,
+      runtime: "go",
+      revision,
+      dirty: revision.endsWith("-dirty"),
+      version,
+      image,
+      imageId,
+      files: Object.fromEntries(
+        goCandidateFiles.map((file) => [file, hash(readFileSync(path.join(directory, file)))]),
+      ),
+    });
+  }
+
+  await assert.rejects(
+    stageCandidateDirectory(artifacts, async (directory) => {
+      prepare(directory);
+      writeFileSync(path.join(directory, retired), oldArchive);
+      return verifyCandidate(directory);
+    }),
+    { code: "ERR_ASSERTION" },
+  );
+  assert.deepEqual(readdirSync(artifacts), ["candidate"]);
+  assert.deepEqual(readFileSync(path.join(destination, retired)), oldArchive);
+  assert.deepEqual(readFileSync(path.join(destination, "manifest.json")), oldManifest);
+
+  const verified = await stageCandidateDirectory(artifacts, async (directory) => {
+    prepare(directory);
+    return verifyCandidate(directory);
+  });
+  assert.deepEqual(await verifyCandidate(destination), verified);
+  assert.deepEqual(readdirSync(destination).sort(), [...goCandidateFiles, "manifest.json"].sort());
+  const archived = readdirSync(artifacts).filter((name) => name !== "candidate");
+  assert.equal(archived.length, 1);
+  const [previous] = archived;
+  assert(previous);
+  assert.match(previous, /^candidate-previous-/u);
+  assert.deepEqual(readFileSync(path.join(artifacts, previous, "candidate", retired)), oldArchive);
+  assert.deepEqual(
+    readFileSync(path.join(artifacts, previous, "candidate", "manifest.json")),
+    oldManifest,
+  );
+});
+
 test("complete image legal fixture validates and binds source and concrete member hashes", () => {
   const f = imageFixture();
   try {
