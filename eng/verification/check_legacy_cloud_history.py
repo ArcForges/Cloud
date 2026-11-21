@@ -21,6 +21,7 @@ TREE = "2b35c50007089d6e6c51797f62437334bd2826f3"
 SOURCE_SHA256 = "536d12a42b9141cd3a61f3c3c5796095948b16c21a1b557d28f9e056896761da"
 D1_MIGRATIONS = "src/ArcForges.Cloud.Storage.D1/Migrations"
 PROOF_MIGRATIONS = "worker/proof-migrations"
+MIGRATION_INVENTORIES = ("d1Migrations", "proofMigrations")
 D1_PLAN_TREES = ("storage/plans", "src/ArcForges.Cloud.Storage.D1/Physical/manifest")
 D1_PLAN_OUTPUT = "worker/storage/plans.generated.ts"
 WORKER_LEGACY_VECTORS = "tests/ArcForges.Cloud.Tests/Vectors"
@@ -37,6 +38,11 @@ ARCHIVES = {
     "proofMigrations": (
         (PROOF_MIGRATIONS,),
         "305d240ff067b6031b5d57dc4c30a92d9a23429437419ccaef46214d9edf08ae",
+    ),
+    "d1MigrationTool": (
+        ("eng/migrations/cli.ts", "eng/migrations/shim.ts", "tooling/sealed-tool.ts",
+         "tests/worker/d1-migration-shim.test.ts"),
+        "e4b4931b504b70394db9d646b2ea943811f486cc4ea7adc4c44d0eac859506ef",
     ),
     "d1References": (
         tuple(D1_REFERENCES.values()),
@@ -182,11 +188,11 @@ def attest(root: Path, *, migrations_only: bool = False) -> dict[str, object]:
             retained = check_retained(root, archive)
     archives = {}
     for name, (paths, expected) in ARCHIVES.items():
-        if migrations_only and name not in ("d1Migrations", "proofMigrations"):
+        if migrations_only and name not in (*MIGRATION_INVENTORIES, "d1MigrationTool"):
             continue
         data = check_archive(root, expected, paths)
         archives[name] = {"paths": list(paths), "bytes": len(data), "sha256": expected}
-        if migrations_only:
+        if migrations_only and name in MIGRATION_INVENTORIES:
             with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
                 retained[paths[0]] = check_retained_tree(root, archive, paths[0])
     report = {"schemaVersion": 1, "sourceCommit": COMMIT, "sourceTree": TREE,
@@ -202,7 +208,7 @@ if __name__ == "__main__":
     parser = ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--migrations-only", action="store_true",
-                      help="Verify only the reviewed D1 and proof migration inventories.")
+                      help="Verify the reviewed D1 and proof migrations and archived D1 migration tooling.")
     mode.add_argument("--d1-reference", choices=D1_REFERENCES,
                       help="Read one reviewed generated D1 reference as raw bytes.")
     mode.add_argument("--managed-layout", action="store_true",

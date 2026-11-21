@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { assertNoD1Binding } from "../../tooling/project.ts";
+import { goCandidateFiles } from "../../tooling/proof-candidate.ts";
 import { main as liveMain } from "../../eng/verification/foundation-live.ts";
 import {
   buildProofConfig as buildProofConfigWithKey,
@@ -370,6 +372,19 @@ test("deployment secrets are generated fresh, well formed, distinct and carry no
     (error: Error) => /distinct/u.test(error.message) && !error.message.includes("AAAA"),
   );
   assert.throws(() => generateSecrets(() => new Uint8Array(8)), /required shape/u);
+});
+
+test("the current Go candidate excludes the old D1 tool and refuses D1 bindings", () => {
+  assert.equal(goCandidateFiles.length, 9);
+  assert(!new Set<string>(goCandidateFiles).has("arcforges-tool.tar"));
+  assert.doesNotThrow(() => assertNoD1Binding({ name: "arcforges-cloud" }));
+  assert.throws(() => assertNoD1Binding(undefined), /Missing Worker configuration/u);
+  for (const d1_databases of [[], [{ binding: "DB" }]]) {
+    assert.throws(
+      () => assertNoD1Binding({ d1_databases }),
+      /The current Go candidate still declares a D1 binding/u,
+    );
+  }
 });
 
 test("the current proof config refuses D1 bindings and deployment overrides", () => {

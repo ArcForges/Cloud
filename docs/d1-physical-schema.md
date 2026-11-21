@@ -6,7 +6,7 @@ not. The binding rules are the Design [D1 execution profile](https://github.com/
 [Cloud data model](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/data-model/01-cloud-data-model.md). Plans and the module
 boundaries are described in [storage plans](storage-plans.md).
 
-## What exists
+## Historical implementation
 
 | Path                                                          | Content                                                                                                                                            |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -70,9 +70,16 @@ expression: it starts with the workspace-and-product scope filter and quotes eve
 
 ## Migrations
 
-One global sequence, applied in order with receipts (RES-cloud-d1-migrations). A module task authors `Migrations/pending/<module>__<slug>.sql`; the Cloud integration owner runs
-`node eng/migrations/cli.ts assign` at merge, which numbers the file, moves it beside the others and locks its checksum. A merged migration is never edited
-(`node eng/migrations/cli.ts check --base origin/main`, part of `npm run check:physical`, refuses an edited or removed entry). Every file starts with `-- af-migration: module=<name> mode=<mode>`.
+The historical D1 deployment used one global sequence and assigned numbers and checksums before merge. Each migration begins with `-- af-migration: module=<name> mode=<mode>`.
+The V2 source check, `npm run check:physical`, validates schema parity and checks the D1 and proof migration inventories against the reviewed Cloud revision
+`9b8796eac760982d9814f371b820b736ddd945c4`. Treat the retained migrations and their locks as immutable.
+
+The same check verifies a restricted Git archive containing `eng/migrations/cli.ts`, `eng/migrations/shim.ts`, `tooling/sealed-tool.ts` and their original
+`tests/worker/d1-migration-shim.test.ts`. The verifier reads the fixed commit and compares the exact archive bytes. The current Go candidate and promotion
+use PostgreSQL, with a deployment receipt confirming D1 is absent.
+
+To inspect the original tool, use `git show 9b8796eac760982d9814f371b820b736ddd945c4:<path>`. The original shim tests are executable from a detached worktree
+at that commit. After restoring its locked Node packages with `npm ci --ignore-scripts`, run `node --test tests/worker/d1-migration-shim.test.ts` there.
 
 | Mode       | Contents                                                                                                                                                                                                                                                                                |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
