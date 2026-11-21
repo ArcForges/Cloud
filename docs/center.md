@@ -106,7 +106,7 @@ variable and never repeats its value.
 | `NEON_DATABASE_URL`                      | none     | With the Neon Hello and no store: a complete pooled Neon URL with `sslmode` and `channel_binding=require`; pool of two, exec query mode; `application_name` `arcforges-center` (the Go Hello sent `arcforges-go-hello`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `ARCFORGES_CENTER_DATABASE_URL`          | none     | The runtime role's pooled URL of the store (a login role of the runtime group; [PostgreSQL store](postgres-store.md)); verified TLS with channel binding, except a loopback host of a self-hosted center                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `ARCFORGES_CENTER_DATABASE_MAX_CONNS`    | `4`      | Pool size of the runtime database, 1 to 32                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `ARCFORGES_CENTER_SURFACES`              | per mode | The enabled surfaces: exact names (`identity`, `pages`, `operations`, `fleet`, `mobile`, `relay`, `nodes`), comma-separated, or `none`; `pages` needs `identity`; `operations` needs both and exists only in official-hosted mode; `fleet` (node enrollment, [center fleet](center-fleet.md)) needs both; `mobile` (the mobile app's native authorization, [center mobile](center-mobile.md)) needs both and a public base URL that is a MobileNativeAuth issuer; `relay` (the node channel, [center fleet](center-fleet.md#node-channel)) needs `identity`, `fleet` and a command key (`ARCFORGES_CENTER_KEY_<NAME>`); `nodes` (FleetService's node registry, [center fleet](center-fleet.md#node-registry)) needs `identity`, `fleet` and `relay`; official-hosted enables none by default, self-hosted `identity`, `pages`, `fleet`, `mobile`, `relay` and `nodes` (without `mobile` for a base URL that is no issuer, without `relay` and `nodes` when no command key is configured) ([surface switch](center-identity.md#surface-switch)); a surface needs the runtime database |
+| `ARCFORGES_CENTER_SURFACES`              | per mode | The enabled surfaces: exact names (`identity`, `pages`, `operations`, `fleet`, `mobile`, `relay`, `nodes`), comma-separated, or `none`; `pages` needs `identity`; `operations` needs both and exists only in official-hosted mode; `fleet` (node enrollment, [center fleet](center-fleet.md)) needs both; `mobile` (the mobile app's native authorization, [center mobile](center-mobile.md)) needs both and a public base URL that is a MobileNativeAuth issuer; `relay` (the node channel, [center fleet](center-fleet.md#node-channel)) needs `identity`, `fleet` and a command key (`ARCFORGES_CENTER_KEY_<NAME>`); `nodes` (V2 DeviceService and typed routes, [gates and limits](#routed-task-control)) needs `identity`, `fleet` and `relay`; official-hosted enables none by default, self-hosted `identity`, `pages`, `fleet`, `mobile`, `relay` and `nodes` (without `mobile` for a base URL that is no issuer, without `relay` and `nodes` when no command key is configured) ([surface switch](center-identity.md#surface-switch)); a surface needs the runtime database |
 | `ARCFORGES_CENTER_CLIENT_IP_HEADER`      | none     | Empty or `X-Arcforges-Client-Ip`; required in official-hosted mode while a surface is enabled (the Worker always passes it); self-hosted only with trusted proxies                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `ARCFORGES_CENTER_TRUSTED_PROXIES`       | none     | Self-hosted only: CIDR prefixes, comma-separated, whose client-address header is trusted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `ARCFORGES_CENTER_BOOTSTRAP_SHA256`      | none     | With `..._EXPIRES_AT`: the SHA-256 (64 lowercase hex characters) of the exact owner bootstrap token text, prefix included (`printf %s "$TOKEN" \| sha256sum`); never the token itself                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -299,17 +299,28 @@ available to authenticated callers according to their individual policies.
 
 ### Routed task control
 
+The `nodes` surface registers the V2 `DeviceService` for the Center's device list, inspection and revocation. The same surface
+routes typed V2 Node, Sandbox, Run, resource and one-file data operations through the enrolled Node's V2 channel. The Center
+checks that the signed-in account owns the exact enrollment and binds the requested grant ID and revision to the call. The Node
+checks the grant and applies its local policy before any effect.
+The `fleet` surface still serves the eleven published `NodeEnrollmentService` methods. Browser enrollment still uses the
+Center's Connect and Activate pages. The retired V1 `FleetService` registry and routed task methods are recorded in the
+[historical Center source](https://github.com/ArcForges/Cloud/blob/9b8796eac760982d9814f371b820b736ddd945c4/docs/center.md#routed-task-control).
+
 `feature.OperationKeys` lists the V2 service groups. The access table checks each gated operation's group and key after
 authentication, target ownership, authorization, applicable resource controls and audit. A V2 hosted entitlement refusal is
 `ENTITLEMENT/hosted_access_required`. A self-hosted operator service limit uses the published `RESOURCE/overloaded` error
-with state reason `operator_limit`. The finite V1 compatibility routes retain their published gate and error semantics. Historical entitlement records keep their original keys and
-validity intervals.
+with state reason `operator_limit`. Historical entitlement records keep their original keys and validity intervals.
 
-| Key              | Group               | Gates                                             |
-| ---------------- | ------------------- | ------------------------------------------------- |
-| `remote.control` | `control`           | Sandbox, Run, resource and data mutations         |
-| `remote.view`    | `status_and_output` | Sandbox, Run, resource and data reads and watches |
-| `center.nodes`   | `node_connection`   | node connection                                   |
+| Key              | Group               | Gates                                                   |
+| ---------------- | ------------------- | ------------------------------------------------------- |
+| `remote.control` | `control`           | Node grant, Sandbox, Run, resource and data mutations   |
+| `remote.view`    | `status_and_output` | Node, Sandbox, Run, resource and data reads and watches |
+| `center.nodes`   | `node_connection`   | node connection                                         |
+
+The V2 watches cover Run output, Node events and resource usage. Ordinary routed unary requests allow up to 253,952 framed
+bytes, with replies capped at 1 MiB. The framed limit is 2 MiB for `WriteImport` requests and `ReadExport` replies. Routed
+unary operations have a ten-second deadline, with thirty seconds for each transfer phase that may perform I/O.
 
 Hosted channels and streams periodically recheck service availability. An expired or revoked hosted entitlement closes the
 affected remote channel or stream and refuses new hosted access. Local Runs, data and the CLI continue independently.
@@ -322,14 +333,17 @@ them says `plan_limit_reached`:
 
 | Control                        | Covers                                       | Policy keys (default)                                                      | Refusal                                              |
 | ------------------------------ | -------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `routed_calls_per_account`     | the gated rows of the three routed groups    | `routedCallsAccountLimit` / `routedCallsAccountWindow` (3600 per hour)     | `RESOURCE/rate_limited`, `retry_at` the window's end |
-| `routed_in_flight_per_account` | the gated rows of the three routed groups    | `routedInFlightPerAccount` (16 at once, per center process)                | `RESOURCE/rate_limited`, `retry_at` one second later |
-| `channel_upgrades_per_account` | the gated node channel row (node connection) | `channelUpgradeAccount` (600 per hour), `channelUpgradeNode` (60 per hour) | `RESOURCE/rate_limited`, `retry_at` the window's end |
+| `routed_calls_per_account`     | gated V2 routed reads, watches and mutations | `routedCallsAccountLimit` / `routedCallsAccountWindow` (3600 per hour)     | `RESOURCE/rate_limited`, `retry_at` the window's end |
+| `routed_in_flight_per_account` | gated V2 routed reads, watches and mutations | `routedInFlightPerAccount` (16 at once, per center process)                | `RESOURCE/rate_limited`, `retry_at` one second later |
+| `channel_upgrades_per_account` | gated node channel upgrades                  | `channelUpgradeAccount` (600 per hour), `channelUpgradeNode` (60 per hour) | `RESOURCE/rate_limited`, `retry_at` the window's end |
 
-There is no connected-node cap (AF-CTR-05 Q21): the enrollment cap (`maxNodesPerAccount`) governs how many nodes an account has.
-The node channel row (`fleet.nodeChannel`, E1a) and the six routed task rows (E2b) are served gated rows.
-`channel_upgrades_per_account` stands in front of the channel, and both routed controls stand in front of the routed groups. A
-composition whose controls leave a gated group uncovered refuses to start (`TestAGatedRowWithoutAControlFailsComposition`, E0 review N-9).
+AF-CTR-05 Q21 documented the historical absence of a connected-node cap. The enrollment cap
+(`maxNodesPerAccount`) limits live enrollments per account. The current Go public listener separately caps concurrent upgraded
+Node sockets at `ARCFORGES_CENTER_MAX_NODE_CONNECTIONS` (default 256, configurable from 1 to 4096). An admitted upgrade
+releases its ordinary request slot under `ARCFORGES_CENTER_MAX_CONNECTIONS` and holds a Node socket slot.
+
+A composition whose controls leave a gated group uncovered refuses to start
+(`TestAGatedRowWithoutAControlFailsComposition`, E0 review N-9).
 The MCP and push rows (AF-CTR-07, AF-CLD-06) bring their own controls with them.
 
 ## Self-hosted mode
@@ -570,39 +584,44 @@ identity and `center` block, the published C# gRPC-Web probe, the published nati
 
 ### Routed files and registered workspaces (AF-CTR-06)
 
-The nodes surface forwards twelve additive Fleet methods: ReadNodeFile, WriteNodeFile,
+The twelve Fleet routes below describe the historical AF-CTR-06 scope. The current Go route table no longer registers them.
+Their published contract, stored receipt identities and acceptance evidence are recorded in the
+[historical Center source](https://github.com/ArcForges/Cloud/blob/9b8796eac760982d9814f371b820b736ddd945c4/docs/center.md#routed-files-and-registered-workspaces-af-ctr-06).
+Current remote file transfer uses the typed V2 `DataService` and its fixed one-file import and export phases.
+
+The nodes surface forwarded twelve Fleet methods: ReadNodeFile, WriteNodeFile,
 EditNodeFile, SearchNodeFiles, ListNodeDirectory, PlanNodeRemoval, ExecuteNodeRemoval,
 GetNodeFileOperation, RegisterNodeWorkspace, UnregisterNodeWorkspace, ListNodeWorkspaces,
-and GetNodeWorkspace. Their inner node request is forwarded byte for byte after portable
-shape checks; the target decides native root/path resolution, permissions and effects.
-The local-only file-operation acknowledgment has no Fleet route.
+and GetNodeWorkspace. The Center forwarded each inner request byte for byte after portable
+shape checks. The target decided native root and path resolution, permissions and effects.
+The local-only file-operation acknowledgment had no Fleet route.
 
-Every new route requires ownership, the verified account session or own-node signed relay,
-and the center.execute gate, using the existing routed-call controls. Account-session
-write/edit/removal and workspace register/unregister deliveries consume fresh method- and
-target-bound high-risk evidence; mobile.limited upgrades first. Queries and creation of a
-removal plan are low risk. Register/unregister additionally reject a signed relay unless it
-is HUMAN from the target itself. The target still applies its fixed HUMAN and per-origin
-rules. Account authentication never supplies local-HUMAN approval.
+Each route required ownership, a verified account session or own-node signed relay, and
+the `center.execute` gate under the routed-call controls. Account-session write, edit,
+removal and workspace registration changes consumed fresh method- and target-bound
+high-risk evidence. A `mobile.limited` session first had to upgrade. Queries and creation
+of a removal plan were low risk. Registering or unregistering a workspace by signed relay
+required a HUMAN caller from the target itself. The target applied its fixed HUMAN and
+per-origin rules. Account authentication could never supply local HUMAN approval.
 
-Only the six mutations carry a command ID and use fleet.routed_file_call. A migration-owned
-private trigger reserves (account, command) across old task and new file receipts, including
-old SQL writers; a new center also checks this namespace before presence. New file records
-bind a relayed agent's specific local session. The old task replay digest remains unchanged.
-Admissions, joins, replay-window fencing, conservative lost-settlement handling and fenced
-epoch sweeps cover both receipt tables. No request/response body is stored in a receipt.
+Only the six mutations carried a command ID and used `fleet.routed_file_call`. A
+migration-owned private trigger reserved (account, command) across task and file receipts,
+including old SQL writers. The Center also checked this namespace before presence. File
+records bound a relayed agent's specific local session. The original task replay digest was
+unchanged. Admissions, joins, replay-window fencing, conservative lost-settlement handling
+and fenced epoch sweeps covered both receipt tables. Receipts stored no request or
+response body.
 
-Each new request admits at most 245,760 inner bytes. The outer ingress remains bounded at
-262,144 bytes, replies at 1 MiB including framing, and the Fleet operation deadline at fifteen seconds.
-The routed node gets up to fourteen seconds including transport and settlement reserve; its file operation retains its published ten-second deadline.
-The official center generator produces the Worker table from these route declarations;
-unrelated methods retain their existing bounds.
+Each request admitted at most 245,760 inner bytes. The outer ingress was bounded at
+262,144 bytes, replies at 1 MiB including framing, and the Fleet operation deadline at
+fifteen seconds. The routed Node got up to fourteen seconds including transport and
+settlement reserve. Its file operation kept the published ten-second deadline. The
+official Center generator produced the historical Worker table from those declarations.
 
-The center audits target metadata and bounded signed node observations, including digest
-scope, actual byte count and digest-input count. It validates actual read bytes against their
-returned digest and requires the success observation prescribed by Design06a. Search digests
-remain explicitly node-supplied observations; the center does not claim to read those files.
-A missing/invalid signed result records observations as unavailable. File bodies, patterns,
-replacement text and search matches remain transient and are excluded from receipts, audits
-and logs. Native-node filesystem acceptance and strict cleanup remain separate required
-AF-CTR-06 evidence; center routing tests with software node handlers do not establish them.
+The Center audited target metadata and bounded signed Node observations, including digest scope,
+actual byte count and digest-input count. It validated read bytes against their returned digest and
+required the success observation prescribed by Design06a. Search digests were recorded as
+Node-supplied observations. A missing or invalid signed result recorded observations as unavailable.
+File bodies, patterns, replacement text and search matches stayed transient and were excluded from
+receipts, audits and logs. Native Node filesystem acceptance and strict cleanup required their own
+AF-CTR-06 evidence, independently of the Center routing tests with software Node handlers.
