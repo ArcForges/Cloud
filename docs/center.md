@@ -5,7 +5,7 @@ one executable, `arcforges-center`, built from the `center/` Go module (`github.
 bounded Go Hello proof ([go-hello](go-hello.md), now history) and is the runtime the production Worker selects. AF-CTR-02 delivered
 it in two parts:
 
-- **Part A (this document):** the executable, the ingress compatibility with the Worker and the C# host, the explicit center
+- **Part A (this document):** the executable, the ingress compatibility with the Worker and the historical C# protocol, the explicit center
   mode, configuration, health, readiness, logs and metrics, the Worker's production table generated from the center's
   registrations, and the Go engineering controls ([engineering controls](engineering-controls.md)).
 - **Part B ([PostgreSQL store](postgres-store.md)):** the store, its migrations and platform tables, the roles, the
@@ -24,10 +24,10 @@ remain explicitly pending where their prerequisites are absent. These implementa
 public sales. Schema-13 backup/restore and receipt evidence must be retained; an older schema-12 executable is not its runtime
 rollback path.
 
-The C# Native AOT host stays in the image as its default entrypoint for historical Hello proof. The guarded deployment path
-requires the Go Center for new official-hosted releases. See the [recovery procedure](deployment.md#recovery) for H-03
-approval and compatibility checks when selecting a previously admitted release. The `proof` environment
-(proof.arcforges.com) runs the Go center as the acceptance environment since part B.
+The current candidate image ships `/app/arcforges-center` as its sole application executable and entrypoint. The production
+configuration and the Go acceptance configuration for `proof` (proof.arcforges.com) both select it. The C# Hello and proof host
+belong to the historical release record. Any H-03-approved use of a previously admitted Worker and image follows the
+[recovery procedure](deployment.md#recovery), including schema and runtime credential compatibility checks.
 
 ## Layout
 
@@ -351,8 +351,9 @@ and (on Linux) checks the graceful shutdown on `SIGTERM`.
 
 ## Ingress compatibility
 
-The pipeline ports the host-side admission of the C# `IngressPipeline` (`src/ArcForges.Cloud/Ingress`) for the methods the
-center serves, in the same order:
+The pipeline carries forward the published admission behavior of the historical C# `IngressPipeline`
+(`src/ArcForges.Cloud/Ingress` at Cloud `9b8796eac760982d9814f371b820b736ddd945c4`) for the methods the center serves,
+in the same order:
 
 1. **Canonical target.** The raw request target must equal the decoded path: no percent-encoding, dot or empty segment, trailing
    slash, backslash or absolute-form target; otherwise plain `404`.
@@ -362,7 +363,7 @@ center serves, in the same order:
 4. **Media.** Binary gRPC-Web (`application/grpc-web`, `application/grpc-web+proto`), as the C# host admitted, and binary gRPC
    (`application/grpc`, `application/grpc+proto`) for direct clients of a self-hosted center and the gRPC listener; no
    `content-encoding`, and `grpc-encoding` absent or `identity`. Anything else (JSON or text codecs, the Connect protocol) is plain
-   `415`. Admitting native gRPC is the one widening against the C# host, which the Worker never reaches (it forwards gRPC-Web only).
+   `415`. Native gRPC is available to direct clients. The Worker forwards gRPC-Web.
 5. **Credentials** of a `session` method: a bearer and a session cookie together are `UNAUTHENTICATED`; a bearer must be exactly
    one `Bearer` value of 16 to 4096 token characters and validate as a native bearer; a cookie (`__Host-af_session`, exactly once)
    needs exactly one `Origin` equal to the allowed origin (else `PERMISSION_DENIED`), a valid session and that session's
@@ -390,10 +391,9 @@ center serves, in the same order:
 
 ## ArcError and gRPC status
 
-The design has no table from an `ArcError` category to a gRPC code, and neither the C# Cloud host nor DesktopPlatform's
-LocalRpc keeps one: LocalRpc and the C# proof methods return a domain refusal as gRPC `OK` with the `ArcError` in the reply
-message. The C# `IngressPipeline` produces a closed set of transport refusals, each a fixed pair of status and registry code. The
-center ports both exactly (`center/internal/ingress/errors.go`, `TestTheRefusalTableIsTheHostTable`):
+The Center, DesktopPlatform's LocalRpc and the historical C# proof methods return a domain refusal as gRPC `OK` with the
+`ArcError` in the reply message. The Center preserves the closed set of transport refusals from the C# `IngressPipeline`.
+Each refusal has a fixed status and registry code (`center/internal/ingress/errors.go`, `TestTheRefusalTableIsTheHostTable`):
 
 | Refusal (grpc-message)                | gRPC status             | ArcError category   | When                                                                         |
 | ------------------------------------- | ----------------------- | ------------------- | ---------------------------------------------------------------------------- |
@@ -439,20 +439,17 @@ ingress registry is built from the same registrations, so a method cannot be ser
 generator refuses a method without a budget, a budget without a method, a second plain route, a changed Hello bound, and a
 surface method outside the `hello` instance or without a `RequestMeta`. The generated refusals carry the call's correlation id (E4-1): the Worker writes a fresh one into a 16-byte slot of each
 generated reply (`replyCorrelationBytes` and the `...Offsets` beside the replies, from the marker the generator renders them with),
-so a refusal the Worker makes is joined to its call. The surface block comes first and the production block
-(`helloPath` to `productionRoutes`, always on) stays last, byte for byte what the C# generator writes for the rollback host;
-`maxBodyBytes` therefore stays the Hello bound (4 KiB), the bound of the Worker's disposal of an unread upload (a larger one is
-cancelled), while every row carries its own `maxRequestBytes` (the identity ceremonies' 16 KiB). `python eng/center.py generate`
-writes the file; `TestCommittedWorkerTablesAreCurrent` (part of `go test`, both legs)
-and `go run ./cmd/center-gen worker-tables -check` fail on any drift, the Go counterpart of `npm run check:generated`.
+so a refusal the Worker makes is joined to its call. The surface block comes first and the always-on production block
+(`helloPath` to `productionRoutes`) stays last. `maxBodyBytes` remains the published Hello bound of 4 KiB. The Worker uses
+that bound when disposing of an unread upload, and each route carries its own `maxRequestBytes` (16 KiB for the identity
+ceremonies). `python eng/center.py generate` writes the current Go table. Its drift checks are
+`TestCommittedWorkerTablesAreCurrent` on both verification legs and `go run ./cmd/center-gen worker-tables -check` in `center/`.
 
-The proof environment stays C# until AF-CTR-09: its methods, the edge guard, the correlation and storage guards, the readiness
-vocabulary and the wire limits are still generated from C# into `worker/tables/cloud-tables.generated.ts`, which imports the
-`ApiRoute` type from the center's module. The C# `HelloModule` registration stays for the rollback host, and
-`GeneratedTablesTests.TheGoCenterProductionTableEqualsTheCSharpRegistrations` checks that the Go module carries byte for byte
-the production rows the C# generator wrote before the split, so switching the runtime changes no Worker behaviour. Both
-generated modules are excluded from the WorkerAdapter literal check, which keeps refusing any business literal in the
-hand-written Worker sources.
+`worker/tables/cloud-tables.generated.ts` and `eng/generated/contracts-identity.json` are frozen outputs of the retired C#
+generator at Cloud `9b8796eac760982d9814f371b820b736ddd945c4`. Worker code still imports shared framing, correlation, storage
+and readiness constants from the frozen table. `npm run check:generated` verifies both frozen digests. The current routing
+authority is the Go registration table, and the Go acceptance configuration uses that table. The WorkerAdapter literal check
+continues to inspect handwritten Worker sources and excludes the generated tables.
 
 ## Health, readiness, logs and metrics
 
@@ -486,9 +483,9 @@ hand-written Worker sources.
 }
 ```
 
-Go is compiled native code but not .NET Native AOT, so `nativeAot` is false. The build identity is set with `-ldflags -X` from
-the same inputs as the C# executable's (`tooling/build-identity.ts`), and the release tooling compares `artifact` and `build`
-with the candidate. `center.surfaces` states the surfaces the center serves, as `ARCFORGES_CENTER_SURFACES` names them (`none` when
+The native Go executable reports `nativeAot: false`. The build identity is set with `-ldflags -X` from the inputs resolved by
+`tooling/build-identity.ts`. The release tooling compares `artifact` and `build` with the candidate. `center.surfaces` states the
+surfaces the center serves, as `ARCFORGES_CENTER_SURFACES` names them (`none` when
 it serves none), so a deployment can be compared with the surfaces its Worker forwards ([deployment](deployment.md#start-environment-after-a-deployment)).
 `operations` (the operator grant's interim page) is listed only together with `identity` and `pages`, and only on the official hosted
 center.
@@ -521,15 +518,16 @@ credential, a request or response body, a command line, output or file content. 
 
 ## Hosted deployment
 
-`worker/foundation/cloud-container.ts` selects `/app/arcforges-center` when `ARCFORGES_HELLO_RUNTIME=go` and passes the center
-mode, base URL and plan configuration, and the runtime role's URL (the Worker secret `ARCFORGES_CENTER_DATABASE_URL` that the
-deployment rotates; [PostgreSQL store](postgres-store.md#deployment)). The Hello's own Neon secret reaches only the C# host or a
-Go center without a store (`tooling/neon-runtime.ts`). The mail variables reach a Go center only while
+`worker/foundation/cloud-container.ts` requires `ARCFORGES_HELLO_RUNTIME=go` and starts `/app/arcforges-center` with the center
+mode, base URL, plan configuration and the pooled runtime-role URL `ARCFORGES_CENTER_DATABASE_URL`. The deployment rotates that
+credential ([PostgreSQL store](postgres-store.md#deployment)). When `ARCFORGES_NEON_HELLO=enabled`, Go Hello uses the same
+runtime role if a Center store is configured. Without that store, the Worker forwards `NEON_DATABASE_URL` for Go Hello's separate
+pooled Neon connection. The mail variables reach the Center only while
 `ARCFORGES_CENTER_MAIL_PROVIDER` names a provider, and then only that provider's own (the closed lists of the Worker, compared with
 `center/internal/config/mail.go` by a test); no deployed environment names one, so none is passed ([mail](#mail)). The Dockerfile builds the
 center with the pinned Go archive (`center/toolchain.json`, SHA-256 checked), `go mod verify`, `CGO_ENABLED=0`, `-trimpath`,
-`-buildvcs=false` and the identity `-ldflags`, beside the C# executable, which stays the image's default entrypoint. The
-candidate inspects both ELF members and their legal files without running them (`tooling/release-provenance.ts`).
+`-buildvcs=false` and the identity `-ldflags`. The candidate inspects the Go ELF and legal files through a stopped container
+(`tooling/release-provenance.ts`).
 
 Structural cost bounds of the production deployment, enforced by configuration:
 
