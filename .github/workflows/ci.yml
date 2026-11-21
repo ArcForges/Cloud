@@ -239,11 +239,11 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-      - name: Build C# for analysis
+      - name: Build the managed verification solution for analysis
         if: matrix.language == 'csharp'
         run: |
-          dotnet restore src/ArcForges.Cloud --locked-mode
-          dotnet build src/ArcForges.Cloud -c Release --no-restore
+          dotnet restore Cloud.slnx --locked-mode
+          dotnet build Cloud.slnx -c Release --no-restore
       # The center and its test packages; the bindings are the published Contracts Go module, so no .NET restore is needed.
       - name: Build Go for analysis
         if: matrix.language == 'go'

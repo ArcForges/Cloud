@@ -22,18 +22,22 @@ internal static class CloudRepository
     public const string ModuleAbstractions = "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj";
     public const string StorageD1 = "src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj";
 
+    /// <summary>The independently built published client probe and repository policy host.</summary>
+    public static IReadOnlyList<ProjectClassification> ActiveClassifications { get; } =
+    [
+        new(Consumer, ProjectRole.Test, Owner, Production: false, Aot: false),
+        new(Host, ProjectRole.Test, Owner, Production: false, Aot: false),
+    ];
+
     /// <summary>
-    /// Cloud is one Native AOT host project and composition root. It is classified as the shell rather than an adapter on purpose: the
-    /// shared engine then rejects every provider SDK call in it (Cloud holds no provider adapter; Cloudflare is reached only through
-    /// the signed Worker facade) and does not apply the RPC-adapter entry-point rule to its implicitly declared record members.
-    /// Roles are declared here, never inferred from names, so a new project fails the inventory test until its role is reviewed.
+    /// The full on-disk inventory during retirement. The reviewed legacy host, its modules and tooling remain
+    /// available for source-only checks until historical preservation is complete. Only the active set builds.
     /// </summary>
     public static IReadOnlyList<ProjectClassification> Classifications { get; } =
     [
+        .. ActiveClassifications,
         new(Service, ProjectRole.Shell, Owner, Production: true, Aot: true),
         new(ServiceTests, ProjectRole.Test, Owner, Production: false, Aot: false),
-        new(Consumer, ProjectRole.Test, Owner, Production: false, Aot: false),
-        new(Host, ProjectRole.Test, Owner, Production: false, Aot: false),
         // CLOUD.84 (ADP-07 supporting inventory row, S35(1)): the non-published generator of the Worker tables and the Contracts identity (D3).
         new("tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj", ProjectRole.BuildTool, Owner, Production: false, Aot: false),
         // CLOUD.02 (ADP-07 inventory binding): the shared boundary types, the named-plan bridge and the nineteen module boundaries.

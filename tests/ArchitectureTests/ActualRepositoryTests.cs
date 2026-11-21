@@ -10,11 +10,14 @@ public sealed class ActualRepositoryTests
     private static readonly string Root = CloudRepository.FindRoot();
 
     [Fact]
-    public void SolutionProjectFilesAndRolesAreTheSameClassifiedProjects()
+    public void SolutionContainsOnlyTheActiveManagedProjectsAndEveryProjectFileIsClassified()
     {
         var files = TrackedFiles().Where(file => file.EndsWith(".csproj", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(CloudRepository.Classifications.Count, files.Length);
-        Assert.Empty(RepositoryInventoryPolicy.CheckProjects(CloudRepository.Read(Root, "Cloud.slnx"), files, CloudRepository.Classifications));
+        var declared = CloudRepository.Classifications.Select(project => project.Path);
+        Assert.Equal(declared.Order(StringComparer.Ordinal), files.Order(StringComparer.Ordinal));
+        var inactive = CloudRepository.Classifications.Except(CloudRepository.ActiveClassifications).Select(project => project.Path);
+        Assert.Empty(RepositoryInventoryPolicy.CheckProjects(CloudRepository.Read(Root, "Cloud.slnx"),
+            files.Except(inactive, StringComparer.Ordinal), CloudRepository.ActiveClassifications));
     }
 
     [Fact]
@@ -37,7 +40,7 @@ public sealed class ActualRepositoryTests
     }
 
     [Fact]
-    public void TheNativeAotServiceDeclaresItsPostureInTheProjectFile()
+    public void TheLegacyNativeAotProjectFilePreservesItsReviewedPosture()
     {
         Assert.Empty(CloudAotPolicy.CheckProject(CloudRepository.Read(Root, CloudRepository.Service), CloudRepository.Read(Root, "Directory.Build.props")));
     }

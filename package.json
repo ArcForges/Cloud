@@ -23,7 +23,7 @@
     "check": "npm run test:bridge-assets && dotnet restore tests/ArchitectureTests/ArcForges.Cloud.ArchitectureTests.csproj --locked-mode && npm run test:dependencies && npm run check:plans && npm run check:physical && npm run policy && node tooling/project.ts toolchain && node tooling/project.ts licence && node tooling/project.ts provenance && npm run check:generated && npm run format:check && npm run lint && npm run typecheck && npm test",
     "policy": "node tooling/project.ts naming",
     "generate": "dotnet run --project tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj -c Release -- generate",
-    "check:generated": "dotnet run --project tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj -c Release -- check",
+    "check:generated": "node eng/verification/check-frozen-generation.ts",
     "check:dotnet": "dotnet restore Cloud.slnx --locked-mode && dotnet build Cloud.slnx -c Release --no-restore && dotnet test --solution Cloud.slnx -c Release --no-build && dotnet format Cloud.slnx --no-restore --verify-no-changes",
     "candidate": "node tooling/project.ts candidate",
     "verify:candidate": "node tooling/project.ts verify",
@@ -41,8 +41,8 @@
     "test:foundation:local": "node eng/verification/foundation-local.ts",
     "test:foundation:live": "node eng/verification/foundation-live.ts",
     "check:dependencies": "node tooling/dependency-policy.ts",
-    "check:plans": "dotnet run --project tools/ArcForges.Cloud.Generation/ArcForges.Cloud.Generation.csproj -c Release -- plans check",
-    "check:physical": "node eng/verification/physical-schema.ts --check && node eng/migrations/cli.ts check --base origin/main",
+    "check:plans": "npm run check:legacy-cloud-history",
+    "check:physical": "node eng/verification/physical-schema.ts --check && python eng/verification/check_legacy_cloud_history.py --migrations-only",
     "test:harness:ai": "node eng/verification/harness-proof.ts ai-binding",
     "test:harness:executor": "node eng/verification/harness-proof.ts executor-crash",
     "test:harness:capacity": "node eng/verification/harness-proof.ts container-capacity",
@@ -53,7 +53,8 @@
     "test:d1:identity:local": "node eng/verification/d1-identity-local.ts",
     "test:dependencies": "node --test tooling/dependency-policy.test.ts",
     "test:bridge-assets": "python -m unittest discover -s eng/verification -p test_ctr06_bridge_assets.py",
-    "test:ctr06:publisher:driver": "node --experimental-test-module-mocks --test tests/worker/ctr06-publisher-integration.test.ts"
+    "test:ctr06:publisher:driver": "node --experimental-test-module-mocks --test tests/worker/ctr06-publisher-integration.test.ts",
+    "check:legacy-cloud-history": "python eng/verification/check_legacy_cloud_history.py"
   },
   "dependencies": {
     "@arcforges/ai-internal": "1.0.0-ci.287.1",
