@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
+	"github.com/ArcForges/Cloud/center/internal/schema"
 )
 
 // migration0006SHA256 pins the applied form of 0006_mobile_authorization.sql (immutable once applied).
@@ -75,9 +76,10 @@ FROM pg_constraint c WHERE c.contype = 'f' AND c.conrelid = 'identity.mobile_aut
 // flow, the approver's complete record, a redeemed code only on a completed or revoked flow, the new revoke reason 9 (and nothing
 // beyond), and the final-state trigger (only COMPLETED to REVOKED, once, changing nothing else).
 func TestTheMobileStoreConstraints(t *testing.T) {
+	const version = schema.ContractionVersion - 1
 	url, name := pgtest.Database(t)
-	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: name + "_runtime"}); err != nil {
-		t.Fatal(err)
+	if result, err := apply(t, url, centerBuild(t)[:version], Options{Runner: "test", RuntimeRole: name + "_runtime"}); err != nil || result.Version != version {
+		t.Fatalf("historical mobile schema %d: %+v %v", version, result, err)
 	}
 	conn := pgtest.Connect(t, url)
 	ctx := context.Background()

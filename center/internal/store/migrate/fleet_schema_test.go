@@ -109,13 +109,33 @@ func TestMigration0004LandsWholeOverVersion3(t *testing.T) {
 	}
 }
 
-// TestEveryFleetForeignKeyHasAnIndex holds migration 0004 to the index decision of 0002 (E8, cloud-10): the first referencing column
-// of every foreign key of the fleet schema leads an index, so the retention sweeps and an account purge check each reference through
-// an index.
+// TestEveryFleetForeignKeyHasAnIndex checks the historical routing records and the current enrollment tables independently.
+// The first referencing column leads an index for each foreign key, supporting retention and account deletion (E8, cloud-10).
 func TestEveryFleetForeignKeyHasAnIndex(t *testing.T) {
+	build := centerBuild(t)
+	shared := []string{
+		"node_device", "node_installation",
+		"node_sign_in_viewer", "node_sign_in_user", "node_sign_in_approver_session", "node_sign_in_session", "node_sign_in_enrollment",
+		"device_authorization_viewer", "device_authorization_user", "device_authorization_approver_session", "device_authorization_session", "device_authorization_enrollment",
+	}
+	t.Run("historical-routing", func(t *testing.T) {
+		legacy := []string{
+			"routed_call_account", "routed_call_node", "routed_call_refusal",
+			"routed_file_call_account", "routed_file_call_node", "routed_file_call_refusal", "routed_command_id_account",
+			"routed_file_target_account_id_fkey", "routed_file_target_node_enrollment_id_fkey",
+		}
+		checkFleetForeignKeyIndexes(t, build[:schema.ContractionVersion-1], append(legacy, shared...))
+	})
+	t.Run("current-enrollment", func(t *testing.T) {
+		checkFleetForeignKeyIndexes(t, build, shared)
+	})
+}
+
+func checkFleetForeignKeyIndexes(t *testing.T, build []Migration, required []string) {
+	t.Helper()
 	url, name := pgtest.Database(t)
-	if _, err := apply(t, url, centerBuild(t), Options{Runner: "test", RuntimeRole: name + "_runtime"}); err != nil {
-		t.Fatal(err)
+	if result, err := apply(t, url, build, Options{Runner: "test", RuntimeRole: name + "_runtime"}); err != nil || result.Version != len(build) {
+		t.Fatalf("fleet schema %d: %+v %v", len(build), result, err)
 	}
 	var missing []string
 	var count int
@@ -139,15 +159,13 @@ WHERE c.contype = 'f' AND n.nspname = 'fleet' ORDER BY 1`)
 			missing = append(missing, constraint)
 		}
 	}
-	for _, constraint := range []string{"routed_file_call_account", "routed_file_call_node", "routed_file_call_refusal", "routed_command_id_account", "routed_file_target_account_id_fkey", "routed_file_target_node_enrollment_id_fkey"} {
+	for _, constraint := range required {
 		if !seen[constraint] {
-			t.Errorf("missing reviewed AF-CTR-06 foreign key %s", constraint)
+			t.Errorf("missing fleet foreign key %s", constraint)
 		}
 	}
-	// node: device and installation; each flow table: viewer, approver, approver session, session and enrollment; routed_call (0010):
-	// account, node and refusal code; routed_file_call (0011) adds the same three, its shared registry adds account, and caller-bound target associations add account and enrollment.
-	if err = rows.Err(); err != nil || len(missing) > 0 || count != 21 {
-		t.Fatalf("fleet foreign keys %d, without a leading index: %v %v", count, missing, err)
+	if err = rows.Err(); err != nil || len(missing) > 0 || count != len(required) {
+		t.Fatalf("fleet foreign keys %d, expected %d, without a leading index: %v %v", count, len(required), missing, err)
 	}
 }
 
