@@ -4,9 +4,9 @@
     "net11.0": {
       "ArcForges.Build.Policy": {
         "type": "Direct",
-        "requested": "[1.0.0-ci.150.1, )",
-        "resolved": "1.0.0-ci.150.1",
-        "contentHash": "1J1u9tUxi5NQARWFroDvXWjlsGn5oILqccuF1rggK/DNwrTNSJR+G5zT+S668RjkvLvt5DPTYZo9WcvKIi0P3w=="
+        "requested": "[1.0.0-ci.151.1, )",
+        "resolved": "1.0.0-ci.151.1",
+        "contentHash": "oQmW7DkVgs5J+k3cJv47OgrNSDT6Z15DqWb5+qMa3lAq3QbjvwqP9EOvudl4RmRhxErIHyk2LcCptzFzTq2f2w=="
       },
       "ArcForges.Contracts.Validation": {
         "type": "Direct",
