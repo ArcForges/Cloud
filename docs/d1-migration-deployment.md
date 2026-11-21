@@ -1,5 +1,18 @@
 # D1 migration deployment step
 
+## Current Go delivery
+
+The Go Center uses PostgreSQL. In a gated delivery job, `eng/migrations/deploy.ts` verifies the exact sealed Go
+candidate and records `not-applicable` for D1. The separately gated PostgreSQL migration is handled by the Center's
+admitted executable. Current checks for the preserved D1 and proof migrations are `npm run check:physical` and
+`npm run check:legacy-cloud-history`. [PostgreSQL deployment](postgres-store.md#deployment) · [D1 history](d1-physical-schema.md#migrations)
+
+## Historical CLOUD.70 record
+
+The C# sealed migrator, D1 environment variables, and proof workflow described below apply to the reviewed historical
+checkout. The prior workflow used the same script name for its D1 migration step.
+[Original D1 deployment implementation and record](https://github.com/ArcForges/Cloud/blob/9b8796eac760982d9814f371b820b736ddd945c4/docs/d1-migration-deployment.md)
+
 CLOUD.70 adds the one place where migrations reach a deployed D1 database: a gated step of the deployment jobs of
 `.github/workflows/ci.yml`, run before the Worker or image is promoted. It is never run from the Container, and it
 adds no runner behavior: the migration engine (lease, fence, receipts and gating) is the CLOUD.03 design

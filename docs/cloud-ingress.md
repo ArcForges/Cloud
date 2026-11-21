@@ -4,7 +4,19 @@ This document is the design, protocol and evidence record of the CLOUD.01 ingres
 WP-21.00). It states what the code implements, which checks run in hosted CI, which ran only as explicit local
 opt-in, and what has not been observed. It does not claim any deployed result that the task record does not hold.
 
+## Current Go Center
+
+The current Go Center owns method registration, authentication and transport policy. Run `python eng/center.py generate`
+to regenerate the Worker table from the Go registrations and `python eng/center.py check` to run the Go checks.
+`npm run check:generated` verifies the frozen `worker/tables/cloud-tables.generated.ts` and
+`eng/generated/contracts-identity.json` that remain in the repository. [Go route and table authority](center.md#worker-table-authority)
+
+The former C# host, pipeline probe and cross-process proof drivers are preserved at the reviewed Cloud revision. The C# routes,
+commands and results in the record below describe that earlier implementation. [Cloud ingress history](https://github.com/ArcForges/Cloud/blob/9b8796eac760982d9814f371b820b736ddd945c4/docs/cloud-ingress.md)
+
 ## Scope
+
+Historical CLOUD.01 scope.
 
 WP-21.00 generalizes the Hello mechanics that the bootstrap proved at small scale into the one public boundary every
 later business call crosses: Worker `/api` routing, and the C# Native AOT gRPC-Web, authentication and current-owner
@@ -27,6 +39,8 @@ until one of them provides a verifier. Nothing here adds authenticated, commerci
 
 ## Request path
 
+The diagram shows the original Worker-to-Kestrel path.
+
 ```text
 client ── HTTPS ──> Worker  arcforges.com/api/*  (or the proof custom domain)
    1. exact method lookup in the route table (unknown path: 404, no Container wakes)
@@ -45,24 +59,12 @@ Everything under `/internal` and every unlisted path is answered by the Worker. 
 
 ## Worker rules
 
-- **Method table.** `findRoute` returns a route only for an exact path; the proof-only probe methods exist only when
-  `FOUNDATION_PROOF` is exactly `enabled`. The rows are generated, never hand-written. Since AF-CTR-02 the production rows (the
-  Hello method, the health route and their transport budgets) come from the Go center's registrations
-  (`center/internal/routes`), written to `worker/tables/center-tables.generated.ts` by `python eng/center.py generate` and
-  drift-checked by the center's Go tests ([center](center.md#worker-table-authority)); `tools/ArcForges.Cloud.Generation`
-  reads the C# host's registrations (`PipelineProbe`, and `HelloModule` for the cross-check) and the transport budgets in
-  `src/ArcForges.Cloud/Generation/TransportBudgets.cs`, and writes the proof rows to `worker/tables/cloud-tables.generated.ts`.
-  Both generators refuse a registered method without a budget and a budget without a registered method.
-  `npm run check:generated`, the center's `TestCommittedWorkerTablesAreCurrent` and the C# test `GeneratedTablesTests` fail
-  on any drift, and `GeneratedTablesTests` pins the Go production table to the C# Hello registration, byte for byte.
-  The Worker's transport budgets and edge-guard names (the session cookie and the CSRF header) come from the same module.
-  Every other limit and identifier shape the Worker applies is declared in C# as well: the production values in
-  `src/ArcForges.Cloud/Generation/WorkerWireLimits.cs` (the body and router read timers, the container sleep, the gRPC frame
-  header, the span id, the canonical UUID, the session token and bearer shapes) and the proof-only values in
-  `ProofWireLimits.cs` (the object part, reply and request bounds, the operator and signing bounds, the readiness report bounds,
-  and the named-plan deadline and integer grammars). The generator emits each into the same module, and a host value is referenced
-  rather than copied. The standing WorkerAdapter literal check (`tests/ArchitectureTests/WorkerAdapter`, CLOUD.84 S43) refuses any
-  other limit or shape literal in `worker/**`, except the closed protocol constants and the owned, expiring register rows.
+- **Method table.** `findRoute` returns only exact paths from the generated Go registrations in
+  `center/internal/routes`. The Go test `TestCommittedWorkerTablesAreCurrent` checks
+  `worker/tables/center-tables.generated.ts` for drift. Retained proof and compatibility constants use the frozen
+  C# output. The standing WorkerAdapter literal check in `tests/ArchitectureTests/WorkerAdapter` still checks
+  `worker/**` against the closed protocol constants and owned, expiring exceptions.
+  [Original C# generator and budget declarations](https://github.com/ArcForges/Cloud/blob/9b8796eac760982d9814f371b820b736ddd945c4/tools/ArcForges.Cloud.Generation/Program.cs)
 - **Admission.** A non-POST is 405, a media type other than `application/grpc-web` or `application/grpc-web+proto` is
   415, `content-encoding` or a `grpc-encoding` other than identity is 415, a query string is 400, a request body over
   the method bound is 413 (declared or actual bytes), the compressed flag in the first frame is 415. A malformed
@@ -162,6 +164,8 @@ against fakes.
 
 ## Mobile rows (AF-CTR-04 part M)
 
+This section records the retired ArcForges Cloud mobile surface.
+
 The mobile surface ([center mobile](center-mobile.md)) adds two kinds of rows beside the page routes, each with a handler of its own
 and a generated table (`nativeRoutes`, `apexRoutes`, from `center/internal/routes/mobile.go`); its HTML page and forms
 (`/mobile/authorize`, `/review`, `/decision`) are ordinary page routes. While `FLAGSHIP_SURFACES` does not name `mobile`, every row is
@@ -220,7 +224,7 @@ While `FLAGSHIP_SURFACES` does not name `nodes`, each is answered with the gener
 before anything is read; production names none. E2b adds the routed methods below; FleetService methods outside those and the registry
 remain unregistered (`UNIMPLEMENTED` at the center).
 
-Part E2b adds the six routed task methods ([routed calls](center-fleet.md#routed-calls)): SubmitNodeTask (a 256 KiB request bound) and
+Historically, part E2b added the six retired Fleet Task methods ([routed calls](center-fleet.md#routed-calls)): SubmitNodeTask (a 256 KiB request bound) and
 GetNodeTask, ListNodeTasks, WaitNodeTask, ReadNodeTaskOutput and CancelNodeTask (8 KiB), each with a reply bound of 1 MiB
 (`routes.RoutedReplyBytes`: a node response of at most 1,040,384 bytes and its frame), the contract's deadline as its budget (10 s;
 WaitNodeTask 55 s; ReadNodeTaskOutput 30 s), and, for the two long polls, the connection deadlines of their budget plus 5 s (PN-1). The
@@ -249,6 +253,8 @@ The guard reads from the Container only as fast as the client reads (no read-ahe
 through the same guard before any byte is returned, bounded by its route, so a failure still maps to an accurate status.
 
 ## Host rules
+
+This section records admission in the former C# host. [Current Go request path](center.md#request-path)
 
 The pipeline runs in this order and stops at the first refusal, which is a trailers-only gRPC-Web status (HTTP 200 and
 one trailer frame) with a stable message key; no plan, store write or business code has run when it is produced.
@@ -290,11 +296,10 @@ in the job wake message and the private job-slice call. It uses only fields the 
 `traceparent` request header between the Worker and the host. It adds no wire field, no client-visible header and no
 contract meaning, and it is never an authorization input.
 
-The Worker's guards on this identity (the canonical UUID shape, the nil value, the field numbers that carry it and the
-traceparent version and flags) are declared in `src/ArcForges.Cloud/Generation/CorrelationGuards.cs` and generated into
-`worker/tables/cloud-tables.generated.ts` (CLOUD.84). `worker/ingress/correlation.ts` applies those guards and forwards the
-values; the host's rule (`CorrelationContext.IsValidId`) is unchanged, and `GeneratedTablesTests` and `CorrelationGuardTests`
-check the declarations against it.
+The archived C# generator declared the UUID shape, nil value, field numbers, and traceparent version and flags in
+`CorrelationGuards.cs`. Its frozen output remains in `worker/tables/cloud-tables.generated.ts` (CLOUD.84), and
+`worker/ingress/correlation.ts` applies the guards and forwards the values. The historical C# `GeneratedTablesTests` and
+`CorrelationGuardTests` checked those declarations against `CorrelationContext.IsValidId`.
 
 | Hop                    | What happens                                                                                                                                                                                                                                                                      | Where                                                                                    |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -357,6 +362,8 @@ On the proof origin only, static assets answer the two Web profile shells (`/acc
 
 ## Adding a public method
 
+New methods use the Go route registrations and generation checks. The original C# procedure follows. [Go table authority](center.md#worker-table-authority)
+
 A module appends its method in its own section, in two places that a test compares: its `RpcPolicy` in the module's
 `RpcPolicies` (host) and its transport budget in `TransportBudgets.ByMethod`; its `ApiRoute` row is generated from the two
 (`worker/tables/cloud-tables.generated.ts`). The policy states whether the request carries a `RequestMeta`
@@ -366,6 +373,8 @@ decides whether the correlation of a call is read from the body. A generated ser
 (RES-cloud-host-composition).
 
 ## Proof-only pipeline probe
+
+This section describes the retired C# probe at the reviewed revision.
 
 The probe lets the deployed ingress be observed without a business service. `arcforges.proof.v1.PipelineProbe` is
 registered only when the foundation proof is enabled; production does not contain it in the host or in the Worker table.
@@ -380,6 +389,9 @@ convention (field 1 is `RequestMeta`). Every reply the probe builds carries the 
 | `Observation` | unary         | counters `1` started, `2` completed, `3` canceled, `4` deadline exceeded streams of this host process                                                                                     |
 
 ## Running the checks
+
+The table and scenarios below document the historical CLOUD.01 and CLOUD.69 checks. Their C# driver commands apply to
+the reviewed archive. The current Go verification is documented in [Center verification](center.md#verification).
 
 | Check                                                                | Command                                                               | Where it runs                                                      |
 | -------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------ |

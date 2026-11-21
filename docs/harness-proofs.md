@@ -1,6 +1,8 @@
 # Harness proofs (HAR.40)
 
-These are the three early proofs of P2-021 item 5 and brief section 4.3: the Workers AI binding, executor crash injection and container capacity. Each is a local opt-in driver under `eng/verification`. None runs in CI (P2-017), and none reads a credential or a local credential store. Each writes one JSON record under `artifacts/harness-proof/`, which is ignored by Git and reproduced by the commands below.
+HAR.40 recorded the Workers AI binding, executor crash injection and container capacity proofs for P2-021 item 5
+and brief section 4.3. The current AI adapter fixture and capacity drivers run by local opt-in under
+`eng/verification`. They write JSON records under `artifacts/harness-proof/`, which Git ignores.
 
 ## Rules for every record
 
@@ -15,21 +17,23 @@ These are the three early proofs of P2-021 item 5 and brief section 4.3: the Wor
 # Fixture proof of the ai.internal adapter (node only)
 npm run test:harness:ai
 
-# Offline C# crash injection and executor suites (CPU-heavy, after a build)
-npm run test:harness:executor
-
 # Container launch values, plus an optional live probe of a deployed proof Worker
 npm run test:harness:capacity
 HARNESS_CAPACITY_URL=https://<proof-origin> HARNESS_CAPACITY_PATH=/healthz HARNESS_CAPACITY_CONCURRENCY=4 npm run test:harness:capacity
 ```
 
-The workstation build slot that the recorded runs below went through is retired (serial delivery, ArcForges/Plan `execution-policy.md`); run the commands directly.
+The `npm run test:harness:executor` alias and C# crash-injection driver were withdrawn from the current checkout
+by `fc0a73f67890ed37b37b0f831c2f4b10c0ba0e85`. Proof 2 retains their original fixtures and evidence
+references. [Archived executor proof driver](https://github.com/ArcForges/Cloud/blob/9b8796eac760982d9814f371b820b736ddd945c4/eng/verification/harness-proof-executor.ts)
+
+The recorded runs below used the workstation build slot retired under the ArcForges/Plan execution policy. The current
+AI and capacity fixture commands run directly.
 
 The live probe sends no credential, requires an `https` origin with no query, fragment or userinfo, refuses redirects, and bounds each request by `HARNESS_CAPACITY_TIMEOUT_MS` (default 120000, at most 180000).
 
 ## Proof 1: Workers AI binding and the ai.internal adapter
 
-Driver: `eng/verification/harness-proof-ai.ts`. Realness: `node-fixture`.
+Driver: `eng/verification/harness-proof-ai.ts`. Realness: `node-fixture`. The current command exercises an isolated adapter fixture.
 
 | Check                                       | What it establishes                                                                                                        |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -42,7 +46,7 @@ Driver: `eng/verification/harness-proof-ai.ts`. Realness: `node-fixture`.
 | `binding-429-is-one-502-never-retried`      | a binding failure is one 502 `ai.upstream_failed`, one binding call                                                        |
 | five refusal checks                         | admitted-set (403), body cap (413), hard ceiling (413), host (404) and method (405) refusals, each with zero binding calls |
 
-Live steps that remain operator runs (`liveNotRun`):
+The HAR.40 record listed the following steps as `liveNotRun`.
 
 1. Workers AI binding latency on the deployed Worker: deploy the proof environment with the AI binding and time `ai.internal` calls.
 2. gpt-oss tier and its requests-per-minute admission: observe the account tier. No tier is assumed here.
@@ -51,7 +55,7 @@ Live steps that remain operator runs (`liveNotRun`):
 
 ## Proof 2: executor crash injection and alarm arming
 
-Driver: `eng/verification/harness-proof-executor.ts`. Realness: `dotnet-local`. It runs `HarnessCrashTests` and `HarnessExecutorTests` (38 tests, including the ten-row crash matrix at claim, reserve, dispatch intent, outcome and yield, each before and after its commit) against the SQLite oracle with the checked-in plans.
+Historical driver: `eng/verification/harness-proof-executor.ts`. Realness: `dotnet-local`. It ran `HarnessCrashTests` and `HarnessExecutorTests` (38 tests, including the ten-row crash matrix at claim, reserve, dispatch intent, outcome and yield, each before and after its commit) against the SQLite oracle with the checked-in plans.
 
 Alarm arming (HAR.40, library level; the successors of `cloud-release-r40` through `cloud-release-r42` carry the bound inputs; the earlier evidence rows that record a deferral are superseded history). The executor arms the run's wake before it parks the run with a timer, and commits the waiting state after the arm. The arming caller is the Hello-agent slice's `read_unavailable` exit. The proof composition registers the alarm port, but no host route constructs the slice, so the park is exercised by offline tests that construct the slice with the port. A real flow arms the wake: under the proof composition, the `read_unavailable` exit parks the run through `ParkWithTimerAsync` with a wake about 1 s later. The alarm fires, the signed wake reaches the run, and the fenced claim settles the run back to waiting with no model or tool step. This is tested end to end offline. Brief section 10, HAR.40 alarm arming, follow-up item 1, is **delivered** for the arming, the signed wake and the fenced claim, and its remaining part is assigned to HAR.00 under S24: resuming the parked run's step after the wake without a caller retry needs durable run input (the greeting name), which HAR.00 and HAR.01 own under architecture 17. The skipped test `AParkedHelloRunResumesAndCompletesTheGreetingWithoutACallerRetry` is the executable specification of that part, and its Skip reason is `HAR.00: resume after wake needs durable run input (brief S24)`. The earlier "not delivered, blocks approval" text in the evidence sections below is superseded by S24 and kept as history. These offline tests cover the arming:
 
@@ -60,7 +64,7 @@ Alarm arming (HAR.40, library level; the successors of `cloud-release-r40` throu
 - `HarnessAlarmClientTests`: one closed JSON request per call to `harness.internal`; every reply other than the exact scheduled reply, a transport failure, a timeout, a cancelled caller and a reply body that stalls past the alarm deadline are refusals. The stalled-body test fails on the pre-fix code, where the body was read after the deadline was disposed (fixed at `284de7d`).
 - `tests/worker/run-alarm.test.ts` (the `harness.internal` suite, merged from the former `harness-internal.test.ts`): the handler refuses every other method, path, host, query, content type, size and body before any run's alarm is addressed; a missing binding is 503; the offline loop runs the schedule through the handler, fires the alarm, and checks the signed wake POST to the container stub against the body the C# wake endpoint parses.
 
-Live steps that remain operator runs (`liveNotRun`):
+The HAR.40 record listed the following steps as `liveNotRun`.
 
 1. Cloudflare D1 fenced writes under a real lease: kill the Container between a dispatch intent and its outcome on the proof environment.
 2. Durable Object alarm wake after a real process restart: on `proof.arcforges.com`, arm a parked run through `harness.internal`, restart the `FoundationContainer`, and observe the alarm wake that claims the run. The offline tests above pass; the live observation is not run here (P2-017: no live CI). The proof environment binds `HARNESS_RUN_ALARM` (`env.proof` in `wrangler.json`).

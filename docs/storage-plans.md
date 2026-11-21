@@ -5,6 +5,12 @@ rules are the Design [D1 execution profile](https://github.com/ArcForges/ArcForg
 sections 2 and 3 and the [Cloud module projects](https://github.com/ArcForges/ArcForges-Design-Parallel/blob/64173614f2c41543bfff8f6df8d5a9e41207eb0a/docs/architecture/01-solution-and-project-layout.md#5-cloud-module-projects)
 rules CM-01 to CM-04 and RD-01 to RD-04.
 
+The D1 named plans and generated Worker dictionary are retained as frozen historical inputs. In the current
+repository, `npm run check:plans` verifies the retained inputs against the reviewed archive and
+`npm run check:physical` verifies the D1 manifest and applied migration history. The C# build, generation
+commands and authoring procedure below belong to the original checkout.
+[Named-plan history](https://github.com/ArcForges/Cloud/blob/9b8796eac760982d9814f371b820b736ddd945c4/docs/storage-plans.md) · [Current Go PostgreSQL store](postgres-store.md)
+
 ## Decision in one sentence
 
 C# owns every business decision and asks the Worker to execute one exact, named and versioned plan; the Worker runs only SQL that is
@@ -135,6 +141,8 @@ build time, not correctness.
 
 ## Checks
 
+Historical CLOUD.02 checks and evidence.
+
 | Check                                                                                                                                                                       | Where                          |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | `npm run check:plans`, `tests/ArcForges.Cloud.Tests/Reduction/StoragePlanGeneratorTests.cs` and `StoragePlanOwnershipTests.cs` (generator rules, ownership, owner registry) | hosted CI and locally          |
@@ -147,6 +155,8 @@ build time, not correctness.
 | Native AOT publish of the host with its twenty-one referenced projects                                                                                                      | hosted CI image build, locally |
 
 ## Adding a module's plans
+
+Historical authoring procedure from the reviewed Cloud revision.
 
 1. Write `storage/plans/<owner>/<name>.sql` for your own owner. Touch only your tables and, for receipts, outbox and similar, the
    `platform_` tables. A write plan starts with its guard inserts, holds your mutations and ends with the canonical commit tail and the guard release
