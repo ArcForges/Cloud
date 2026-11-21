@@ -62,7 +62,7 @@ func newDatabase(t *testing.T, build []migrate.Migration) *Database {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	migration := pgtest.Connect(t, url)
-	if _, err = migrate.Apply(ctx, migration, build, migrate.Options{Runner: "test", RuntimeRole: group}); err != nil {
+	if _, err := migrate.Apply(ctx, migration, build, migrate.Options{Runner: "test", RuntimeRole: group}); err != nil {
 		t.Fatal(err)
 	}
 	rotation, err := provision.Rotate(ctx, pgtest.Connect(t, url), provision.Options{Group: group, DirectURL: url, PooledHost: pgtest.Host(t), Runner: "test", ProbeTimeout: 10 * time.Second})
