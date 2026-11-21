@@ -18,12 +18,12 @@ AGPL-3.0-only
 GNU Affero General Public License version 3; Copyright Free Software Foundation, Inc. Complete original licence and its verbatim-copying permission are retained.
 
 center-runtime-afv2-mig-01-r1
-https://github.com/ArcForges/Cloud @ 684381a07aeebf22b1cad2de5fb4a44de2ed0907
+https://github.com/ArcForges/Cloud @ d54ab7ffc6a7d28ee594159ec750897374d78123
 AGPL-3.0-only
 The Go-only Center links the reviewed module closure and Go standard library. The pinned chiseled base's eight original copyright files and the applicable full Go and Contracts Go legal texts remain available in the image.
 
 center-worker-afv2-mig-01-r1
-https://github.com/ArcForges/Cloud @ 684381a07aeebf22b1cad2de5fb4a44de2ed0907
+https://github.com/ArcForges/Cloud @ d54ab7ffc6a7d28ee594159ec750897374d78123
 AGPL-3.0-only
 Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. Full applicable terms accompany the Worker bundle.
 
