@@ -14,12 +14,6 @@ public sealed partial class FamilyPortArchitectureTests
 {
     private static string Src => Path.Combine(CloudRepository.FindRoot(), "src");
 
-    private static string[] Sources(string directory) =>
-        [.. Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories)
-            .Where(file => !file.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                && !file.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            .Order(StringComparer.Ordinal)];
-
     [GeneratedRegex(@"(?:class|record|struct)\s+\w+[^{;]*:\s*[^{;]*\bIModuleFamilyPort(?:Factory)?\b", RegexOptions.CultureInvariant)]
     private static partial Regex Implementation();
 
@@ -30,14 +24,10 @@ public sealed partial class FamilyPortArchitectureTests
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)];
 
-    private static (string Path, string Text)[] Read(IEnumerable<string> files) => [.. files.Select(file => (file, File.ReadAllText(file)))];
-
     [Fact]
     public void ThePortIsPublishedInTheAbstractionsProjectFromPrimitivesOnly()
     {
-        var file = Path.Combine(Src, "ArcForges.Cloud.Modules.Abstractions", "Families", "ModuleFamilyPort.cs");
-        Assert.True(File.Exists(file));
-        var text = File.ReadAllText(file);
+        var text = ArchivedManagedSource.Read("src/ArcForges.Cloud.Modules.Abstractions/Families/ModuleFamilyPort.cs");
         Assert.Contains("namespace ArcForges.Cloud.Modules;", text, StringComparison.Ordinal);
         Assert.DoesNotMatch(@"\busing\s", text);
         Assert.DoesNotMatch(@"ArcForges\.Cloud\.(?:Storage|Modules\.[A-Za-z])", text);
@@ -49,14 +39,14 @@ public sealed partial class FamilyPortArchitectureTests
     [Fact]
     public void OnlyTheFamilyBindingAdapterImplementsThePort()
     {
-        var files = Read(Sources(Src));
+        var files = ArchivedManagedSource.CSharpUnder("src");
         Assert.Equal(["ArcForges.Cloud.Storage.D1/FamilyBinding/ModuleFamilyPortFactory.cs"], Implementers(Src, files));
     }
 
     [Fact]
     public void TheImplementerScanDoesNotDependOnTheOrderTheFilesystemReturns()
     {
-        var files = Read(Sources(Src));
+        var files = ArchivedManagedSource.CSharpUnder("src");
         var reversed = files.Reverse().ToArray();
         var shuffled = files.OrderBy(file => file.Path.Length).ThenByDescending(file => file.Path, StringComparer.Ordinal).ToArray();
         Assert.Equal(Implementers(Src, files), Implementers(Src, reversed));
@@ -73,12 +63,10 @@ public sealed partial class FamilyPortArchitectureTests
     [Fact]
     public void TheAdapterReferencesNoModuleAndHoldsNoSqlOrTableName()
     {
-        var folder = Path.Combine(Src, "ArcForges.Cloud.Storage.D1", "FamilyBinding");
-        var files = Sources(folder);
-        Assert.Equal(["FamilyContributionPolicy.cs", "ModuleFamilyPortFactory.cs"], files.Select(Path.GetFileName));
-        foreach (var file in files)
+        var files = ArchivedManagedSource.CSharpUnder("src/ArcForges.Cloud.Storage.D1/FamilyBinding");
+        Assert.Equal(["FamilyContributionPolicy.cs", "ModuleFamilyPortFactory.cs"], files.Select(file => Path.GetFileName(file.Path)));
+        foreach (var (_, text) in files)
         {
-            var text = File.ReadAllText(file);
             Assert.DoesNotMatch(@"ArcForges\.Cloud\.Modules\.[A-Za-z]", text);
             Assert.DoesNotMatch(@"\b(?:SELECT|INSERT INTO|UPDATE|DELETE FROM)\b", text);
             Assert.DoesNotMatch(@"\b(?:identity|workspace|platform)_[a-z_]+", text);

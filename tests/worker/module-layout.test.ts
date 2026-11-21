@@ -1,18 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The nineteen module boundaries as files: the owner registry, the module projects, their references, the host listing and the
-// solution agree. The C# architecture tests (ModuleBoundaryTests) enforce the same from the compiled side. The last tests keep the
-// test files from leaving temporary directories behind (support/scratch.ts).
+// The retained owner registry agrees with the archived module projects, their references, the host listing and the solution.
+// The last tests keep the current checkout's tests from leaving temporary directories behind (support/scratch.ts).
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ownerRegistry, parseOwnerRegistry } from "../../eng/verification/storage-plans.ts";
 import { repositoryRoot } from "./support/sqlite-d1.ts";
 
-const read = (relative: string) => readFileSync(path.join(repositoryRoot, relative), "utf8");
-const modules = parseOwnerRegistry(read(ownerRegistry))
+const layout = JSON.parse(
+  execFileSync(
+    "python",
+    ["-E", "-s", "eng/verification/check_legacy_cloud_history.py", "--managed-layout"],
+    { cwd: repositoryRoot, encoding: "utf8", maxBuffer: 256 * 1024, timeout: 30_000 },
+  ),
+) as { directories: string[]; files: Record<string, string> };
+
+const archived = (relative: string) => {
+  const content = layout.files[relative];
+  assert.ok(content !== undefined, `Missing reviewed layout file: ${relative}`);
+  return content;
+};
+
+const modules = parseOwnerRegistry(readFileSync(path.join(repositoryRoot, ownerRegistry), "utf8"))
   .owners.filter((entry) => entry.kind === "module")
   .map((entry) => entry.className);
 const project = (name: string) =>
@@ -25,7 +37,7 @@ const includes = (xml: string, element: string) =>
 test("the registry, the module projects and the host listing name the same nineteen modules", () => {
   assert.equal(modules.length, 19);
   assert.equal(new Set(modules).size, 19);
-  const directories = readdirSync(path.join(repositoryRoot, "src"))
+  const directories = layout.directories
     .filter(
       (name) =>
         name.startsWith("ArcForges.Cloud.Modules.") &&
@@ -33,14 +45,12 @@ test("the registry, the module projects and the host listing name the same ninet
     )
     .map((name) => name.slice("ArcForges.Cloud.Modules.".length));
   assert.deepEqual(directories.toSorted(), modules.toSorted());
-  const listing = read("src/ArcForges.Cloud/Composition/ModuleBoundaries.cs");
-  const solution = read("Cloud.slnx");
-  const host = read("src/ArcForges.Cloud/ArcForges.Cloud.csproj");
+  const listing = archived("src/ArcForges.Cloud/Composition/ModuleBoundaries.cs");
+  const solution = archived("Cloud.slnx");
+  const host = archived("src/ArcForges.Cloud/ArcForges.Cloud.csproj");
   for (const name of modules) {
-    assert(existsSync(path.join(repositoryRoot, project(name))), name);
-    assert(
-      existsSync(path.join(repositoryRoot, `src/ArcForges.Cloud.Modules.${name}/${name}Module.cs`)),
-    );
+    assert(Object.hasOwn(layout.files, project(name)), name);
+    assert(Object.hasOwn(layout.files, `src/ArcForges.Cloud.Modules.${name}/${name}Module.cs`));
     assert(listing.includes(`${name}Module.Instance`), `${name} is listed by the host`);
     assert(solution.includes(project(name)), `${name} is in the solution`);
     assert(
@@ -52,13 +62,13 @@ test("the registry, the module projects and the host listing name the same ninet
 
 test("a module references only the Abstractions and no package, and the shared projects reference no module", () => {
   for (const name of modules) {
-    const xml = read(project(name));
+    const xml = archived(project(name));
     assert.deepEqual(includes(xml, "ProjectReference"), [
       "../ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj",
     ]);
     assert.deepEqual(includes(xml, "PackageReference"), [], name);
     assert.deepEqual(includes(xml, "FrameworkReference"), [], name);
-    const source = read(`src/ArcForges.Cloud.Modules.${name}/${name}Module.cs`);
+    const source = archived(`src/ArcForges.Cloud.Modules.${name}/${name}Module.cs`);
     for (const other of modules.filter((candidate) => candidate !== name))
       assert(!source.includes(`ArcForges.Cloud.Modules.${other}`), `${name} names ${other}`);
     assert(
@@ -66,12 +76,12 @@ test("a module references only the Abstractions and no package, and the shared p
       name,
     );
   }
-  const abstractions = read(
+  const abstractions = archived(
     "src/ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj",
   );
   assert.deepEqual(includes(abstractions, "ProjectReference"), []);
   assert.deepEqual(includes(abstractions, "PackageReference"), []);
-  const storage = read("src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj");
+  const storage = archived("src/ArcForges.Cloud.Storage.D1/ArcForges.Cloud.Storage.D1.csproj");
   // The plan bridge references the Abstractions project only to implement its generic plan-execution port (COM.16), never a module.
   assert.deepEqual(includes(storage, "ProjectReference"), [
     "../ArcForges.Cloud.Modules.Abstractions/ArcForges.Cloud.Modules.Abstractions.csproj",
@@ -80,10 +90,10 @@ test("a module references only the Abstractions and no package, and the shared p
 });
 
 test("only the host project references the modules and nothing under src references the host", () => {
-  for (const entry of readdirSync(path.join(repositoryRoot, "src"))) {
+  for (const entry of layout.directories) {
     const file = `src/${entry}/${entry}.csproj`;
-    if (!existsSync(path.join(repositoryRoot, file))) continue;
-    const references = includes(read(file), "ProjectReference");
+    if (!Object.hasOwn(layout.files, file)) continue;
+    const references = includes(archived(file), "ProjectReference");
     if (entry === "ArcForges.Cloud") continue;
     assert(
       references.every(

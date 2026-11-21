@@ -42,7 +42,7 @@ public sealed class ActualRepositoryTests
     [Fact]
     public void TheLegacyNativeAotProjectFilePreservesItsReviewedPosture()
     {
-        Assert.Empty(CloudAotPolicy.CheckProject(CloudRepository.Read(Root, CloudRepository.Service), CloudRepository.Read(Root, "Directory.Build.props")));
+        Assert.Empty(CloudAotPolicy.CheckProject(ArchivedManagedSource.Read(CloudRepository.Service), ArchivedManagedSource.Read("Directory.Build.props")));
     }
 
     [Fact]

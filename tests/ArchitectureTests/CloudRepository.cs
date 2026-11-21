@@ -281,3 +281,64 @@ internal static class CloudRepository
 
     private static PolicyFinding Finding(string rule, string message) => new(rule, "artifacts/evidence/naming.json", message);
 }
+
+/// <summary>The legacy C# source inputs used only by the historical architecture assertions.</summary>
+internal static class ArchivedManagedSource
+{
+    private static readonly string Root = CloudRepository.FindRoot();
+    private static readonly Lazy<Dictionary<string, string>> Sources = new(Load);
+
+    public static string Read(string relativePath) => Sources.Value[relativePath];
+
+    public static IEnumerable<string> ModuleProjects => Sources.Value.Keys
+        .Where(path => path.StartsWith("src/ArcForges.Cloud.Modules.", StringComparison.Ordinal)
+            && path.EndsWith(".csproj", StringComparison.Ordinal))
+        .Select(Path.GetFileNameWithoutExtension)
+        .OfType<string>()
+        .Order(StringComparer.Ordinal);
+
+    /// <summary>Absolute file names for the scanners' path logic and verified archive text for their input.</summary>
+    public static (string Path, string Text)[] CSharpUnder(string directory)
+    {
+        var sources = Sources.Value
+            .Where(file => file.Key.StartsWith(directory + "/", StringComparison.Ordinal)
+                && file.Key.EndsWith(".cs", StringComparison.Ordinal))
+            .OrderBy(file => file.Key, StringComparer.Ordinal)
+            .Select(file => (Path.GetFullPath(Path.Combine(Root, file.Key)), file.Value))
+            .ToArray();
+        return sources.Length > 0 ? sources : throw new InvalidOperationException("Missing reviewed C# sources: " + directory);
+    }
+
+    private static Dictionary<string, string> Load()
+    {
+        var start = new ProcessStartInfo("python")
+        {
+            WorkingDirectory = Root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (string argument in new[] { "-E", "-s", "eng/verification/check_legacy_cloud_history.py", "--managed-sources" })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("The managed source archive reader did not start.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("The managed source archive reader timed out.");
+        }
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException("The managed source archive was refused: " + error.GetAwaiter().GetResult());
+        }
+
+        return JsonSerializer.Deserialize<Dictionary<string, string>>(output.GetAwaiter().GetResult())
+            ?? throw new InvalidOperationException("The managed source archive returned no inputs.");
+    }
+}

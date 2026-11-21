@@ -23,6 +23,7 @@ D1_MIGRATIONS = "src/ArcForges.Cloud.Storage.D1/Migrations"
 PROOF_MIGRATIONS = "worker/proof-migrations"
 D1_PLAN_TREES = ("storage/plans", "src/ArcForges.Cloud.Storage.D1/Physical/manifest")
 D1_PLAN_OUTPUT = "worker/storage/plans.generated.ts"
+WORKER_LEGACY_VECTORS = "tests/ArcForges.Cloud.Tests/Vectors"
 D1_REFERENCES = {
     "plan": "src/ArcForges.Cloud.Storage.D1/PlanManifest.g.cs",
     "physical": "src/ArcForges.Cloud.Storage.D1/Physical/PhysicalSchema.g.cs",
@@ -40,6 +41,14 @@ ARCHIVES = {
     "d1References": (
         tuple(D1_REFERENCES.values()),
         "1d6a6f490cf5c6c486314f967d3b1269b527a0b05993f61343b64a3b2a2d0c96",
+    ),
+    "managedLayout": (
+        ("Cloud.slnx", "src"),
+        "dd62b439285b17f312a94ede2448c4f7961edbb77a297de78cf1b5362b61e6c7",
+    ),
+    "managedSources": (
+        ("Directory.Build.props", "src"),
+        "bc9446c3d38991eb69b5971594712d4b8c3f19861a5fbea848b92864b37eb5bf",
     ),
     "generation": (
         ("tools/ArcForges.Cloud.Generation", "storage/plans",
@@ -104,7 +113,7 @@ def check_retained_tree(root: Path, archive: tarfile.TarFile, directory: str) ->
 def check_retained(root: Path, archive: tarfile.TarFile) -> dict[str, int]:
     """Verify immutable histories, retired generator inputs and outputs, and Go parity data."""
     retained = {directory: check_retained_tree(root, archive, directory)
-                for directory in (D1_MIGRATIONS, PROOF_MIGRATIONS, *D1_PLAN_TREES)}
+                for directory in (D1_MIGRATIONS, PROOF_MIGRATIONS, *D1_PLAN_TREES, WORKER_LEGACY_VECTORS)}
     for name in (D1_PLAN_OUTPUT, RESOLVER_VECTORS):
         check_retained_file(root, archive, name)
         retained[name] = 1
@@ -133,6 +142,35 @@ def read_d1_reference(root: Path, kind: str) -> bytes:
     data = check_archive(root, expected, paths)
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
         return archive_file(archive, D1_REFERENCES[kind])
+
+
+def read_managed_layout(root: Path) -> dict[str, object]:
+    check_source(root)
+    paths, expected = ARCHIVES["managedLayout"]
+    data = check_archive(root, expected, paths)
+    module_prefix = "ArcForges.Cloud.Modules."
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+        directories = sorted(member.name.split("/")[1] for member in archive.getmembers()
+                             if member.isdir() and member.name.startswith("src/") and member.name.count("/") == 1)
+        names = {"Cloud.slnx", "src/ArcForges.Cloud/Composition/ModuleBoundaries.cs"}
+        for directory in directories:
+            names.add(f"src/{directory}/{directory}.csproj")
+            if directory.startswith(module_prefix):
+                module = directory.removeprefix(module_prefix)
+                names.add(f"src/{directory}/{module}Module.cs")
+        files = {name: archive_file(archive, name).decode("utf-8")
+                 for name in sorted(names.intersection(archive.getnames()))}
+    return {"directories": directories, "files": files}
+
+
+def read_managed_sources(root: Path) -> dict[str, str]:
+    check_source(root)
+    paths, expected = ARCHIVES["managedSources"]
+    data = check_archive(root, expected, paths)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+        names = ["Directory.Build.props", *(member.name for member in archive.getmembers()
+                 if member.name.startswith("src/") and member.name.endswith((".cs", ".csproj")))]
+        return {name: archive_file(archive, name).decode("utf-8-sig") for name in sorted(names)}
 
 
 def attest(root: Path, *, migrations_only: bool = False) -> dict[str, object]:
@@ -167,10 +205,18 @@ if __name__ == "__main__":
                       help="Verify only the reviewed D1 and proof migration inventories.")
     mode.add_argument("--d1-reference", choices=D1_REFERENCES,
                       help="Read one reviewed generated D1 reference as raw bytes.")
+    mode.add_argument("--managed-layout", action="store_true",
+                      help="Read the reviewed legacy solution, projects and module declarations.")
+    mode.add_argument("--managed-sources", action="store_true",
+                      help="Read the reviewed C# sources and project settings for architecture tests.")
     args = parser.parse_args()
     try:
         if args.d1_reference:
             sys.stdout.buffer.write(read_d1_reference(ROOT, args.d1_reference))
+        elif args.managed_layout:
+            print(json.dumps(read_managed_layout(ROOT)))
+        elif args.managed_sources:
+            print(json.dumps(read_managed_sources(ROOT)))
         else:
             print(json.dumps(attest(ROOT, migrations_only=args.migrations_only), indent=2))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError, tarfile.TarError) as error:
