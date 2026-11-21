@@ -108,6 +108,22 @@ public sealed class DeployTests
     }
 
     [Fact]
+    public void HistoricalProofSelectsItsReservedD1BindingAndNamesTheRunner()
+    {
+        // This fixture represents the proof declaration at 9b8796e, with no provider lookup.
+        using var legacy = JsonDocument.Parse("""
+            { "env": { "proof": { "d1_databases": [{ "binding": "DB", "database_name": "arcforges-proof-business" }] } } }
+            """);
+        Assert.Null(DeployGate.DatabaseNameFor(MigrationFiles.DeclaredDatabases(legacy.RootElement, "production"), "production"));
+        Assert.Equal("arcforges-proof-business",
+            DeployGate.DatabaseNameFor(MigrationFiles.DeclaredDatabases(legacy.RootElement, "proof"), "proof"));
+        var env = Env();
+        Assert.Equal("gh-42-1-deploy-proof", DeployGate.RunnerIdentity(env));
+        env["GITHUB_RUN_ATTEMPT"] = "2";
+        Assert.Equal("gh-42-2-deploy-proof", DeployGate.RunnerIdentity(env));
+    }
+
+    [Fact]
     public async Task TheDatabaseIdComesFromAnExactNameLookupAMissingDuplicatedOrFailedLookupRefusesAndNothingIsCreated()
     {
         const string name = "arcforges-proof-business";
@@ -145,6 +161,14 @@ public sealed class DeployTests
         Assert.Equal(1, report.After.SchemaVersion);
         Assert.Equal(new[] { chain[2].File, chain[3].File, chain[4].File }, report.After.Pending.ToArray());
         Assert.True(report.Compatibility.CanWrite);
+        var formatted = DeployGate.FormatReport(report);
+        using var output = JsonDocument.Parse(formatted);
+        var fields = output.RootElement;
+        Assert.Equal("passed", fields.GetProperty("status").GetString());
+        Assert.Equal(report.Run.Fence, fields.GetProperty("fence").GetInt64());
+        Assert.Contains(fields.GetProperty("receipts").EnumerateArray(), entry => entry.GetProperty("file").GetString() == chain[1].File);
+        Assert.True(fields.GetProperty("compatibility").GetProperty("canWrite").GetBoolean());
+        Assert.DoesNotContain(Token, formatted, StringComparison.Ordinal);
         // A second deployment of the same release has nothing to do.
         var again = await DeployGate.RunGateAsync(Gate(client, null, time));
         Assert.True(again.Run.AlreadyCurrent);
@@ -288,8 +312,12 @@ public sealed class DeployTests
             Assert.Empty(handler.Bodies);
             Assert.Matches("not applicable", output);
             Assert.Equal("not-applicable", DeployGateRecord(root, "production").Status);
-            AssertRefusal("gate-failed", () => DeployGate.RequireGatePassed(new GateRecord("production", Revision, "refused", string.Empty), "production", Revision));
-            DeployGate.RequireGatePassed(new GateRecord("production", Revision, "not-applicable", string.Empty), "production", Revision);
+            var receipt = new GateRecord("production", Revision, "not-applicable", string.Empty);
+            DeployGate.RequireGatePassed(receipt, "production", Revision);
+            AssertRefusal("gate-failed", () => DeployGate.RequireGatePassed(receipt with { Status = "refused" }, "production", Revision));
+            AssertRefusal("gate-missing", () => DeployGate.RequireGatePassed(null, "production", Revision));
+            AssertRefusal("gate-mismatch", () => DeployGate.RequireGatePassed(receipt with { Target = "proof" }, "production", Revision));
+            AssertRefusal("gate-mismatch", () => DeployGate.RequireGatePassed(receipt with { Revision = new string('f', 40) }, "production", Revision));
         }
         finally
         {
