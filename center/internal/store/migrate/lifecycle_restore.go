@@ -5,6 +5,7 @@ package migrate
 import (
 	"context"
 
+	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -12,13 +13,20 @@ import (
 // renews account authority only; old sessions/proofs keep their lower snapshots
 // and are explicitly revoked. Lifecycle/command/UNKNOWN identities survive.
 func finishLifecycleRestore(ctx context.Context, tx pgx.Tx, conn *pgx.Conn, runtimeRole, sourceRole string, c *restoreCapability) error {
-	if c == nil || !c.active || c.conn != conn || c.lifecycleArtifact == "" || requireCTR06RestoreIsolation(ctx, tx) != nil || checkRestoreIsolation(ctx, tx, runtimeRole) != nil {
+	if c == nil || !c.active || c.conn != conn || c.lifecycleArtifact == "" || requireCTR06RestoreIsolation(ctx, tx) != nil ||
+		checkRestoreIsolationAtVersion(ctx, tx, runtimeRole, c.schemaVersion) != nil {
 		return ErrLifecycleTransitionRequired
 	}
-	if _, err := tx.Exec(ctx, `LOCK TABLE identity.user,identity.account_security_state,identity.session,
- identity.step_up_challenge,identity.auth_flow,identity.lifecycle_operation,identity.mobile_authorization,
- fleet.node_sign_in,fleet.device_authorization IN ACCESS EXCLUSIVE MODE;
- UPDATE identity.account_security_state SET auth_epoch=auth_epoch+1,recovery_generation=recovery_generation+1,
+	tables := "identity.user,identity.account_security_state,identity.session,identity.step_up_challenge," +
+		"identity.auth_flow,identity.lifecycle_operation"
+	if c.schemaVersion < schema.ContractionVersion {
+		tables += ",identity.mobile_authorization"
+	}
+	tables += ",fleet.node_sign_in,fleet.device_authorization"
+	if _, err := tx.Exec(ctx, "LOCK TABLE "+tables+" IN ACCESS EXCLUSIVE MODE"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE identity.account_security_state SET auth_epoch=auth_epoch+1,recovery_generation=recovery_generation+1,
  rev=rev+1,changed_at=greatest(changed_at,clock_timestamp());
  UPDATE identity.session SET revoked_at=greatest(issued_at,clock_timestamp()),revoke_reason=6,rev=rev+1 WHERE revoked_at IS NULL;
  UPDATE identity.step_up_challenge SET state=5,rev=rev+1 WHERE state=1;

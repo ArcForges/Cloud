@@ -45,7 +45,6 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/ingress"
 	"github.com/ArcForges/Cloud/center/internal/mail"
 	"github.com/ArcForges/Cloud/center/internal/management"
-	"github.com/ArcForges/Cloud/center/internal/mobileauth"
 	"github.com/ArcForges/Cloud/center/internal/observe"
 	"github.com/ArcForges/Cloud/center/internal/pages"
 	"github.com/ArcForges/Cloud/center/internal/platform"
@@ -342,7 +341,7 @@ func (c *Center) composeIdentity(dispatcher *connect.Server, pipeline *ingress.O
 	service := identity.New(identity.Options{DB: c.Store, Policy: c.Config.Identity.Policy, RP: rp, Mail: sender, Bootstrap: c.Config.Identity.Bootstrap,
 		Clock: clock, Events: c.Metrics, Logger: logger, Background: options.Background, Participants: participants,
 		// Remediation still cancels preserved approvals from the retired mobile surface. Registration order keeps the existing lock order.
-		AccountParticipants: append(fleet.AccountParticipants(), mobileauth.ApprovalParticipant{})})
+		AccountParticipants: fleet.AccountParticipants()})
 	c.drain = service.Drain
 	// The per-account resource controls stand in front of every gated row (AF-CTR-05 E0, CTR5-GATE-05): a gated row without one
 	// refuses the composition.

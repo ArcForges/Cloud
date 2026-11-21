@@ -20,17 +20,19 @@ import (
 // digest is bound to the target floor in 0011, but the digest is not authority
 // to complete a restore after this capability has been lost.
 type restoreCapability struct {
-	conn               *pgx.Conn
-	cluster            string
-	databaseOID        uint32
-	ownerOID           uint32
-	archiveSHA256      string
-	metadataSHA256     string
-	secret             [32]byte
-	active             bool
-	managementArtifact string
-	managementSource   int
-	lifecycleArtifact  string
+	conn                *pgx.Conn
+	cluster             string
+	databaseOID         uint32
+	ownerOID            uint32
+	archiveSHA256       string
+	metadataSHA256      string
+	secret              [32]byte
+	active              bool
+	managementArtifact  string
+	managementSource    int
+	lifecycleArtifact   string
+	schemaVersion       int
+	contractionArtifact string
 }
 
 func newRestoreCapability(ctx context.Context, conn *pgx.Conn, archive, metadata string) (*restoreCapability, error) {
@@ -184,13 +186,20 @@ func finalizeCTR06Restore(ctx context.Context, conn *pgx.Conn, runtimeRole, sour
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", LockKey); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, "LOCK TABLE fleet.routed_call, fleet.routed_file_call, fleet.routed_command_id, fleet.routed_file_target, fleet.hub_lease IN ACCESS EXCLUSIVE MODE"); err != nil {
+		if c.schemaVersion >= schema.ContractionVersion {
+			applied, _, err := ReadApplied(ctx, tx)
+			if err != nil || len(applied) != c.schemaVersion {
+				return ErrCTR06RetirementUnproven
+			}
+		}
+		writers := strings.Join(restoreWriterRelations(c.schemaVersion), ", ")
+		if _, err := tx.Exec(ctx, "LOCK TABLE "+writers+" IN ACCESS EXCLUSIVE MODE"); err != nil {
 			return err
 		}
 		if err := requireCTR06RestoreIsolation(ctx, tx); err != nil {
 			return err
 		}
-		if err := checkRestoreIsolation(ctx, tx, runtimeRole); err != nil {
+		if err := checkRestoreIsolationAtVersion(ctx, tx, runtimeRole, c.schemaVersion); err != nil {
 			return err
 		}
 		var roleOID uint32
@@ -244,6 +253,11 @@ func finalizeCTR06Restore(ctx context.Context, conn *pgx.Conn, runtimeRole, sour
 		}
 		if c.lifecycleArtifact != "" {
 			if err := finishLifecycleRestore(ctx, tx, conn, runtimeRole, sourceRole, c); err != nil {
+				return err
+			}
+		}
+		if c.schemaVersion >= schema.ContractionVersion {
+			if err := finishContractionRestore(ctx, tx, conn, runtimeRole, sourceRole, c); err != nil {
 				return err
 			}
 		}

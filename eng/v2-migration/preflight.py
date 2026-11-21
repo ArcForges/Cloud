@@ -15,7 +15,8 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "center/internal/schema/migrations"
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}\Z")
 HISTORICAL_SCHEMA = 11
-CURRENT_SCHEMA = 16
+EXPANDED_SCHEMA = 16
+CURRENT_SCHEMA = 17
 COUNTS = {
     "pending_commands": ("platform.command_receipt", "status = 1"),
     "pending_inbox": ("platform.inbox", "processed_at IS NULL"),
@@ -37,6 +38,12 @@ CURRENT_COUNTS = {
     "unsettled_legacy_outcomes": ("management.legacy_outcome", "final_at IS NULL OR legacy_state = 7"),
     "unknown_legacy_outcomes": ("management.legacy_outcome", "legacy_state = 7"),
 }
+LEGACY_SOURCE_COUNTS = frozenset({"unsettled_routed_calls", "unsettled_routed_file_calls",
+                                  "unknown_routed_calls", "unknown_routed_file_calls"})
+CONTRACTED_COUNTS = {name: count for name, count in CURRENT_COUNTS.items() if name not in LEGACY_SOURCE_COUNTS}
+CONTRACTED_COUNTS["ready_contraction_receipts"] = ("management.cutover_receipt", "target_schema = 17 AND phase = 4")
+RETIRED_RELATIONS = ("fleet.routed_call", "fleet.routed_file_call", "fleet.routed_file_target",
+                     "fleet.routed_command_id", "fleet.refusal_code", "identity.mobile_authorization")
 PREREQUISITES = [
     "operator-confirmed installed cohort, authority inventory and security-successor qualification (H-03)",
     "exclusive maintenance ownership, stopped hub/runtime sessions and settled routed effects",
@@ -75,12 +82,18 @@ def inspection_sql() -> str:
              "FROM (SELECT version, CASE WHEN length(name)<=128 THEN name END AS name, "
              "CASE WHEN length(sha256)=64 THEN sha256 END AS sha256 FROM platform.schema_migration "
              f"ORDER BY version LIMIT {CURRENT_SCHEMA + 1}) AS observed;",
-             f"SELECT count(*)={CURRENT_SCHEMA} AND min(version)=1 AND max(version)={CURRENT_SCHEMA} AS inspect_current "
+             f"SELECT count(*)={EXPANDED_SCHEMA} AND min(version)=1 AND max(version)={EXPANDED_SCHEMA} AS inspect_expanded, "
+             f"count(*)={CURRENT_SCHEMA} AND min(version)=1 AND max(version)={CURRENT_SCHEMA} AS inspect_contracted "
              f"FROM (SELECT version FROM platform.schema_migration ORDER BY version LIMIT {CURRENT_SCHEMA + 1}) AS observed \\gset",
              "\\else", "SELECT json_build_object('kind','ledger','rows',NULL);",
-             "SELECT false AS inspect_current \\gset", "\\endif"]
+             "SELECT false AS inspect_expanded, false AS inspect_contracted \\gset", "\\endif"]
     parts.extend(count_sql(COUNTS))
-    parts.extend(["\\if :inspect_current", *count_sql(CURRENT_COUNTS), "\\endif", "ROLLBACK;"])
+    retired = ",".join(f"'{name}'" for name in RETIRED_RELATIONS)
+    parts.extend(["\\if :inspect_expanded", *count_sql(CURRENT_COUNTS), "\\endif",
+                  "\\if :inspect_contracted", *count_sql(CONTRACTED_COUNTS),
+                  "SELECT json_build_object('kind','count','name','retired_relations_present','value',count(*)) "
+                  f"FROM unnest(ARRAY[{retired}]) AS retired(name) WHERE to_regclass(name) IS NOT NULL;",
+                  "\\endif", "ROLLBACK;"])
     return "\n".join(parts) + "\n"
 
 
@@ -145,7 +158,7 @@ def inventory(command: list[str]) -> dict:
         versions = [row["version"] for row in applied]
         report["applied_migrations"] = applied
         if versions and max(versions) > HISTORICAL_SCHEMA:
-            report["source_migrations"] = source
+            report["source_migrations"] = source[:max(versions)]
         if versions and max(versions) > CURRENT_SCHEMA:
             report["classification"] = "newer"
             blockers.append("newer_database_refused")
@@ -154,30 +167,41 @@ def inventory(command: list[str]) -> dict:
             blockers.append("applied_migration_name_checksum_or_sequence_mismatch")
             return report
         version = len(applied)
-        if version not in {10, HISTORICAL_SCHEMA, CURRENT_SCHEMA}:
+        if version not in {10, HISTORICAL_SCHEMA, EXPANDED_SCHEMA, CURRENT_SCHEMA}:
             blockers.append("unsupported_or_incomplete_migration_baseline")
             return report
         report["classification"] = f"center{version}"
         report["migration_ledger_matches_source"] = True
         expected = set(COUNTS)
-        if version == CURRENT_SCHEMA:
+        if version == EXPANDED_SCHEMA:
             expected.update(CURRENT_COUNTS)
+        if version == CURRENT_SCHEMA:
+            expected.update(CONTRACTED_COUNTS)
+            expected.add("retired_relations_present")
         count_values = observed_counts(observations, expected)
         report["counts"].update(count_values)
         required = expected - SCHEMA11_COUNTS if version == 10 else expected
+        if version == CURRENT_SCHEMA:
+            required -= LEGACY_SOURCE_COUNTS
         if any(report["counts"].get(name) is None for name in required):
             report["classification"] = "unknown"
             blockers.append("required_metadata_table_missing")
             return report
+        if version == CURRENT_SCHEMA and (count_values["retired_relations_present"] != 0
+                                          or count_values["ready_contraction_receipts"] != 1):
+            report["classification"] = "unknown"
+            blockers.append("contracted_schema_identity_unproven")
+            return report
         for name, value in report["counts"].items():
-            if name not in {"runtime_floor_rows", "restore_admission_rows"} and value:
+            if name not in {"runtime_floor_rows", "restore_admission_rows", "ready_contraction_receipts"} and value:
                 blockers.append(name)
         if version == 10:
             blockers.append("schema10_requires_0011_security_successor_admission_not_simple_append")
         elif report["counts"]["runtime_floor_rows"] != 1 or report["counts"]["restore_admission_rows"] != 1:
             blockers.append(f"schema{version}_runtime_floor_or_restore_admission_unproven")
-        if version == CURRENT_SCHEMA:
-            report["prerequisites"] = [*PREREQUISITES[:-1], "retain applied 0001..0016 SQL/checksums and published artifacts"]
+        if version >= EXPANDED_SCHEMA:
+            report["prerequisites"] = [*PREREQUISITES[:-1],
+                                       f"retain applied 0001..{version:04d} SQL/checksums and published artifacts"]
         report["authority_and_full_schema_identity"] = "unproven_requires_guarded_runner_qualification"
         blockers.append("deployment_cohort_backup_and_authority_qualification_required")
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, StopIteration):

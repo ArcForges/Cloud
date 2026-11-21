@@ -163,6 +163,9 @@ func CaptureLogical(ctx context.Context, cfg config.Migration, archivePath, meta
 	if version >= 13 && requireLifecycleReady(ctx, tx) != nil {
 		return report, ErrLifecycleTransitionRequired
 	}
+	if version >= schema.ContractionVersion && requireContractionReady(ctx, tx) != nil {
+		return report, ErrContractionRequired
+	}
 	tables, err := ctr06RequiredTablesFrom(inventory)
 	if err != nil {
 		return report, err

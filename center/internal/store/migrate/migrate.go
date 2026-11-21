@@ -163,10 +163,14 @@ type Querier interface {
 
 // ReadApplied reads platform.schema_migration; exists is false before the first run.
 func ReadApplied(ctx context.Context, q Querier) (applied []Applied, exists bool, err error) {
-	if err = q.QueryRow(ctx, "SELECT to_regclass('platform.schema_migration') IS NOT NULL").Scan(&exists); err != nil || !exists {
+	return readMigrationHistory(ctx, q, "platform.schema_migration")
+}
+
+func readMigrationHistory(ctx context.Context, q Querier, relation string) (applied []Applied, exists bool, err error) {
+	if err = q.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", relation).Scan(&exists); err != nil || !exists {
 		return nil, exists, err
 	}
-	rows, err := q.Query(ctx, "SELECT version, name, sha256, applied_at, applied_by FROM platform.schema_migration ORDER BY version")
+	rows, err := q.Query(ctx, "SELECT version, name, sha256, applied_at, applied_by FROM "+relation+" ORDER BY version")
 	if err != nil {
 		return nil, true, err
 	}
@@ -332,6 +336,10 @@ func Inspect(ctx context.Context, conn *pgx.Conn, build []Migration) (Result, er
 		result.State = StateRefused
 		return result, ErrLifecycleTransitionRequired
 	}
+	if result.Version >= schema.ContractionVersion && requireContractionReady(ctx, conn) != nil {
+		result.State = StateRefused
+		return result, ErrContractionRequired
+	}
 	return result, nil
 }
 
@@ -372,6 +380,7 @@ type Options struct {
 	localLegacyGrant *ctr06RestoreBridgeGrant
 	management       *managementAdmission
 	lifecycle        *managementAdmission
+	contraction      *contractionAdmission
 	LockTimeout      time.Duration
 	StatementTimeout time.Duration
 	LockWait         time.Duration
@@ -510,6 +519,16 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 			options.lifecycle = &managementAdmission{conn: conn, source: 0, artifactDigest: artifact, active: true}
 			defer func() { options.lifecycle.active = false }()
 		}
+		if len(build) >= schema.ContractionVersion && isContraction(build[schema.ContractionVersion-1]) {
+			artifact, err := managementArtifact(options.Runner, build[schema.ContractionVersion-1])
+			if err != nil {
+				return result, err
+			}
+			options.contraction = &contractionAdmission{
+				snapshot: managementAdmission{conn: conn, artifactDigest: artifact, active: true},
+			}
+			defer func() { options.contraction.snapshot.active = false }()
+		}
 	}
 	// Even a schema-only invocation must not report a quarantined or
 	// identity-mismatched canonical 0011 database as current. Only the
@@ -523,6 +542,9 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 		if a := options.lifecycle; a != nil && a.active && a.conn == conn && a.source == 12 {
 			role = a.oldRole
 		}
+		if a := options.contraction; a != nil && a.snapshot.active && a.snapshot.conn == conn && a.snapshot.source == schema.ContractionVersion-1 {
+			role = a.snapshot.oldRole
+		}
 		if _, _, err := readyCTR06Admission(ctx, conn, role); err != nil {
 			result.State = StateRefused
 			result.Problems = append(result.Problems, "runtime floor or restore admission is unavailable or untrusted")
@@ -534,6 +556,9 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 	}
 	if len(applied) >= 13 && requireLifecycleReady(ctx, conn) != nil {
 		return Result{State: StateRefused}, ErrLifecycleTransitionRequired
+	}
+	if len(applied) >= schema.ContractionVersion && requireContractionReady(ctx, conn) != nil {
+		return Result{State: StateRefused}, ErrContractionRequired
 	}
 	if len(comparison.Problems) > 0 {
 		for _, problem := range comparison.Problems {
@@ -647,6 +672,11 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 				return err
 			}
 		}
+		if isContraction(migration) {
+			if err := guardContraction(ctx, tx, conn, options); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, migration.SQL); err != nil {
 			return err
 		}
@@ -660,6 +690,11 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 				return err
 			}
 		}
+		if isContraction(migration) {
+			if err := recordContraction(ctx, tx, conn, options); err != nil {
+				return err
+			}
+		}
 		if migration.Version == 11 && migration.Name == "0011_fleet_routed_files.sql" {
 			if err := recordCTR06Floor(ctx, tx, conn, options.RuntimeRole, options.BridgeProof, options.localBridge, options.localRestore, options.management); err != nil {
 				return err
@@ -670,7 +705,8 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 		return err
 	})
 	if err != nil {
-		if errors.Is(err, ErrCTR06RetirementUnproven) || errors.Is(err, ErrManagementTransitionRequired) || errors.Is(err, ErrLifecycleTransitionRequired) {
+		if errors.Is(err, ErrCTR06RetirementUnproven) || errors.Is(err, ErrManagementTransitionRequired) ||
+			errors.Is(err, ErrLifecycleTransitionRequired) || errors.Is(err, ErrContractionRequired) {
 			return Step{}, err
 		}
 		failure := &Failure{Version: migration.Version, Name: migration.Name, SQLState: "unknown", Message: "the migration did not complete"}
@@ -791,20 +827,27 @@ func ValidRoleName(name string) error {
 // differs from the build's.
 var ErrIncompatible = errors.New("the database schema does not match this build")
 
-// CheckCompatible is the runtime's schema check (it needs only SELECT on platform.schema_migration): every migration of the
-// build must be applied exactly. Migrations beyond the build are allowed, because expand-and-contract keeps the previous
-// revision working while the next one is migrated and deployed. It returns the database's version.
+// CheckCompatible checks the runtime's exact applied prefix. Newer expansions
+// are compatible, but schema contraction requires the new runtime reader.
 func CheckCompatible(ctx context.Context, q Querier, build []Migration) (int, error) {
 	var database string
 	if err := q.QueryRow(ctx, "SELECT current_database()").Scan(&database); err != nil || RequireOrdinaryDatabase(ctx, q, database) != nil {
 		return 0, fmt.Errorf("%w: database restore isolation is unresolved", ErrIncompatible)
 	}
-	applied, exists, err := ReadApplied(ctx, q)
+	relation := "platform.schema_migration"
+	if len(build) >= schema.ContractionVersion && isContraction(build[schema.ContractionVersion-1]) {
+		relation = "platform.runtime_schema_history"
+	}
+	applied, exists, err := readMigrationHistory(ctx, q, relation)
 	if err != nil {
-		return 0, Sanitize("read platform.schema_migration", err)
+		return 0, fmt.Errorf("%w: runtime migration history could not be read", ErrIncompatible)
 	}
 	if !exists || len(applied) < len(build) {
 		return len(applied), fmt.Errorf("%w: %d of its %d migrations are applied", ErrIncompatible, len(applied), len(build))
+	}
+	if len(applied) >= schema.ContractionVersion && isContraction(Migration{Version: applied[schema.ContractionVersion-1].Version, Name: applied[schema.ContractionVersion-1].Name}) &&
+		relation != "platform.runtime_schema_history" {
+		return len(applied), fmt.Errorf("%w: the database requires the contraction-era reader", ErrIncompatible)
 	}
 	for index, migration := range build {
 		if applied[index].Version != migration.Version || applied[index].Name != migration.Name || applied[index].SHA256 != migration.SHA256 {

@@ -35,6 +35,8 @@ func backupDefinition(version int) (inventory, catalogue string, err error) {
 		return hostedEntitlementBackupDefinition()
 	case 16:
 		return hostedCommerceBackupDefinition()
+	case schema.ContractionVersion:
+		return contractionBackupDefinition()
 	default:
 		return "", "", errors.New("unsupported logical backup schema")
 	}

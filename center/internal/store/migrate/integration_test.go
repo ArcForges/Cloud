@@ -319,7 +319,7 @@ func TestTheRuntimeRoleHasExactlyItsGrants(t *testing.T) {
 	}
 	runtime := pgtest.Connect(t, pgtest.WithUser(t, url, login, password))
 	allowed := []string{
-		"SELECT count(*) FROM platform.schema_migration",
+		"SELECT count(*) FROM platform.runtime_schema_history",
 		"INSERT INTO platform.inbox (source, message_id, received_at, expires_at) VALUES ('test', 'm1', now(), now() + interval '1 day')",
 		"UPDATE platform.inbox SET processed_at = now(), outcome = 1 WHERE source = 'test'",
 		"SELECT count(*) FROM fleet.signing_key",
@@ -349,6 +349,7 @@ func TestTheRuntimeRoleHasExactlyItsGrants(t *testing.T) {
 		"DELETE FROM audit.audit_event",
 		"INSERT INTO fleet.signing_key (kid) VALUES ('kid-00001')",
 		"SELECT * FROM platform.runtime_credential",
+		"SELECT count(*) FROM platform.schema_migration",
 		"INSERT INTO platform.schema_migration (version, name, sha256, duration_ms, runner) VALUES (99, '0099_x.sql', repeat('0', 64), 0, 'x')",
 		"SELECT * FROM other.secret",
 		"CREATE INDEX extra ON platform.outbox (topic)",

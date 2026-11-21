@@ -267,6 +267,17 @@ func restoreSecuritySnapshot(ctx context.Context, conn *pgx.Conn) (string, strin
 // even when CONNECT is currently revoked. Only the newly created group and
 // its passwordless slots may receive target privileges after reconciliation.
 func checkRestoreIsolation(ctx context.Context, conn Querier, role string) error {
+	return checkRestoreIsolationAtVersion(ctx, conn, role, 11)
+}
+
+func restoreWriterRelations(version int) []string {
+	if version >= schema.ContractionVersion {
+		return []string{"fleet.hub_lease", "management.node_protocol", "management.command_identity", "management.remote_operation"}
+	}
+	return []string{"fleet.routed_call", "fleet.routed_file_call", "fleet.routed_command_id", "fleet.routed_file_target", "fleet.hub_lease"}
+}
+
+func checkRestoreIsolationAtVersion(ctx context.Context, conn Querier, role string, version int) error {
 	for _, name := range []string{role, role + "_a", role + "_b"} {
 		if err := RequirePlainRole(ctx, conn, name, false); err != nil {
 			return errors.New("a destination runtime role is not a fresh passwordless group")
@@ -275,7 +286,9 @@ func checkRestoreIsolation(ctx context.Context, conn Querier, role string) error
 	var unsafe bool
 	err := conn.QueryRow(ctx, `WITH RECURSIVE reach(actor, memberof) AS (
  SELECT oid,oid FROM pg_roles UNION SELECT reach.actor,m.roleid FROM reach JOIN pg_auth_members m ON m.member=reach.memberof
-), owner AS (SELECT oid FROM pg_roles WHERE rolname=current_user)
+), owner AS (SELECT oid FROM pg_roles WHERE rolname=current_user), writers AS (
+ SELECT pg_catalog.to_regclass(name)::oid AS oid FROM unnest($2::text[]) AS relation(name)
+)
 SELECT
  EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid,owner
    WHERE parent.rolname IN ($1::text,$1::text||'_a',$1::text||'_b') AND m.member<>owner.oid)
@@ -283,13 +296,11 @@ SELECT
    WHERE a.datname=current_database() AND a.pid<>pg_backend_pid() AND NOT r.rolsuper)
  OR EXISTS(SELECT 1 FROM pg_database d,aclexplode(coalesce(d.datacl,acldefault('d',d.datdba))) a
    WHERE d.datname=current_database() AND a.grantee=0 AND a.privilege_type IN ('CONNECT','TEMPORARY'))
+ OR EXISTS(SELECT 1 FROM writers WHERE oid IS NULL)
  OR EXISTS(SELECT 1 FROM pg_roles actor JOIN reach r ON r.actor=actor.oid JOIN pg_roles reachable ON reachable.oid=r.memberof,owner
    WHERE actor.oid<>owner.oid AND NOT actor.rolsuper AND actor.rolname !~ '^pg_' AND actor.rolname NOT IN ($1::text,$1::text||'_a',$1::text||'_b')
-   AND (has_table_privilege(reachable.oid,'fleet.routed_call','INSERT,UPDATE,DELETE,TRUNCATE') OR
-        has_table_privilege(reachable.oid,'fleet.routed_file_call','INSERT,UPDATE,DELETE,TRUNCATE') OR
-        has_table_privilege(reachable.oid,'fleet.routed_command_id','INSERT,UPDATE,DELETE,TRUNCATE') OR
-        has_table_privilege(reachable.oid,'fleet.routed_file_target','INSERT,UPDATE,DELETE,TRUNCATE') OR
-        has_table_privilege(reachable.oid,'fleet.hub_lease','INSERT,UPDATE,DELETE,TRUNCATE')))`, role).Scan(&unsafe)
+   AND EXISTS(SELECT 1 FROM writers WHERE has_table_privilege(reachable.oid,writers.oid,'INSERT,UPDATE,DELETE,TRUNCATE')))`,
+		role, restoreWriterRelations(version)).Scan(&unsafe)
 	if err != nil || unsafe {
 		return errors.New("the destination has an unknown writer, membership or connection")
 	}
@@ -305,7 +316,7 @@ type RestoreReport struct {
 	RestoreReceipt     string `json:"restoreReceipt"`
 }
 
-// RestoreLogical admits only a supported 0010/0011/0012 backup with its protected
+// RestoreLogical admits only a supported backup with its protected
 // same-snapshot metadata. The original archive is never modified, and a
 // destination is created only after the complete preflight checks succeed.
 func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expected, metadataPath, metadataDigest, runner string) (report RestoreReport, finalErr error) {
@@ -419,6 +430,7 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 	if version == 10 {
 		return restoreManagementSchema10(ctx, conn, cfg, metadata, metadataDigest, runner, tool, childEnv, archive, listPath, capability)
 	}
+	capability.schemaVersion = version
 	if version >= 12 {
 		capability.managementArtifact, err = managementArtifact(runner, build[11])
 		if err != nil {
@@ -431,12 +443,18 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 			return report, err
 		}
 	}
+	if version >= schema.ContractionVersion {
+		capability.contractionArtifact, err = managementArtifact(runner, build[schema.ContractionVersion-1])
+		if err != nil {
+			return report, err
+		}
+	}
 	options := Options{Runner: runner, RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout, localRestore: capability}
 	initial, err := Apply(ctx, conn, build, options)
 	if err != nil || initial.State != StateCurrent || initial.Grants != "" {
 		return report, errors.New("the fresh destination admission outcome is UNKNOWN; preserve it for investigation")
 	}
-	if err := checkRestoreIsolation(ctx, conn, cfg.RuntimeRole); err != nil {
+	if err := checkRestoreIsolationAtVersion(ctx, conn, cfg.RuntimeRole, version); err != nil {
 		return report, err
 	}
 	floor, security, err := restoreSecuritySnapshot(ctx, conn)
@@ -455,7 +473,7 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 	if err != nil || floor != newFloor || security != newSecurity {
 		return report, errors.New("the restored security schema or quarantined destination floor differs; preserve the target")
 	}
-	if err := checkRestoreIsolation(ctx, conn, cfg.RuntimeRole); err != nil {
+	if err := checkRestoreIsolationAtVersion(ctx, conn, cfg.RuntimeRole, version); err != nil {
 		return report, err
 	}
 	verification, err := ctr06VerifyRestoredData(ctx, conn, metadata, build)
@@ -476,7 +494,7 @@ func RestoreLogical(ctx context.Context, cfg config.Migration, archivePath, expe
 	if err != nil || reconciled.State != StateCurrent || len(reconciled.Ran) != 0 || reconciled.Grants != "reconciled" {
 		return report, errors.New("restore readiness committed, but destination grants could not be reconciled; inspect the receipt")
 	}
-	if err := checkRestoreIsolation(ctx, conn, cfg.RuntimeRole); err != nil {
+	if err := checkRestoreIsolationAtVersion(ctx, conn, cfg.RuntimeRole, version); err != nil {
 		return report, err
 	}
 	digest := sha256.Sum256([]byte(floor))

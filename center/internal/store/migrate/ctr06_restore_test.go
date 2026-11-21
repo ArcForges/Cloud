@@ -117,6 +117,9 @@ func TestCTR06ArchiveInventoryRequiresEverySupportedDataAndObject(t *testing.T) 
 	if err := ctr06ArchiveInventory([]byte(base), nil); err != nil {
 		t.Fatalf("complete supported inventory refused: %v", err)
 	}
+	if err := ctr06ArchiveInventory([]byte(strings.ReplaceAll(base, "\n", "\r\n")), nil); err != nil {
+		t.Fatalf("complete Windows inventory refused: %v", err)
+	}
 	for name, altered := range map[string]string{
 		"omitted non-floor data": strings.Replace(base, "TABLE DATA platform outbox owner\n", "TABLE DATA platform missing owner\n", 1),
 		"omitted history":        strings.Replace(base, "TABLE DATA platform schema_migration owner\n", "TABLE DATA platform missing owner\n", 1),

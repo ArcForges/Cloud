@@ -23,6 +23,10 @@ func Migrations() fs.FS {
 	return directory
 }
 
+// ContractionVersion introduces the first schema whose runtime reader no
+// longer reads the owner-only migration ledger directly.
+const ContractionVersion = 17
+
 // Schemas are the module schemas the migrations own, in creation order. platform is created by the runner before the first
 // migration (it holds platform.schema_migration).
 var Schemas = []string{"platform", "audit", "fleet", "identity", "device", "entitlement", "management", "commerce"}
@@ -47,8 +51,11 @@ type Grant struct {
 
 // RuntimeGrants are the only privileges of the runtime role. Every other table, every sequence and every schema not named here
 // is unreadable to it, and it can create nothing. The runner revokes anything else on every run.
-var RuntimeGrants = []Grant{
+var _, RuntimeGrants = AtVersion(ContractionVersion)
+
+var runtimeGrantHistory = []Grant{
 	{"platform", "schema_migration", []Privilege{Select}},
+	{"platform", "runtime_schema_history", []Privilege{Select}},
 	{"platform", "command_receipt", []Privilege{Select, Insert, Update}},
 	{"platform", "inbox", []Privilege{Select, Insert, Update}},
 	{"platform", "outbox", []Privilege{Select, Insert, Update}},
@@ -132,9 +139,10 @@ var RuntimeGrants = []Grant{
 	{"commerce", "provider_cleanup_pending", []Privilege{Select}},
 }
 
-// MigrationOnly are the tables of the module schemas the runtime role must not read or write. Every table is either granted
+// MigrationOnly are the tables of the current module schemas the runtime role must not read or write. Every table is either granted
 // above or listed here; a test refuses a table with neither decision.
 var MigrationOnly = []string{
+	"platform.schema_migration",
 	"platform.runtime_credential",
 	"platform.ctr06_runtime_floor",
 	"platform.ctr06_restore_admission",
@@ -154,8 +162,10 @@ func AtVersion(version int) ([]string, []Grant) {
 		schemas = append(schemas, name)
 	}
 	var grants []Grant
-	for _, grant := range RuntimeGrants {
+	for _, grant := range runtimeGrantHistory {
 		switch {
+		case version < ContractionVersion && grant.Schema == "platform" && grant.Table == "runtime_schema_history":
+		case version >= ContractionVersion && retiredRuntimeGrant(grant):
 		case version < 3 && (grant.Schema == "entitlement" || grant.Schema == "identity" && grant.Table == "operator"):
 		case version < 4 && grant.Schema == "fleet" && grant.Table != "signing_key":
 		case version < 6 && grant.Schema == "identity" && grant.Table == "mobile_authorization":
@@ -174,4 +184,19 @@ func AtVersion(version int) ([]string, []Grant) {
 		}
 	}
 	return schemas, grants
+}
+
+func retiredRuntimeGrant(grant Grant) bool {
+	switch grant.Schema {
+	case "platform":
+		return grant.Table == "schema_migration"
+	case "identity":
+		return grant.Table == "mobile_authorization"
+	case "fleet":
+		switch grant.Table {
+		case "routed_call", "routed_file_call", "routed_file_target", "routed_command_id", "refusal_code":
+			return true
+		}
+	}
+	return false
 }

@@ -25,25 +25,33 @@ import (
 var restoreDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func restoreFlags(args []string, capture bool) (map[string]string, bool) {
-	allowed := map[string]bool{"--archive": true, "--metadata": true}
+	allowed := []string{"--archive", "--metadata"}
 	if !capture {
-		allowed["--sha256"] = true
-		allowed["--metadata-sha256"] = true
+		allowed = append(allowed, "--sha256", "--metadata-sha256")
 	}
+	values, ok := restoreFlagValues(args, allowed...)
+	if !ok || !capture && (!restoreDigest.MatchString(values["--sha256"]) || !restoreDigest.MatchString(values["--metadata-sha256"])) {
+		return nil, false
+	}
+	return values, true
+}
+
+func restoreFlagValues(args []string, allowed ...string) (map[string]string, bool) {
 	if len(args) != len(allowed)*2 {
 		return nil, false
 	}
+	permitted := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		permitted[name] = true
+	}
 	values := make(map[string]string, len(allowed))
 	for i := 0; i < len(args); i += 2 {
-		if !allowed[args[i]] || values[args[i]] != "" || args[i+1] == "" {
+		if !permitted[args[i]] || values[args[i]] != "" || args[i+1] == "" {
 			return nil, false
 		}
 		values[args[i]] = args[i+1]
 	}
 	if !filepath.IsAbs(values["--archive"]) || !filepath.IsAbs(values["--metadata"]) {
-		return nil, false
-	}
-	if !capture && (!restoreDigest.MatchString(values["--sha256"]) || !restoreDigest.MatchString(values["--metadata-sha256"])) {
 		return nil, false
 	}
 	return values, true
