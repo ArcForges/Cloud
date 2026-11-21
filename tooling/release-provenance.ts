@@ -106,7 +106,11 @@ function archiveFiles(owner: string, commit: string, names: string[]): Map<strin
     files.set(name, oid);
   }
   assert.equal(files.size, names.length, "Missing archived file");
-  const contents = archiveGit(owner, ["cat-file", "--batch"], [...files.values()].join("\n") + "\n");
+  const contents = archiveGit(
+    owner,
+    ["cat-file", "--batch"],
+    [...files.values()].join("\n") + "\n",
+  );
   const blobs = new Map<string, Buffer>();
   let offset = 0;
   for (const [name, oid] of files) {
@@ -215,10 +219,7 @@ export function releaseProfile(owner: string) {
     .filter((line) => line.startsWith("FROM "));
   assert.deepEqual(
     from,
-    [
-      `FROM ${text(image.buildImage)} AS build`,
-      `FROM ${text(image.baseImage)}`,
-    ],
+    [`FROM ${text(image.buildImage)} AS build`, `FROM ${text(image.baseImage)}`],
     "Changed image producer/base",
   );
   for (const [name, expected] of Object.entries(object(image.baseLegal))) {
@@ -368,7 +369,9 @@ export function verifyArchivedBridgeProfile(owner: string) {
     [producerCommit, producerTree],
   ] as const) {
     assert.equal(
-      archiveGit(ownerRoot, ["rev-parse", "--verify", `${commit}^{tree}`]).toString("ascii").trim(),
+      archiveGit(ownerRoot, ["rev-parse", "--verify", `${commit}^{tree}`])
+        .toString("ascii")
+        .trim(),
       tree,
       "Archived Cloud tree differs",
     );
@@ -419,7 +422,11 @@ export function verifyBridgeAsset(owner: string, platform: "linux" | "windows", 
   assert(platform === "linux" || platform === "windows", "Unclassified bridge asset platform");
   const { bridgeAssets, profileHash } = verifyArchivedBridgeProfile(owner);
   const asset = bridgeAssets.assets[platform];
-  assert.equal(hash(bundle), asset.sha256, "Bridge asset differs from the archived release profile");
+  assert.equal(
+    hash(bundle),
+    asset.sha256,
+    "Bridge asset differs from the archived release profile",
+  );
   return { platform, name: asset.name, sha256: asset.sha256, profileHash };
 }
 
