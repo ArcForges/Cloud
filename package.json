@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
-  "description": "Native AOT C# Hello API on Cloudflare Containers",
+  "description": "ArcForges Go Center and Cloudflare Worker tooling",
   "repository": {
     "type": "git",
     "url": "https://github.com/ArcForges/Cloud.git"
