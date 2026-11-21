@@ -276,7 +276,8 @@ async function verifyCloudCandidate(
       40,
     );
     gitPrivate(verifier, "update-ref", "refs/remotes/origin/main", main);
-    gitPrivate(verifier, "checkout", "--quiet", "--detach", source.commit);
+    // The stock provenance audit selects origin/main when the producer is on a named branch.
+    gitPrivate(verifier, "checkout", "--quiet", "-B", "verify-self-host-cohort", source.commit);
     assert.deepEqual(
       checkout(verifier, source.repo),
       source,
