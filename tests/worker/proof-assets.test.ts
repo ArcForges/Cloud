@@ -354,6 +354,33 @@ async function selfHostStaticFixture(t: TestContext) {
   };
 }
 
+test("self-host proxies replace the Center client address header and use loopback upstreams", () => {
+  const config = readFileSync(
+    new URL("../../center/internal/config/identity.go", import.meta.url),
+    "utf8",
+  );
+  const header = /^const ClientIPHeader = "([^"]+)"$/mu.exec(config)?.[1];
+  assert(header);
+
+  const environment = readFileSync(
+    new URL("../../deploy/self-host/center.env.example", import.meta.url),
+    "utf8",
+  );
+  assert.equal(/^ARCFORGES_CENTER_CLIENT_IP_HEADER=(\S+)$/mu.exec(environment)?.[1], header);
+  assert.match(environment, /^ARCFORGES_CENTER_TRUSTED_PROXIES=127\.0\.0\.1\/32$/mu);
+
+  const caddy = readFileSync(new URL("../../deploy/self-host/Caddyfile", import.meta.url), "utf8");
+  const proxies = [
+    ...caddy.matchAll(
+      /^[\t ]*reverse_proxy ([^\r\n]+) \{\r?\n[\t ]*header_up (\S+) \{remote_host\}$/gmu,
+    ),
+  ].map((match) => [match[1], match[2]]);
+  assert.deepEqual(proxies, [
+    ["@native_grpc h2c://127.0.0.1:8081", header],
+    ["127.0.0.1:8080", header],
+  ]);
+});
+
 test("self-host static publication verifies one digest release and checks every selected byte", async (t) => {
   const fixture = await selfHostStaticFixture(t);
   const built = profileBundle();
