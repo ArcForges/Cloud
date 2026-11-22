@@ -370,9 +370,10 @@ class Upgrade:
         self.phase(self.journal["phase"], serviceControlGroup=group)
         self.systemd("stop", self.unit)
         require(
-            self.systemd("show", "--property=ActiveState", "--value", self.unit) == "inactive"
-            and self.systemd("show", "--property=MainPID", "--value", self.unit) == "0",
-            "The previous Center did not stop.",
+            self.systemd("show", "--property=ActiveState", "--value", self.unit) in ("inactive", "failed")
+            and self.systemd("show", "--property=MainPID", "--value", self.unit) == "0"
+            and self.systemd("show", "--property=ControlPID", "--value", self.unit) == "0",
+            "The Center unit did not stop.",
         )
         require(self.systemd("show", "--property=ControlGroup", "--value", self.unit) in ("", group),
                 "The Center control group changed during shutdown.")

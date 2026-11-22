@@ -12,6 +12,7 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import Mock, patch
 
 
 SCRIPT = Path(__file__).with_name("operator-inputs.py")
@@ -88,6 +89,42 @@ class OperatorInputsTest(unittest.TestCase):
         unexpected = self.root / "rejected"
         self.command("bootstrap", unexpected, "--hours", 169, code=2)
         self.assertFalse(unexpected.exists())
+
+    def test_stopped_failed_unit_requires_zero_pids_and_a_drained_group(self):
+        operations = runpy.run_path(str(SCRIPT))
+        upgrade_class = operations["Upgrade"]
+        refusal = operations["UpgradeRefused"]
+        unit = "arcforges-center-fixture.service"
+        group = f"/user.slice/{unit}"
+        for state, main_pid, control_pid, after_group, drained in (
+            ("inactive", "0", "0", group, "empty"),
+            ("failed", "0", "0", "", "removed"),
+            ("active", "0", "0", "", None),
+            ("deactivating", "0", "0", "", None),
+            ("failed", "17", "0", "", None),
+            ("failed", "0", "19", "", None),
+            ("failed", "0", "0", f"/other.slice/{unit}", None),
+            ("failed", "0", "0", "", None),
+        ):
+            with self.subTest(state=state, main_pid=main_pid, control_pid=control_pid,
+                              after_group=after_group, drained=drained):
+                upgrade = upgrade_class.__new__(upgrade_class)
+                upgrade.unit = unit
+                upgrade.journal = {"phase": "activation-fencing", "serviceControlGroup": group}
+                upgrade.systemd = Mock(side_effect=["", "", state, main_pid, control_pid, after_group])
+                upgrade.phase = Mock()
+                check_drain = Mock(return_value=drained, side_effect=None if drained else refusal("Not drained"))
+                with patch.dict(upgrade_class.stop_service.__globals__,
+                                cgroup_path=lambda *_: True, drained_group=check_drain):
+                    if drained:
+                        upgrade.stop_service()
+                        check_drain.assert_called_once_with(group, unit)
+                        upgrade.phase.assert_called_with("activation-fencing", serviceControlGroupState=drained)
+                    else:
+                        with self.assertRaises(refusal):
+                            upgrade.stop_service()
+                        upgrade.phase.assert_called_once_with("activation-fencing", serviceControlGroup=group)
+                upgrade.systemd.assert_any_call("stop", unit)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "real Linux durable file and link operations")
     def test_private_journal_inspection_and_immutable_release_tree(self):
