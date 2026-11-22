@@ -45,6 +45,80 @@ func TestContractionFreshRuntimeUsesTheContractedReader(t *testing.T) {
 	if repeated, err := Apply(ctx, owner, build, options); err != nil || repeated.Version != result.Version || len(repeated.Ran) != 0 {
 		t.Fatalf("reapply current history and grants: %v", err)
 	}
+	refused, err := PrepareContraction(ctx, owner, build, options, managementConfig(url, name, group))
+	if !errors.Is(err, ErrRefused) || refused.State != StateRefused || refused.Version != schema.ContractionVersion ||
+		!reflect.DeepEqual(refused.Applied, result.Applied) || len(refused.Ran) != 0 {
+		t.Fatalf("schema preparation attempted to revisit a contracted database: %+v %v", refused, err)
+	}
+}
+
+func TestPrepareContractionRefusesIneligibleAuthorityAndResumesAfterKnownPartialProgress(t *testing.T) {
+	ctx := t.Context()
+	url, name := pgtest.Database(t)
+	owner := pgtest.Connect(t, url)
+	group := name + "_runtime"
+	build := centerBuild(t)
+	options := Options{Runner: "isolated-preparation", RuntimeRole: group}
+	cfg := managementConfig(url, name, group)
+	assertRefused := func(role string, version int) {
+		t.Helper()
+		selected := options
+		selected.RuntimeRole = role
+		source := cfg
+		source.RuntimeRole = role
+		result, err := PrepareContraction(ctx, owner, build, selected, source)
+		if !errors.Is(err, ErrRefused) || result.State != StateRefused || result.Version != version || len(result.Ran) != 0 {
+			t.Fatalf("unsafe schema preparation was not refused at schema %d: %+v %v", version, result, err)
+		}
+	}
+	assertRefused(group, 0)
+	if _, exists, err := ReadApplied(ctx, owner); err != nil || exists {
+		t.Fatalf("preparation initialized an empty database: exists=%t %v", exists, err)
+	}
+	original, err := Apply(ctx, owner, build[:13], options)
+	if err != nil || original.Version != 13 {
+		t.Fatalf("prepare the real schema13 source: %+v %v", original, err)
+	}
+	assertRefused(name+"_obsolete", 13)
+
+	foreign := pgx.Identifier{name + "_foreign"}.Sanitize()
+	if _, err := owner.Exec(ctx, "CREATE ROLE "+foreign); err != nil {
+		t.Fatal(store.Sanitize("create the isolated historical reader", err))
+	}
+	if _, err := owner.Exec(ctx, "GRANT CONNECT ON DATABASE "+pgx.Identifier{name}.Sanitize()+" TO "+foreign+
+		"; GRANT SELECT ON TABLE fleet.routed_call TO "+foreign); err != nil {
+		t.Fatal(store.Sanitize("grant the isolated historical reader access", err))
+	}
+	assertRefused(group, 13)
+	if _, err := owner.Exec(ctx, "REVOKE SELECT ON TABLE fleet.routed_call FROM "+foreign+
+		"; REVOKE CONNECT ON DATABASE "+pgx.Identifier{name}.Sanitize()+" FROM "+foreign); err != nil {
+		t.Fatal(store.Sanitize("revoke the isolated historical reader access", err))
+	}
+	if applied := contractionHistory(t, ctx, owner); !reflect.DeepEqual(applied, original.Applied) {
+		t.Fatal("an ineligible preparation changed the applied ledger")
+	}
+
+	faulty := append([]Migration(nil), build...)
+	faulty[14].SQL += "\nSELECT 1 / 0;\n"
+	partial, err := PrepareContraction(ctx, owner, faulty, options, cfg)
+	var fault *Failure
+	if !errors.As(err, &fault) || fault.Version != 15 || fault.SQLState != "22012" ||
+		partial.State != StateMaintenance || partial.Version != 14 || len(partial.Applied) != 14 || partial.Grants != "" ||
+		len(partial.Ran) != 1 || partial.Ran[0].Version != 14 ||
+		!reflect.DeepEqual(partial.Applied[:13], original.Applied) {
+		t.Fatalf("the real failed additive step lost the last committed checkpoint: %+v %v", partial, err)
+	}
+	complete, err := PrepareContraction(ctx, owner, build, options, cfg)
+	if err != nil || complete.State != StateCurrent || complete.Version != 16 || complete.BuildVersion != 16 ||
+		complete.RuntimeRole != group || complete.Grants != "reconciled" || len(complete.Ran) != 2 || len(complete.Applied) != 16 ||
+		!reflect.DeepEqual(complete.Applied[:14], partial.Applied) {
+		t.Fatalf("resuming after a known partial preparation did not keep the same history: %+v %v", complete, err)
+	}
+	replayed, err := PrepareContraction(ctx, owner, build, options, cfg)
+	if err != nil || replayed.State != StateCurrent || replayed.Version != 16 || replayed.RuntimeRole != group ||
+		replayed.Grants != "reconciled" || len(replayed.Ran) != 0 || !reflect.DeepEqual(replayed.Applied, complete.Applied) {
+		t.Fatalf("replay changed the prepared migration ledger or runtime generation: %+v %v", replayed, err)
+	}
 }
 
 func TestContractionRuntimeReaderRefusesCopiedDatabaseAuthority(t *testing.T) {
@@ -132,6 +206,12 @@ func TestContractionFromSchema10And11RetainsOriginalIdentitiesAndRestores(t *tes
 				t.Fatalf("expand actual schema%d without changing its applied history: %v", version, err)
 			}
 			group = management.RuntimeRole
+			early, err := PrepareContraction(ctx, owner, build, Options{Runner: "isolated-contraction-predecessor", RuntimeRole: group},
+				managementConfig(url, name, group))
+			if !errors.Is(err, ErrRefused) || early.State != StateRefused || early.Version != 12 ||
+				!reflect.DeepEqual(early.Applied, management.Applied) || len(early.Ran) != 0 {
+				t.Fatalf("contraction preparation skipped the schema13 lifecycle admission: %+v %v", early, err)
+			}
 			lifecycleDir := t.TempDir()
 			lifecycle, err := ApplyLifecycle(ctx, owner, build, Options{Runner: "isolated-lifecycle-expansion", RuntimeRole: group},
 				managementConfig(url, name, group), filepath.Join(lifecycleDir, "source.dump"), filepath.Join(lifecycleDir, "source.json"))
@@ -140,8 +220,12 @@ func TestContractionFromSchema10And11RetainsOriginalIdentitiesAndRestores(t *tes
 			}
 			group = lifecycle.RuntimeRole
 			predecessor := schema.ContractionVersion - 1
-			if _, err := Apply(ctx, owner, build[:predecessor], Options{Runner: "isolated-contraction-predecessor", RuntimeRole: group}); err != nil {
-				t.Fatal(err)
+			prepared, err := PrepareContraction(ctx, owner, build, Options{Runner: "isolated-contraction-predecessor", RuntimeRole: group},
+				managementConfig(url, name, group))
+			if err != nil || prepared.State != StateCurrent || prepared.Version != predecessor || prepared.RuntimeRole != group ||
+				prepared.Grants != "reconciled" || len(prepared.Ran) != 3 || len(prepared.Applied) != predecessor ||
+				!reflect.DeepEqual(prepared.Applied[:13], lifecycle.Applied) {
+				t.Fatalf("prepare the historical schema%d lineage through schema16: %+v %v", version, prepared, err)
 			}
 			before := contractionHistory(t, ctx, owner)
 			assertContractedTombstone(t, ctx, owner, fixture, command, 1)

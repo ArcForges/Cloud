@@ -62,7 +62,7 @@ func TestVersionMigrationRefusalsAndUsage(t *testing.T) {
 	stderr.Reset()
 	secret := map[string]string{"ARCFORGES_CENTER_MODE": "official-hosted",
 		"ARCFORGES_CENTER_MIGRATION_DATABASE_URL": "postgresql://owner:leaked-secret@db.example/center?sslmode=disable"}
-	for _, arguments := range [][]string{{"migrate"}, {"migrate", "status"}, {"admin", "rotate-runtime-credential"}, {"admin", "confirm-runtime-credential", "--slot", "a"}, {"admin", "rotate-runtime-credential", "--live-slot=a"}} {
+	for _, arguments := range [][]string{{"migrate"}, {"migrate", "status"}, {"migrate", "prepare-contraction"}, {"admin", "rotate-runtime-credential"}, {"admin", "confirm-runtime-credential", "--slot", "a"}, {"admin", "rotate-runtime-credential", "--live-slot=a"}} {
 		stdout.Reset()
 		stderr.Reset()
 		if code := run(arguments, environment(secret), &stdout, &stderr); code != 1 || strings.Contains(stderr.String(), "leaked-secret") ||
@@ -70,7 +70,7 @@ func TestVersionMigrationRefusalsAndUsage(t *testing.T) {
 			t.Fatalf("%v: %d %s", arguments, code, stderr.String())
 		}
 	}
-	for _, arguments := range [][]string{{"unknown"}, {"serve", "extra"}, {"migrate", "drop"}, {"migrate", "apply", "x"}, {"admin"}, {"admin", "drop"}, {"version", "x"},
+	for _, arguments := range [][]string{{"unknown"}, {"serve", "extra"}, {"migrate", "drop"}, {"migrate", "apply", "x"}, {"migrate", "prepare-contraction", "--version=17"}, {"admin"}, {"admin", "drop"}, {"version", "x"},
 		{"admin", "confirm-runtime-credential"}, {"admin", "confirm-runtime-credential", "--slot"}, {"admin", "confirm-runtime-credential", "--slot", "c"},
 		{"admin", "confirm-runtime-credential", "--slot=", "a"}, {"admin", "rotate-runtime-credential", "--slot", "a"},
 		{"admin", "rotate-runtime-credential", "--live-slot", "c"}, {"admin", "rotate-runtime-credential", "--live-slot"}} {
@@ -92,6 +92,7 @@ func TestCTR06Phase1CommandEntriesRefuseBeforeCredentialLookup(t *testing.T) {
 	}{
 		{"local bridge", []string{"migrate", "apply"}, map[string]string{"ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE": "/sensitive/old-bridge"}},
 		{"hosted proof", []string{"migrate", "apply"}, map[string]string{"ARCFORGES_CENTER_CTR06_PROOF_FILE": "/sensitive/old-proof"}},
+		{"preparation with old proof", []string{"migrate", "prepare-contraction"}, map[string]string{"ARCFORGES_CENTER_CTR06_PROOF_FILE": "/sensitive/old-proof"}},
 		{"prepare", []string{"admin", "prepare-ctr06-bridge"}, nil},
 		{"legacy restore", []string{"admin", "restore-legacy-logical-backup"}, nil},
 	} {

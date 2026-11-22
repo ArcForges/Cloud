@@ -24,6 +24,10 @@ var ErrContractionOutcomeUnknown = errors.New("schema contraction commit was not
 // incomplete post-commit check or grant reconciliation.
 var ErrContractionFollowupRequired = errors.New("schema contraction committed; keep the database in maintenance until status and runtime grants are confirmed")
 
+// ErrContractionPreparationOutcomeUnknown means an additive step sent COMMIT
+// without an authoritative reply. Inspect the applied history before resuming.
+var ErrContractionPreparationOutcomeUnknown = errors.New("contraction preparation commit was not confirmed; keep the database in maintenance and inspect its migration status")
+
 const contractionName = "0017_retire_legacy_routing.sql"
 
 type contractionAdmission struct {
@@ -46,6 +50,77 @@ func requireContractionReady(ctx context.Context, q Querier) error {
 		return ErrContractionRequired
 	}
 	return nil
+}
+
+// PrepareContraction applies only the immutable additive prefix after the
+// schema13 lifecycle admission. It neither contracts nor rotates authority.
+func PrepareContraction(ctx context.Context, conn *pgx.Conn, build []Migration, options Options, cfg config.Migration) (Result, error) {
+	const predecessor = schema.ContractionVersion - 1
+	refused := Result{BuildVersion: predecessor, State: StateRefused, Applied: []Applied{}, Pending: []string{}}
+	if len(build) < schema.ContractionVersion || !isContraction(build[predecessor]) ||
+		build[predecessor-1].Name != "0016_hosted_web_commerce.sql" ||
+		options.BridgeProof != nil || cfg.CTR06ProofFile != "" || cfg.CTR06BridgeExecutable != "" ||
+		options.RuntimeRole != cfg.RuntimeRole || ValidRoleName(cfg.RuntimeRole) != nil {
+		refused.Problems = []string{"the reviewed contraction predecessor and its current runtime role are required"}
+		return refused, ErrRefused
+	}
+
+	prefix := build[:predecessor]
+	options.Schemas, options.Grants = schema.AtVersion(predecessor)
+	options.defaults()
+	if err := lock(ctx, conn, options); err != nil {
+		return refused, err
+	}
+	defer unlock(conn)
+
+	source, err := Inspect(ctx, conn, prefix)
+	if err != nil {
+		if source.State == StateRefused {
+			return source, errors.Join(ErrRefused, err)
+		}
+		return source, err
+	}
+	if source.State != StateCurrent && source.State != StatePending {
+		source.State = StateRefused
+		source.Problems = append(source.Problems, "contraction preparation requires the admitted schema13 through schema16 history")
+		return source, ErrRefused
+	}
+	if source.Version < 13 || source.Database != cfg.Database || source.RuntimeRole != cfg.RuntimeRole {
+		source.State = StateRefused
+		source.Problems = append(source.Problems, "contraction preparation requires the admitted schema13 through schema16 source database and its current runtime role")
+		return source, ErrRefused
+	}
+	if err = requireRuntimeGroupRole(ctx, conn, cfg.RuntimeRole); err == nil {
+		err = refuseRetiredReaders(ctx, conn, cfg.RuntimeRole)
+	}
+	if err != nil {
+		source.State = StateRefused
+		source.Problems = append(source.Problems, "the runtime role or a legacy reader prevents contraction preparation")
+		return source, errors.Join(ErrRefused, err)
+	}
+
+	options.preparingContraction = true
+	result, err := Apply(ctx, conn, prefix, options)
+	result.RestoreReceipt = source.RestoreReceipt
+	if err == nil {
+		return result, nil
+	}
+	if !errors.Is(err, ErrContractionPreparationOutcomeUnknown) {
+		// The last acknowledged step, or grant reconciliation, may have
+		// failed after an earlier step committed. Preserve the actual history.
+		observed, checkErr := Inspect(ctx, conn, prefix)
+		if checkErr == nil && observed.Database == source.Database && observed.RuntimeRole == source.RuntimeRole &&
+			observed.RestoreReceipt == source.RestoreReceipt && (observed.State == StatePending || observed.State == StateCurrent) {
+			observed.Ran = result.Ran
+			if observed.State == StatePending && observed.Version == source.Version {
+				return observed, err
+			}
+			result = observed
+		}
+	}
+	result.State = StateMaintenance
+	result.Problems = append(result.Problems, "schema preparation is incomplete; inspect the applied migrations and runtime grants before resuming")
+	return result, err
 }
 
 // ApplyContraction takes and restores the exact predecessor backup before

@@ -49,6 +49,7 @@ commands:
                                    expand checked schema10/11 in offline maintenance with a verified backup and writer fence
   migrate lifecycle --archive <new path> --metadata <new path>
                                    expand checked schema12 to13 with a verified backup, seven-schema fence and new runtime roles
+  migrate prepare-contraction      bring the admitted schema13 through schema16 source to the exact schema16 predecessor
   migrate contract --archive <new path> --metadata <new path> --witness-database <new database> --witness-role <new role>
                                    verify an isolated predecessor restore before retiring drained legacy database objects
   admin ensure-database            create the center's database if it does not exist
@@ -180,7 +181,7 @@ func run(arguments []string, lookup func(string) (string, bool), stdout, stderr 
 		if sub == "" {
 			sub = "apply"
 		}
-		if sub != "apply" && sub != "status" && sub != "plan" {
+		if sub != "apply" && sub != "status" && sub != "plan" && sub != "prepare-contraction" {
 			_, _ = fmt.Fprint(stderr, usage)
 			return exitUsage
 		}
@@ -373,7 +374,7 @@ func connect(ctx context.Context, value string) (*pgx.Conn, error) {
 }
 
 func migration(sub string, lookup func(string) (string, bool), stdout, stderr io.Writer) int {
-	if sub == "apply" {
+	if sub == "apply" || sub == "prepare-contraction" {
 		bridge, _ := lookup(config.EnvCTR06BridgeExecutable)
 		proof, _ := lookup(config.EnvCTR06ProofFile)
 		if bridge != "" || proof != "" {
@@ -403,7 +404,10 @@ func migration(sub string, lookup func(string) (string, bool), stdout, stderr io
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 	var result migrate.Result
-	if sub == "apply" {
+	if sub == "prepare-contraction" {
+		options := migrate.Options{Runner: revision(), RuntimeRole: cfg.RuntimeRole, LockTimeout: cfg.LockTimeout, Logger: logger}
+		result, err = migrate.PrepareContraction(ctx, conn, build, options, cfg)
+	} else if sub == "apply" {
 		var proof *bridgeproof.Verified
 		if cfg.CTR06ProofFile != "" {
 			proof, err = readCTR06Proof(ctx, cfg.CTR06ProofFile)
