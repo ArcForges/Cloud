@@ -42,15 +42,8 @@ func reconcile(ctx context.Context, conn *pgx.Conn, options Options) error {
 				return Sanitize("create the runtime role (the migration role needs CREATEROLE)", err)
 			}
 		}
-		if err := RequirePlainRole(ctx, tx, role, false); err != nil {
+		if err := requireRuntimeGroupRole(ctx, tx, role); err != nil {
 			return err
-		}
-		var memberships int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE r.rolname = $1`, role).Scan(&memberships); err != nil {
-			return Sanitize("read the runtime role's memberships", err)
-		}
-		if memberships != 0 {
-			return fmt.Errorf("the runtime role %s is a member of another role; it must hold only its own grants", role)
 		}
 		used := map[string]bool{}
 		for _, grant := range options.Grants {
@@ -135,6 +128,20 @@ func reconcile(ctx context.Context, conn *pgx.Conn, options Options) error {
 		return nil
 	})
 	return err
+}
+
+func requireRuntimeGroupRole(ctx context.Context, q Querier, role string) error {
+	if err := RequirePlainRole(ctx, q, role, false); err != nil {
+		return err
+	}
+	var memberships int
+	if err := q.QueryRow(ctx, `SELECT count(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE r.rolname = $1`, role).Scan(&memberships); err != nil {
+		return Sanitize("read the runtime role's memberships", err)
+	}
+	if memberships != 0 {
+		return fmt.Errorf("the runtime role %s is a member of another role; it must hold only its own grants", role)
+	}
+	return nil
 }
 
 // RequirePlainRole refuses a role with an elevated attribute (superuser, CREATEDB, CREATEROLE, REPLICATION, BYPASSRLS); a group

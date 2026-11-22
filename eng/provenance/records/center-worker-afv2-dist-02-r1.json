@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "id": "center-worker-afv2-dist-02-r1",
+  "kind": "generated",
+  "sourceRepository": "https://github.com/ArcForges/Cloud",
+  "sourceCommit": "baa99d38c092bb888ccd3b371dee3e66308a2d3d",
+  "sourcePaths": [
+    ".node-version",
+    "LICENSE",
+    "NOTICE",
+    "center/cmd/center-gen/main.go",
+    "center/internal/routes/commerce.go",
+    "center/internal/routes/fleet.go",
+    "center/internal/routes/identity.go",
+    "center/internal/routes/management.go",
+    "center/internal/routes/nodes.go",
+    "center/internal/routes/pages.go",
+    "center/internal/routes/relay.go",
+    "center/internal/routes/routes.go",
+    "center/internal/workertables/workertables.go",
+    "eng/provenance/NOTICE.txt",
+    "package-lock.json",
+    "package.json",
+    "third-party/Containers.LICENSE.txt",
+    "third-party/Esbuild.LICENSE.txt",
+    "tooling/build-identity.ts",
+    "tooling/process.ts",
+    "tooling/project.ts",
+    "tooling/provenance.ts",
+    "tooling/release-provenance.ts",
+    "worker/foundation/cloud-container.ts",
+    "worker/foundation/proof-command-key.ts",
+    "worker/index.ts",
+    "worker/ingress/applink.ts",
+    "worker/ingress/correlation.ts",
+    "worker/ingress/edge-caller.ts",
+    "worker/ingress/edge-limit.ts",
+    "worker/ingress/errors.ts",
+    "worker/ingress/frames.ts",
+    "worker/ingress/io.ts",
+    "worker/ingress/native.ts",
+    "worker/ingress/paddle-webhook.ts",
+    "worker/ingress/pages.ts",
+    "worker/ingress/pipeline.ts",
+    "worker/ingress/remote-target.ts",
+    "worker/ingress/routes.ts",
+    "worker/ingress/upgrade.ts",
+    "worker/private/encoding.ts",
+    "worker/readiness/container.ts",
+    "worker/router.ts",
+    "worker/tables/center-tables.generated.ts",
+    "worker/tables/cloud-tables.generated.ts",
+    "wrangler.json"
+  ],
+  "licence": {
+    "spdx": "AGPL-3.0-only",
+    "category": "agpl-compatible",
+    "evidence": [
+      {
+        "path": "LICENSE",
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+        "finding": "Exact Worker inputs and package lock are bound by the measured release profile."
+      }
+    ],
+    "scope": "The current Worker bundle includes the reviewed Cloudflare Containers package, an MIT esbuild helper, and AGPL-3.0-only Cloud ingress, typed routing, container transport and readiness code. The pinned build inputs, emitted input membership and applicable legal terms are bound by the successor profile.",
+    "copyingPermission": null
+  },
+  "attribution": [
+    "Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. Full applicable terms accompany the Worker bundle."
+  ],
+  "targets": [],
+  "artifactTargets": [
+    {
+      "project": "package.json",
+      "package": "arcforges-cloud-worker",
+      "kind": "worker-bundle",
+      "profile": "eng/provenance/artifact-profiles/cloud-release-r152.json",
+      "sha256": "a0c76bf5a8528817820760c5865137a67247834f43eb3297d9e84668f963b6ae"
+    }
+  ],
+  "disposition": "Rewrite",
+  "verification": {
+    "kind": "regeneration",
+    "command": "Build the Worker with the locked npm installation using node tooling/project.ts prepare-provenance-test (wrangler deploy --dry-run --containers-rollout none). Bind the actual bundle and closed parsed/emitted input, external-import and export membership. No provider deployment or runtime execution is performed.",
+    "expected": "Exact latest dependency inputs, inspected output membership and full original legal texts match the successor profile. Final complete native checks remain required.",
+    "artifacts": []
+  },
+  "notice": {
+    "required": true,
+    "text": "Cloud routing and foundation code: Copyright ArcForges contributors, AGPL-3.0-only. Containers: Copyright Cloudflare, Inc., selected MIT. esbuild helper: Copyright Evan Wallace, MIT. Full applicable terms accompany the Worker bundle.",
+    "files": [
+      "eng/provenance/NOTICE.txt"
+    ],
+    "distribution": "source-and-applicable-artifacts",
+    "reason": "The current Worker bundle includes the reviewed Cloudflare Containers package, an MIT esbuild helper, and AGPL-3.0-only Cloud ingress, typed routing, container transport and readiness code. The pinned build inputs, emitted input membership and applicable legal terms are bound by the successor profile."
+  },
+  "lifetime": {
+    "status": "permanent",
+    "owner": "Cloud Licensing and Provenance Owner",
+    "removalTrigger": null
+  },
+  "generation": {
+    "generators": [
+      {
+        "repository": "https://github.com/cloudflare/workers-sdk",
+        "commit": "79b890ab89a62823198a0c551c44ff647c80de4d",
+        "paths": [
+          "packages/wrangler/src/deployment-bundle/bundle.ts"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE-MIT",
+            "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+            "finding": "Exact Wrangler4.162 release source and MIT terms; build-only implementation is not inserted into the Worker."
+          },
+          {
+            "path": "packages/wrangler/src/deployment-bundle/bundle.ts",
+            "sha256": "3b3f764ca83e762bbccca096efd645bc1ad702bf86205a0c3ca198615e1227ac",
+            "finding": "Exact Wrangler4.162 release source and MIT terms; build-only implementation is not inserted into the Worker."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/evanw/esbuild",
+        "commit": "609683d892977362a0f99026cb74b96263d728a9",
+        "paths": [
+          "internal/runtime/runtime.go"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE.md",
+            "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
+            "finding": "Exact esbuild0.28.2 runtime helper source and complete MIT terms; actual emitted helper remains part of the inspected Worker output."
+          },
+          {
+            "path": "internal/runtime/runtime.go",
+            "sha256": "f198574bac5592f0b39a2165bd38651b185e5a5cbc75d864092e555d459b94d8",
+            "finding": "Exact esbuild0.28.2 runtime helper source and complete MIT terms; actual emitted helper remains part of the inspected Worker output."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/microsoft/TypeScript",
+        "commit": "050880ce59e30b356b686bd3144efe24f875ebc8",
+        "paths": [
+          "src/compiler/transformers/ts.ts"
+        ],
+        "spdx": "Apache-2.0",
+        "evidence": [
+          {
+            "path": "LICENSE.txt",
+            "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
+            "finding": "Upstream exact lock selects 6.0.3. Independent transpilation reproduced all four Containers JavaScript files byte-for-byte; compiler implementation is not bundled."
+          }
+        ]
+      }
+    ],
+    "inputs": [
+      {
+        "repository": "https://github.com/ArcForges/Cloud",
+        "commit": "baa99d38c092bb888ccd3b371dee3e66308a2d3d",
+        "paths": [
+          ".node-version",
+          "LICENSE",
+          "NOTICE",
+          "center/cmd/center-gen/main.go",
+          "center/internal/routes/commerce.go",
+          "center/internal/routes/fleet.go",
+          "center/internal/routes/identity.go",
+          "center/internal/routes/management.go",
+          "center/internal/routes/nodes.go",
+          "center/internal/routes/pages.go",
+          "center/internal/routes/relay.go",
+          "center/internal/routes/routes.go",
+          "center/internal/workertables/workertables.go",
+          "eng/provenance/NOTICE.txt",
+          "package-lock.json",
+          "package.json",
+          "third-party/Containers.LICENSE.txt",
+          "third-party/Esbuild.LICENSE.txt",
+          "tooling/build-identity.ts",
+          "tooling/process.ts",
+          "tooling/project.ts",
+          "tooling/provenance.ts",
+          "tooling/release-provenance.ts",
+          "worker/foundation/cloud-container.ts",
+          "worker/foundation/proof-command-key.ts",
+          "worker/index.ts",
+          "worker/ingress/applink.ts",
+          "worker/ingress/correlation.ts",
+          "worker/ingress/edge-caller.ts",
+          "worker/ingress/edge-limit.ts",
+          "worker/ingress/errors.ts",
+          "worker/ingress/frames.ts",
+          "worker/ingress/io.ts",
+          "worker/ingress/native.ts",
+          "worker/ingress/paddle-webhook.ts",
+          "worker/ingress/pages.ts",
+          "worker/ingress/pipeline.ts",
+          "worker/ingress/remote-target.ts",
+          "worker/ingress/routes.ts",
+          "worker/ingress/upgrade.ts",
+          "worker/private/encoding.ts",
+          "worker/readiness/container.ts",
+          "worker/router.ts",
+          "worker/tables/center-tables.generated.ts",
+          "worker/tables/cloud-tables.generated.ts",
+          "wrangler.json"
+        ],
+        "spdx": "AGPL-3.0-only",
+        "evidence": [
+          {
+            "path": "LICENSE",
+            "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+            "finding": "Exact measured Cloud source under the existing repository AGPL-3.0-only boundary."
+          }
+        ]
+      },
+      {
+        "repository": "https://github.com/cloudflare/containers",
+        "commit": "298169f4aaba82e7b712458b7c6b14fc3e40ad78",
+        "paths": [
+          "src/lib/helpers.ts",
+          "src/lib/container.ts",
+          "src/lib/utils.ts",
+          "src/index.ts"
+        ],
+        "spdx": "MIT",
+        "evidence": [
+          {
+            "path": "LICENSE-MIT",
+            "sha256": "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+            "finding": "Exact source files and generated npm package bytes reviewed; no subordinate licence override; MIT alternative selected, full copyright/terms retained."
+          }
+        ]
+      }
+    ],
+    "command": "Build the Worker with the locked npm installation using node tooling/project.ts prepare-provenance-test (wrangler deploy --dry-run --containers-rollout none). Bind the actual bundle and closed parsed/emitted input, external-import and export membership. No provider deployment or runtime execution is performed.",
+    "outputSpdx": "AGPL-3.0-only"
+  },
+  "review": {
+    "owner": "Licensing and Provenance Owner",
+    "reviewer": "candidate_audit",
+    "reviewedOn": "2026-11-22",
+    "decision": "approved",
+    "rationale": "The admitted Go source covers bounded predecessor preparation and readiness admission. The independent Worker closure retains its measured bytes and original legal terms.",
+    "baselineCommit": "baa99d38c092bb888ccd3b371dee3e66308a2d3d",
+    "reconciliation": false
+  },
+  "supersedes": "center-worker-afv2-mig-02-r1"
+}

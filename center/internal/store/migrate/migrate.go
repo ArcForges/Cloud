@@ -53,7 +53,7 @@ const (
 	StatePending       = "pending"       // migrations of this build are not applied yet
 	StateCurrent       = "current"       // every migration of this build is applied, nothing else is
 	StateRefused       = "refused"       // the database record differs from the build; nothing is applied
-	StateMaintenance   = "maintenance"   // contraction may be committed or confirmed follow-up is incomplete
+	StateMaintenance   = "maintenance"   // a cutover step or its follow-up is incomplete or unconfirmed
 )
 
 var namePattern = regexp.MustCompile(`^([0-9]{4})_[a-z0-9_]+\.sql$`)
@@ -376,16 +376,17 @@ type Options struct {
 	BridgeProof *bridgeproof.Verified
 	// localBridge is created only inside the self-hosted manager after it has
 	// issued fresh roles and run and stopped the exact verified bridge.
-	localBridge      *localBridgeAdmission
-	localRestore     *restoreCapability
-	localLegacyGrant *ctr06RestoreBridgeGrant
-	management       *managementAdmission
-	lifecycle        *managementAdmission
-	contraction      *contractionAdmission
-	LockTimeout      time.Duration
-	StatementTimeout time.Duration
-	LockWait         time.Duration
-	Logger           *slog.Logger
+	localBridge          *localBridgeAdmission
+	localRestore         *restoreCapability
+	localLegacyGrant     *ctr06RestoreBridgeGrant
+	management           *managementAdmission
+	lifecycle            *managementAdmission
+	contraction          *contractionAdmission
+	preparingContraction bool
+	LockTimeout          time.Duration
+	StatementTimeout     time.Duration
+	LockWait             time.Duration
+	Logger               *slog.Logger
 	// Grants and Schemas default to the center's (package schema); tests replace them.
 	Grants  []schema.Grant
 	Schemas []string
@@ -571,7 +572,7 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, build []Migration, opt
 	for _, migration := range comparison.Pending {
 		step, err := applyOne(ctx, conn, migration, options)
 		if err != nil {
-			if errors.Is(err, ErrContractionOutcomeUnknown) {
+			if errors.Is(err, ErrContractionOutcomeUnknown) || errors.Is(err, ErrContractionPreparationOutcomeUnknown) {
 				result.State = StateMaintenance
 			}
 			options.Logger.Error("migration failed", "migration", migration.Name, "error", err.Error())
@@ -724,6 +725,9 @@ func applyOne(ctx context.Context, conn *pgx.Conn, migration Migration, options 
 	if err != nil {
 		if contractionCommitUnknown(migration, bodyCompleted, err) {
 			return Step{}, ErrContractionOutcomeUnknown
+		}
+		if options.preparingContraction && bodyCompleted && !errors.Is(err, pgx.ErrTxCommitRollback) {
+			return Step{}, ErrContractionPreparationOutcomeUnknown
 		}
 		if errors.Is(err, ErrCTR06RetirementUnproven) || errors.Is(err, ErrManagementTransitionRequired) ||
 			errors.Is(err, ErrLifecycleTransitionRequired) || errors.Is(err, ErrContractionRequired) {

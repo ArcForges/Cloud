@@ -3,6 +3,72 @@
 # Operate and recover a self-hosted Center
 
 Use the installed configuration from the [Linux setup procedure](self-host-install.md).
+
+## Upgrade the selected cohort
+
+Keep the independently verified current binary and the signed replacement in
+their own release directories. Verify the replacement with an independently
+trusted public key and current producer admission record. The updater uses the
+loaded Center unit, its control group, the operator software directories, and
+the existing private PostgreSQL configuration. Drain new remote admission at
+the TLS boundary for the maintenance window.
+
+```sh
+python3 "$DEFINITION/operator-inputs.py" upgrade apply \
+  --cohort-tool "$TRUSTED_COHORT_TOOL" --archive "$SIGNED_ARCHIVE" \
+  --public-key "$PINNED_PUBLIC_KEY" --previous-sha256 "$CURRENT_BINARY_SHA256" \
+  --admission "$ADMISSION" --cloud-repo "$CLOUD_PRODUCER" --web-repo "$WEB_PRODUCER"
+```
+
+Use the existing operator-owned `/opt/arcforges-center/releases` and private
+`/var/lib/arcforges-center/operator` directories. The updater accepts an
+already admitted PostgreSQL 18 schema from 13 to 17. For a retained schema 10
+or 11, use the existing guarded management and lifecycle transitions first.
+The serving unit must have an identifiable cgroup, and its previous binary
+must accept the exact source history. The updater stops the loaded unit
+under a durable maintenance fence, verifies that the cgroup has drained,
+and captures a native
+archive. It verifies a real restore into a freshly named PostgreSQL database
+and runtime role before continuing.
+
+For a predecessor below 17, the existing Go commands prepare schema 16 and
+perform the separately witnessed contraction. The updater rotates a fresh
+runtime login and confirms it after the candidate passes readiness on private
+loopback listeners. It records the newly admitted database runtime role and
+switches the protected migration and serving inputs under the same fence.
+It verifies that both readiness listeners belong to the candidate PID and
+executable before and after the HTTP requests. It switches the release
+selector before enabling the
+serving unit. The last release, protected backup, and restore witness remain
+available to the operator.
+
+After an interruption, inspect the durable record and the maintenance fence.
+
+```sh
+python3 "$DEFINITION/operator-inputs.py" upgrade inspect
+```
+
+If the journal confirms candidate readiness and reports `selecting`,
+`selected`, `rechecking-selection`, `activation-fencing`, or `activation-failed`,
+`upgrade resume` verifies the stored database history and runtime
+input, repeats the private readiness probe, and finishes the selection.
+Before any incompatible effect, `upgrade rollback-compatible` can restore the
+previous selection only after proving that the previous binary and runtime
+credential still admit the current database and pass private readiness.
+Once the journal records previous-selection intent, finish it with
+`upgrade rollback-compatible`.
+The same explicit command can recover an interruption just before initial
+fencing, provided the previous selector, binary, runtime inputs and database
+history still match the journal.
+
+An uncertain SQL, restore, or credential operation leaves maintenance in
+effect. Preserve its journal and source database, and inspect the current
+state using the selected candidate's migration tooling. After contraction,
+an activation failure leaves the actual selector in place under maintenance.
+Recover an earlier binary only on a separately verified restore with its own
+new runtime role and credential generation. The recorded archive capture is
+the boundary for potential data loss. Account for every later committed
+operation and any external outcome before switching recovered traffic.
 Run these maintenance commands from the operator account in a private shell
 with `umask 077`. The examples assume elevated access to the root-owned
 configuration and a locally managed PostgreSQL 18 cluster. Preserve the
@@ -47,7 +113,7 @@ rotation receipt privately before continuing.
 ```sh
 set -eu
 umask 077
-CENTER=/opt/arcforges-center/arcforges-center
+CENTER=/opt/arcforges-center/current/bin/arcforges-center
 DEFINITION=/path/to/Cloud/deploy/self-host
 ROTATION=$(mktemp -d /var/lib/arcforges-center/operator/rotate-XXXXXXXX)
 install -m 0600 /etc/arcforges-center/runtime.env "$ROTATION/previous.env"
@@ -95,7 +161,7 @@ Capture into a new directory accessible only to the operator.
 ```sh
 set -eu
 umask 077
-CENTER=/opt/arcforges-center/arcforges-center
+CENTER=/opt/arcforges-center/current/bin/arcforges-center
 BACKUP=$(mktemp -d "/var/lib/arcforges-center/operator/backup-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXXXX")
 systemctl stop arcforges-center.service
 (
@@ -138,7 +204,7 @@ archive copied out of their trusted custody.
 ```sh
 set -eu
 umask 077
-CENTER=/opt/arcforges-center/arcforges-center
+CENTER=/opt/arcforges-center/current/bin/arcforges-center
 RESTORE=$(mktemp -d /var/lib/arcforges-center/operator/restore-XXXXXXXX)
 (
   set -a
@@ -205,8 +271,8 @@ history. Keep your own incident reference separately from credentials.
   set -a
   . /etc/arcforges-center/migration.env
   set +a
-  /opt/arcforges-center/arcforges-center admin revoke-sessions --account "$ACCOUNT_ID"
-  /opt/arcforges-center/arcforges-center admin revoke-device --node "$NODE_ID"
+  /opt/arcforges-center/current/bin/arcforges-center admin revoke-sessions --account "$ACCOUNT_ID"
+  /opt/arcforges-center/current/bin/arcforges-center admin revoke-device --node "$NODE_ID"
 )
 ```
 

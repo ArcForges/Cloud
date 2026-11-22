@@ -5,11 +5,14 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import runpy
+import socket
 import stat
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import Mock, patch
 
 
 SCRIPT = Path(__file__).with_name("operator-inputs.py")
@@ -86,6 +89,125 @@ class OperatorInputsTest(unittest.TestCase):
         unexpected = self.root / "rejected"
         self.command("bootstrap", unexpected, "--hours", 169, code=2)
         self.assertFalse(unexpected.exists())
+
+    def test_stopped_failed_unit_requires_zero_pids_and_a_drained_group(self):
+        operations = runpy.run_path(str(SCRIPT))
+        upgrade_class = operations["Upgrade"]
+        refusal = operations["UpgradeRefused"]
+        unit = "arcforges-center-fixture.service"
+        group = f"/user.slice/{unit}"
+        for state, main_pid, control_pid, after_group, drained, problem in (
+            ("inactive", "0", "0", group, "empty", None),
+            ("failed", "0", "0", "", "removed", None),
+            ("active", "0", "0", "", "removed", "unit did not stop"),
+            ("deactivating", "0", "0", "", "removed", "unit did not stop"),
+            ("failed", "17", "0", "", "removed", "unit did not stop"),
+            ("failed", "0", "19", "", "removed", "unit did not stop"),
+            ("failed", "0", "0", f"/other.slice/{unit}", "removed", "group changed"),
+            ("failed", "0", "0", "", None, "group still holds processes"),
+        ):
+            with self.subTest(state=state, main_pid=main_pid, control_pid=control_pid,
+                              after_group=after_group, drained=drained):
+                upgrade = upgrade_class.__new__(upgrade_class)
+                upgrade.unit = unit
+                upgrade.journal = {"phase": "activation-fencing", "serviceControlGroup": group}
+                upgrade.systemd = Mock(side_effect=["", "", state, main_pid, control_pid, after_group])
+                upgrade.phase = Mock()
+                check_drain = Mock(
+                    return_value=drained,
+                    side_effect=None if drained else refusal("Center control group still holds processes."),
+                )
+                with patch.dict(upgrade_class.stop_service.__globals__,
+                                cgroup_path=lambda *_: True, drained_group=check_drain):
+                    if problem is None:
+                        upgrade.stop_service()
+                        upgrade.phase.assert_called_with("activation-fencing", serviceControlGroupState=drained)
+                    else:
+                        with self.assertRaisesRegex(refusal, problem):
+                            upgrade.stop_service()
+                        upgrade.phase.assert_called_once_with("activation-fencing", serviceControlGroup=group)
+                if problem is None or drained is None:
+                    check_drain.assert_called_once_with(group, unit)
+                else:
+                    check_drain.assert_not_called()
+                upgrade.systemd.assert_any_call("stop", unit)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "real Linux durable file and link operations")
+    def test_private_journal_inspection_and_immutable_release_tree(self):
+        operations = runpy.run_path(str(SCRIPT))
+        state = self.root / "state"
+        state.mkdir(mode=0o700)
+        journal = operations["Upgrade"].__new__(operations["Upgrade"])
+        journal.journal_path = state / "upgrade.json"
+        journal.journal = {"schema": 1, "operation": "0" * 16}
+        journal.phase("contracting", predecessor={"version": 16})
+        operations["replace_file"](state / "maintenance", b"0" * 16 + b"\n")
+        inspected = subprocess.run(
+            [sys.executable, "-B", SCRIPT, "upgrade", "inspect", "--state-root", state],
+            capture_output=True,
+            check=True,
+        )
+        observed = json.loads(inspected.stdout)
+        self.assertEqual(observed["phase"], "contracting")
+        self.assertTrue(observed["maintenance"])
+        self.assertEqual(observed["predecessor"], {"version": 16})
+        self.assertEqual(stat.S_IMODE(journal.journal_path.stat().st_mode), 0o600)
+        journal.fence = state / "maintenance"
+        journal.current = self.root / "current"
+        journal.journal["previous"] = "1" * 64
+        journal.current.symlink_to(f"releases/{'1' * 64}")
+        journal.fence.unlink()
+        self.assertFalse(journal.previous_recovery_fence(rolling_back=False))
+        journal.phase("fencing")
+        self.assertTrue(journal.previous_recovery_fence(rolling_back=False))
+        journal.current.unlink()
+        journal.current.symlink_to(f"releases/{'2' * 64}")
+        self.assertFalse(journal.previous_recovery_fence(rolling_back=False))
+
+        tree = self.root / "verified-release"
+        tree.mkdir(mode=0o755)
+        artifact = tree / "member"
+        artifact.write_bytes(b"original")
+        verified = operations["release_tree"](tree, synchronize=True)
+        artifact.write_bytes(b"changed")
+        self.assertNotEqual(operations["release_tree"](tree), verified)
+        (tree / "unexpected-link").symlink_to(artifact)
+        with self.assertRaises(operations["UpgradeRefused"]):
+            operations["release_tree"](tree)
+
+        journal.releases = self.root / "releases"
+        selected = journal.releases / ("1" * 64) / "bin"
+        selected.mkdir(parents=True)
+        executable = selected / "arcforges-center"
+        executable.write_bytes(b"candidate")
+        executable.chmod(0o755)
+        self.assertEqual(journal.binary("1" * 64), executable)
+        executable.chmod(0o775)
+        with self.assertRaises(operations["UpgradeRefused"]):
+            journal.binary("1" * 64)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "real Linux TCP listener ownership")
+    def test_listener_receipt_changes_when_the_socket_is_replaced(self):
+        operations = runpy.run_path(str(SCRIPT))
+        listeners = operations["listening_sockets"]
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as admin:
+            admin.bind(("127.0.0.1", 0))
+            admin.listen()
+            admin_port = admin.getsockname()[1]
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as public:
+                public.bind(("127.0.0.1", 0))
+                public.listen()
+                public_port = public.getsockname()[1]
+                addresses = (f"127.0.0.1:{public_port}", f"127.0.0.1:{admin_port}")
+                previous = listeners(os.getpid(), addresses)
+                self.assertIsNotNone(previous)
+            self.assertIsNone(listeners(os.getpid(), addresses))
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as replacement:
+                replacement.bind(("127.0.0.1", public_port))
+                replacement.listen()
+                current = listeners(os.getpid(), addresses)
+                self.assertIsNotNone(current)
+                self.assertNotEqual(previous, current)
 
 
 if __name__ == "__main__":

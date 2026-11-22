@@ -42,12 +42,17 @@ set -eu
 umask 077
 DEFINITION=/path/to/Cloud/deploy/self-host
 CENTER_BUILD=/path/to/staging/arcforges-center
-CENTER=/opt/arcforges-center/arcforges-center
+INSTALL=/opt/arcforges-center
+CENTER=$INSTALL/current/bin/arcforges-center
 
 useradd --system --user-group --no-create-home --shell /usr/sbin/nologin arcforges-center
-install -d -m 0755 /opt/arcforges-center
+install -d -m 0755 "$INSTALL/releases"
 install -d -m 0700 /etc/arcforges-center /var/lib/arcforges-center/operator
-install -m 0755 "$CENTER_BUILD" "$CENTER"
+RELEASE_SHA256=$(sha256sum "$CENTER_BUILD" | cut -d ' ' -f 1)
+mkdir -m 0755 "$INSTALL/releases/$RELEASE_SHA256"
+mkdir -m 0755 "$INSTALL/releases/$RELEASE_SHA256/bin"
+install -m 0755 "$CENTER_BUILD" "$INSTALL/releases/$RELEASE_SHA256/bin/arcforges-center"
+ln -s "releases/$RELEASE_SHA256" "$INSTALL/current"
 install -m 0644 "$DEFINITION/arcforges-center.service" /etc/systemd/system/arcforges-center.service
 install -m 0600 "$DEFINITION/center.env.example" /etc/arcforges-center/center.env
 install -m 0600 "$DEFINITION/migration.env.example" /etc/arcforges-center/migration.env
@@ -58,6 +63,14 @@ on PostgreSQL connections, in-flight requests, and Node channels. The
 optional `ARCFORGES_CENTER_DISABLED_FEATURES` turns off named Center
 capabilities for this operator. A capability allowed by the Center still
 requires account, enrollment, and Node-local authorization.
+
+The selected binary remains in a versioned directory. An existing
+installation can adopt this layout by stopping its current service, copying
+its independently verified installed executable into a fresh release
+directory, and selecting that same executable before loading the supplied
+unit. Keep the original installation and the build digest in operator
+custody. Use the [upgrade procedure](self-host-recovery.md#upgrade-the-selected-cohort)
+for a different release.
 
 ## Provision PostgreSQL and signing custody
 

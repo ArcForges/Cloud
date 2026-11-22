@@ -2,6 +2,7 @@
 Description=ArcForges self-hosted Center
 Wants=network-online.target
 After=network-online.target postgresql.service
+ConditionPathExists=!/var/lib/arcforges-center/operator/maintenance
 
 [Service]
 Type=exec
@@ -13,9 +14,10 @@ EnvironmentFile=/etc/arcforges-center/runtime.env
 EnvironmentFile=/etc/arcforges-center/signing.env
 EnvironmentFile=-/etc/arcforges-center/bootstrap.env
 UnsetEnvironment=ARCFORGES_CENTER_MIGRATION_DATABASE_URL ARCFORGES_CENTER_DATABASE_NAME ARCFORGES_CENTER_RUNTIME_ROLE ARCFORGES_CENTER_RUNTIME_SECRET_FILE ARCFORGES_CENTER_RUNTIME_POOLED_HOST ARCFORGES_CENTER_MIGRATION_LOCK_TIMEOUT ARCFORGES_CENTER_CTR06_PROOF_FILE ARCFORGES_CENTER_CTR06_BRIDGE_EXECUTABLE NEON_DATABASE_URL_DIRECT
-ExecStart=/opt/arcforges-center/arcforges-center serve
+ExecStart=/opt/arcforges-center/current/bin/arcforges-center serve
 Restart=on-failure
 RestartSec=2s
+KillMode=control-group
 TimeoutStopSec=15s
 NoNewPrivileges=true
 CapabilityBoundingSet=

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -19,8 +20,66 @@ import (
 	"github.com/ArcForges/Cloud/center/internal/device"
 	"github.com/ArcForges/Cloud/center/internal/pgtest"
 	"github.com/ArcForges/Cloud/center/internal/platform"
+	"github.com/ArcForges/Cloud/center/internal/schema"
 	"github.com/ArcForges/Cloud/center/internal/session"
+	"github.com/ArcForges/Cloud/center/internal/store/migrate"
 )
+
+func TestPrepareContractionCommandUsesTheFixedPredecessorAndReplays(t *testing.T) {
+	url, name := pgtest.Database(t)
+	owner := pgtest.Connect(t, url)
+	group := name + "_runtime"
+	build, err := migrate.Load(schema.Migrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, err := migrate.Apply(t.Context(), owner, build[:13], migrate.Options{Runner: "isolated-prepare-cli", RuntimeRole: group})
+	if err != nil || seed.Version != 13 {
+		t.Fatalf("isolated schema13: %+v %v", seed, err)
+	}
+	values := map[string]string{
+		config.EnvMode:                 string(config.SelfHosted),
+		config.EnvMigrationDatabaseURL: url,
+		config.EnvDatabaseName:         name,
+		config.EnvRuntimeRole:          group,
+	}
+	command := func(exit int, sub string) migrate.Result {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"migrate", sub}, environment(values), &stdout, &stderr); code != exit {
+			t.Fatalf("migrate %s: exit %d instead of %d: %s", sub, code, exit, stderr.String())
+		}
+		var result migrate.Result
+		if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+			t.Fatalf("migrate %s: invalid migration receipt: %v", sub, err)
+		}
+		return result
+	}
+	before := command(exitOK, "status")
+	values[config.EnvRuntimeRole] = group + "_obsolete"
+	refused := command(exitRefused, "prepare-contraction")
+	if refused.State != migrate.StateRefused || !reflect.DeepEqual(before.Applied, refused.Applied) || len(refused.Ran) != 0 {
+		t.Fatalf("wrong runtime role was not refused before writes: %+v", refused)
+	}
+	values[config.EnvRuntimeRole] = group
+	prepared := command(exitOK, "prepare-contraction")
+	if prepared.State != migrate.StateCurrent || prepared.Version != 16 || prepared.BuildVersion != 16 ||
+		prepared.RuntimeRole != group || prepared.Grants != "reconciled" || len(prepared.Ran) != 3 ||
+		len(prepared.Pending) != 0 || len(prepared.Applied) != 16 || !reflect.DeepEqual(prepared.Applied[:13], before.Applied) {
+		t.Fatalf("preparation did not stop at the fixed schema16 ledger: %+v", prepared)
+	}
+	replay := command(exitOK, "prepare-contraction")
+	if replay.State != migrate.StateCurrent || replay.RuntimeRole != group || replay.Grants != "reconciled" ||
+		len(replay.Ran) != 0 || !reflect.DeepEqual(replay.Applied, prepared.Applied) {
+		t.Fatalf("prepared ledger changed on replay: %+v", replay)
+	}
+	current := command(exitOK, "status")
+	if current.State != migrate.StatePending || current.Version != 16 || current.BuildVersion != 17 ||
+		!reflect.DeepEqual(current.Pending, []string{"0017_retire_legacy_routing.sql"}) ||
+		!reflect.DeepEqual(current.Applied, prepared.Applied) {
+		t.Fatalf("ordinary status lost the contraction boundary: %+v", current)
+	}
+}
 
 func TestTheMigrationAndAdministrationCommands(t *testing.T) {
 	url, name := pgtest.Database(t)
