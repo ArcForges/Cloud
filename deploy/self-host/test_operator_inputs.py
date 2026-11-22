@@ -96,15 +96,15 @@ class OperatorInputsTest(unittest.TestCase):
         refusal = operations["UpgradeRefused"]
         unit = "arcforges-center-fixture.service"
         group = f"/user.slice/{unit}"
-        for state, main_pid, control_pid, after_group, drained in (
-            ("inactive", "0", "0", group, "empty"),
-            ("failed", "0", "0", "", "removed"),
-            ("active", "0", "0", "", None),
-            ("deactivating", "0", "0", "", None),
-            ("failed", "17", "0", "", None),
-            ("failed", "0", "19", "", None),
-            ("failed", "0", "0", f"/other.slice/{unit}", None),
-            ("failed", "0", "0", "", None),
+        for state, main_pid, control_pid, after_group, drained, problem in (
+            ("inactive", "0", "0", group, "empty", None),
+            ("failed", "0", "0", "", "removed", None),
+            ("active", "0", "0", "", "removed", "unit did not stop"),
+            ("deactivating", "0", "0", "", "removed", "unit did not stop"),
+            ("failed", "17", "0", "", "removed", "unit did not stop"),
+            ("failed", "0", "19", "", "removed", "unit did not stop"),
+            ("failed", "0", "0", f"/other.slice/{unit}", "removed", "group changed"),
+            ("failed", "0", "0", "", None, "group still holds processes"),
         ):
             with self.subTest(state=state, main_pid=main_pid, control_pid=control_pid,
                               after_group=after_group, drained=drained):
@@ -113,17 +113,23 @@ class OperatorInputsTest(unittest.TestCase):
                 upgrade.journal = {"phase": "activation-fencing", "serviceControlGroup": group}
                 upgrade.systemd = Mock(side_effect=["", "", state, main_pid, control_pid, after_group])
                 upgrade.phase = Mock()
-                check_drain = Mock(return_value=drained, side_effect=None if drained else refusal("Not drained"))
+                check_drain = Mock(
+                    return_value=drained,
+                    side_effect=None if drained else refusal("Center control group still holds processes."),
+                )
                 with patch.dict(upgrade_class.stop_service.__globals__,
                                 cgroup_path=lambda *_: True, drained_group=check_drain):
-                    if drained:
+                    if problem is None:
                         upgrade.stop_service()
-                        check_drain.assert_called_once_with(group, unit)
                         upgrade.phase.assert_called_with("activation-fencing", serviceControlGroupState=drained)
                     else:
-                        with self.assertRaises(refusal):
+                        with self.assertRaisesRegex(refusal, problem):
                             upgrade.stop_service()
                         upgrade.phase.assert_called_once_with("activation-fencing", serviceControlGroup=group)
+                if problem is None or drained is None:
+                    check_drain.assert_called_once_with(group, unit)
+                else:
+                    check_drain.assert_not_called()
                 upgrade.systemd.assert_any_call("stop", unit)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "real Linux durable file and link operations")
