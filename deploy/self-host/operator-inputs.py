@@ -615,7 +615,8 @@ class Upgrade:
     def apply(self):
         self.verify_unit()
         self.runtime_identity(self.live_runtime)
-        require(not self.fence.exists(), "An unfinished Center maintenance operation is fenced.")
+        require(not (self.fence.exists() or self.fence.is_symlink()),
+                "An unfinished Center maintenance operation is fenced.")
         if self.journal_path.exists():
             previous = json_receipt(private_input(self.journal_path), "Previous upgrade journal")
             require(previous.get("phase") in ("completed", "rolled-back"), "Inspect the unfinished Center upgrade.")
@@ -718,7 +719,7 @@ class Upgrade:
             and self.journal.get("phase") not in ("completed", "rolled-back"),
             "No matching unfinished Center upgrade was found.",
         )
-        if self.fence.exists():
+        if self.fence.exists() or self.fence.is_symlink():
             require(private_input(self.fence) == (self.journal["operation"] + "\n").encode("ascii"),
                     "Maintenance fence belongs to another operation.")
         probe_unit = self.journal.get("probeUnit")
@@ -785,7 +786,7 @@ class Upgrade:
             and self.journal.get("rollbackChecked") is True
         )
         require(
-            (self.fence.is_file() or rolling_back and self.selected() == self.journal["previous"])
+            self.previous_recovery_fence(rolling_back)
             and (not self.journal.get("contractionRequired")
                  or phase in ("fencing", "capturing-backup", "verifying-backup", "backup-verified")
                  or rolling_back)
@@ -821,6 +822,16 @@ class Upgrade:
             self.phase("rollback-failed")
             raise
         self.phase("rolled-back")
+
+    def previous_recovery_fence(self, rolling_back):
+        if self.fence.is_file():
+            return True
+        if self.fence.exists() or self.fence.is_symlink():
+            return False
+        # A crash can leave the initial durable intent before the first fence is created.
+        # Only the exact untouched previous selector can enter the compatibility checks.
+        return ((self.journal["phase"] == "fencing" or rolling_back)
+                and self.selected() == self.journal["previous"])
 
 
 def cgroup_path(group, unit):

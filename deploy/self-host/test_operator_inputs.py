@@ -109,6 +109,17 @@ class OperatorInputsTest(unittest.TestCase):
         self.assertTrue(observed["maintenance"])
         self.assertEqual(observed["predecessor"], {"version": 16})
         self.assertEqual(stat.S_IMODE(journal.journal_path.stat().st_mode), 0o600)
+        journal.fence = state / "maintenance"
+        journal.current = self.root / "current"
+        journal.journal["previous"] = "1" * 64
+        journal.current.symlink_to(f"releases/{'1' * 64}")
+        journal.fence.unlink()
+        self.assertFalse(journal.previous_recovery_fence(rolling_back=False))
+        journal.phase("fencing")
+        self.assertTrue(journal.previous_recovery_fence(rolling_back=False))
+        journal.current.unlink()
+        journal.current.symlink_to(f"releases/{'2' * 64}")
+        self.assertFalse(journal.previous_recovery_fence(rolling_back=False))
 
         tree = self.root / "verified-release"
         tree.mkdir(mode=0o755)

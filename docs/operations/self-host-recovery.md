@@ -57,6 +57,9 @@ previous selection only after proving that the previous binary and runtime
 credential still admit the current database and pass private readiness.
 Once the journal records previous-selection intent, finish it with
 `upgrade rollback-compatible`.
+The same explicit command can recover an interruption just before initial
+fencing, provided the previous selector, binary, runtime inputs and database
+history still match the journal.
 
 An uncertain SQL, restore, or credential operation leaves maintenance in
 effect. Preserve its journal and source database, and inspect the current
