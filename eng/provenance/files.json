@@ -912,6 +912,7 @@
     "eng/policy/dependency-reviews/afv2-center-04-r1.json",
     "eng/policy/dependency-reviews/afv2-center-04-r2.json",
     "eng/policy/dependency-reviews/afv2-dist-01-r1.json",
+    "eng/policy/dependency-reviews/afv2-dist-02-r1.json",
     "eng/policy/dependency-reviews/afv2-env-01-r1.json",
     "eng/policy/dependency-reviews/afv2-env-01-r2.json",
     "eng/policy/dependency-reviews/afv2-env-01-r3.json",
@@ -1061,6 +1062,7 @@
     "eng/provenance/artifact-profiles/cloud-release-r15.json",
     "eng/provenance/artifact-profiles/cloud-release-r150.json",
     "eng/provenance/artifact-profiles/cloud-release-r151.json",
+    "eng/provenance/artifact-profiles/cloud-release-r152.json",
     "eng/provenance/artifact-profiles/cloud-release-r16.json",
     "eng/provenance/artifact-profiles/cloud-release-r17.json",
     "eng/provenance/artifact-profiles/cloud-release-r18.json",
@@ -1171,6 +1173,7 @@
     "eng/provenance/records/center-runtime-afv2-center-03-r1.json",
     "eng/provenance/records/center-runtime-afv2-center-04-r1.json",
     "eng/provenance/records/center-runtime-afv2-center-04-r2.json",
+    "eng/provenance/records/center-runtime-afv2-dist-02-r1.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r1.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r2.json",
     "eng/provenance/records/center-runtime-afv2-env-01-r3.json",
@@ -1270,6 +1273,7 @@
     "eng/provenance/records/center-worker-afv2-center-03-r1.json",
     "eng/provenance/records/center-worker-afv2-center-04-r1.json",
     "eng/provenance/records/center-worker-afv2-center-04-r2.json",
+    "eng/provenance/records/center-worker-afv2-dist-02-r1.json",
     "eng/provenance/records/center-worker-afv2-env-01-r1.json",
     "eng/provenance/records/center-worker-afv2-env-01-r2.json",
     "eng/provenance/records/center-worker-afv2-env-01-r3.json",
@@ -1992,5 +1996,5 @@
     "third-party/Puddle.LICENSE.txt": "go-puddle-legal-r1",
     "tooling/wrangler-init.ts": "web-miniflare-compat-afv2-env-01-r2"
   },
-  "artifacts": ["center-runtime-afv2-mig-02-r1", "center-worker-afv2-mig-02-r1"]
+  "artifacts": ["center-runtime-afv2-dist-02-r1", "center-worker-afv2-dist-02-r1"]
 }
