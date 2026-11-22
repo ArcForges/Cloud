@@ -857,6 +857,12 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			go center.keepRecordingDefinitions(ctx, 10*time.Second)
 		}
 	}
+	if center.Hub != nil {
+		// A Center that requires a command key must pass the check before any listener can report readiness.
+		if err := center.CheckCommandKeys(ctx); err != nil {
+			return err
+		}
+	}
 	type plan struct {
 		name, address string
 		handler       http.Handler
@@ -920,13 +926,6 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		go center.logReadiness(ctx)
 	}
 	if center.Hub != nil {
-		// CTR5-SIG-02: a center that serves the relay surface holds a valid command key, or it does not start.
-		if err := center.CheckCommandKeys(ctx); err != nil {
-			for _, server := range servers {
-				_ = server.Close()
-			}
-			return err
-		}
 		// The hub takes the hub lease (or waits for it) before the listeners admit a channel.
 		center.Hub.Start(ctx)
 	}
