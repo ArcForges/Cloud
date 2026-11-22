@@ -24,8 +24,10 @@ Use the existing operator-owned `/opt/arcforges-center/releases` and private
 `/var/lib/arcforges-center/operator` directories. The updater accepts an
 already admitted PostgreSQL 18 schema from 13 to 17. For a retained schema 10
 or 11, use the existing guarded management and lifecycle transitions first.
-The previous binary must accept the exact source history. The updater stops
-the loaded unit under a durable maintenance fence and captures a native
+The serving unit must have an identifiable cgroup, and its previous binary
+must accept the exact source history. The updater stops the loaded unit
+under a durable maintenance fence, verifies that the cgroup has drained,
+and captures a native
 archive. It verifies a real restore into a freshly named PostgreSQL database
 and runtime role before continuing.
 
@@ -34,8 +36,9 @@ perform the separately witnessed contraction. The updater rotates a fresh
 runtime login and confirms it after the candidate passes readiness on private
 loopback listeners. It records the newly admitted database runtime role and
 switches the protected migration and serving inputs under the same fence.
-It verifies the candidate executable behind the readiness response and
-switches the release selector before enabling the
+It verifies that both readiness listeners belong to the candidate PID and
+executable before and after the HTTP requests. It switches the release
+selector before enabling the
 serving unit. The last release, protected backup, and restore witness remain
 available to the operator.
 
@@ -46,17 +49,20 @@ python3 "$DEFINITION/operator-inputs.py" upgrade inspect
 ```
 
 If the journal confirms candidate readiness and reports `selecting`,
-`selected`, `rechecking-selection`, or `activation-failed`,
+`selected`, `rechecking-selection`, `activation-fencing`, or `activation-failed`,
 `upgrade resume` verifies the stored database history and runtime
 input, repeats the private readiness probe, and finishes the selection.
 Before any incompatible effect, `upgrade rollback-compatible` can restore the
 previous selection only after proving that the previous binary and runtime
 credential still admit the current database and pass private readiness.
+Once the journal records previous-selection intent, finish it with
+`upgrade rollback-compatible`.
 
 An uncertain SQL, restore, or credential operation leaves maintenance in
 effect. Preserve its journal and source database, and inspect the current
 state using the selected candidate's migration tooling. After contraction,
-recover an earlier binary only on a separately verified restore with its own
+an activation failure leaves the actual selector in place under maintenance.
+Recover an earlier binary only on a separately verified restore with its own
 new runtime role and credential generation. The recorded archive capture is
 the boundary for potential data loss. Account for every later committed
 operation and any external outcome before switching recovered traffic.

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import socket
 import stat
 import subprocess
 import sys
@@ -119,6 +120,29 @@ class OperatorInputsTest(unittest.TestCase):
         (tree / "unexpected-link").symlink_to(artifact)
         with self.assertRaises(operations["UpgradeRefused"]):
             operations["release_tree"](tree)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "real Linux TCP listener ownership")
+    def test_listener_receipt_changes_when_the_socket_is_replaced(self):
+        operations = runpy.run_path(str(SCRIPT))
+        listeners = operations["listening_sockets"]
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as admin:
+            admin.bind(("127.0.0.1", 0))
+            admin.listen()
+            admin_port = admin.getsockname()[1]
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as public:
+                public.bind(("127.0.0.1", 0))
+                public.listen()
+                public_port = public.getsockname()[1]
+                addresses = (f"127.0.0.1:{public_port}", f"127.0.0.1:{admin_port}")
+                previous = listeners(os.getpid(), addresses)
+                self.assertIsNotNone(previous)
+            self.assertIsNone(listeners(os.getpid(), addresses))
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as replacement:
+                replacement.bind(("127.0.0.1", public_port))
+                replacement.listen()
+                current = listeners(os.getpid(), addresses)
+                self.assertIsNotNone(current)
+                self.assertNotEqual(previous, current)
 
 
 if __name__ == "__main__":

@@ -350,13 +350,26 @@ class Upgrade:
         replace_file(self.journal_path, (json.dumps(self.journal, indent=2) + "\n").encode("utf-8"))
 
     def guard(self):
+        self.fence_service()
+        self.stop_service()
+
+    def fence_service(self):
         replace_file(self.fence, (self.journal["operation"] + "\n").encode("ascii"))
+
+    def stop_service(self):
+        group = self.systemd("show", "--property=ControlGroup", "--value", self.unit)
+        group = group or self.journal.get("serviceControlGroup")
+        require(group and cgroup_path(group, self.unit), "The exact Center control group is unknown.")
+        self.phase(self.journal["phase"], serviceControlGroup=group)
         self.systemd("stop", self.unit)
         require(
             self.systemd("show", "--property=ActiveState", "--value", self.unit) == "inactive"
             and self.systemd("show", "--property=MainPID", "--value", self.unit) == "0",
             "The previous Center did not stop.",
         )
+        require(self.systemd("show", "--property=ControlGroup", "--value", self.unit) in ("", group),
+                "The Center control group changed during shutdown.")
+        self.phase(self.journal["phase"], serviceControlGroupState=drained_group(group, self.unit))
 
     def inspect_database(self, binary):
         result = native_command(binary, self.migration, "PostgreSQL schema inspection", "migrate", "status")
@@ -531,7 +544,7 @@ class Upgrade:
         probe_env = job / "probe.env"
         replace_file(probe_env, "".join(f"{k}={json.dumps(v)}\n" for k, v in environment.items()).encode("ascii"))
         unit = f"arcforges-center-probe-{self.journal['operation']}-{secrets.token_hex(4)}.service"
-        self.phase(phase, probeUnit=unit)
+        self.phase(phase, probeUnit=unit, probeControlGroup=None, probeControlGroupState=None)
         try:
             run = ["systemd-run", *(["--user"] if self.options.user_manager else []),
                    "--quiet", "--service-type=exec", "--unit", unit,
@@ -539,11 +552,23 @@ class Upgrade:
             if self.service_user:
                 run.append(f"--property=User={self.service_user}")
             checked([*run, binary, "serve"], "Start isolated native candidate", timeout=30)
+            group = self.systemd("show", "--property=ControlGroup", "--value", unit)
+            require(group and cgroup_path(group, unit), "The exact readiness probe control group is unknown.")
+            self.phase(phase, probeControlGroup=group)
             self.await_ready(unit, binary, identity, f"127.0.0.1:{http}", f"127.0.0.1:{admin}")
         finally:
-            if self.systemd("show", "--property=LoadState", "--value", unit) == "loaded":
-                self.systemd("stop", unit)
+            self.stop_probe(unit)
             probe_env.unlink(missing_ok=True)
+
+    def stop_probe(self, unit):
+        if self.systemd("show", "--property=LoadState", "--value", unit) == "loaded":
+            group = self.systemd("show", "--property=ControlGroup", "--value", unit)
+            group = group or self.journal.get("probeControlGroup")
+            self.systemd("stop", unit)
+        else:
+            group = self.journal.get("probeControlGroup")
+        if group:
+            self.phase(self.journal["phase"], probeControlGroupState=drained_group(group, unit))
 
     def await_ready(self, unit, binary, identity, http, admin):
         # Connect directly to the loopback listener and never follow an HTTP redirect.
@@ -551,10 +576,9 @@ class Upgrade:
                 "Readiness must identify the private IPv4 listeners.")
         deadline = time.monotonic() + 25
         while time.monotonic() < deadline:
-            pid = self.systemd("show", "--property=MainPID", "--value", unit)
-            if pid.isdecimal() and int(pid) > 0:
-                try:
-                    require(os.path.samefile(Path("/proc") / pid / "exe", binary), "Readiness belongs to another process.")
+            try:
+                before = self.listener_identity(unit, binary, (http, admin))
+                if before:
                     health = http_receipt(http, "/healthz")
                     ready = http_receipt(admin, "/readyz")
                     require(build_identity(health) == identity and health.get("runtime") == "go"
@@ -562,13 +586,24 @@ class Upgrade:
                             "The native health identity does not match the selected release.")
                     if (ready.get("status") == "ready" and ready.get("components", {}).get("database") == "ready"
                             and ready.get("components", {}).get("databaseSchema") == "ready"):
-                        require(self.systemd("show", "--property=MainPID", "--value", unit) == pid,
-                                "Center changed processes during readiness verification.")
+                        require(self.listener_identity(unit, binary, (http, admin)) == before,
+                                "The Center process or listening socket changed during readiness verification.")
                         return
-                except (OSError, http.client.HTTPException):
-                    pass
+            except (OSError, http.client.HTTPException):
+                pass
             time.sleep(0.25)
         raise UpgradeRefused("The native private Center database did not become ready.")
+
+    def listener_identity(self, unit, binary, addresses):
+        pid = self.systemd("show", "--property=MainPID", "--value", unit)
+        if not pid.isdecimal() or int(pid) == 0:
+            return None
+        process = Path("/proc") / pid
+        require(os.path.samefile(process / "exe", binary), "Readiness belongs to another executable.")
+        require(os.path.samefile(process / "ns" / "net", "/proc/self/ns/net"),
+                "The Center does not share the readiness listener namespace.")
+        sockets = listening_sockets(pid, addresses)
+        return (pid, sockets) if sockets is not None else None
 
     def apply(self):
         self.verify_unit()
@@ -612,7 +647,10 @@ class Upgrade:
             and previous_status["history"] == before["history"],
             "The selected previous binary is not compatible with the exact source schema.",
         )
-        self.phase("fencing", predecessor=before, contractionRequired=before["version"] < 17)
+        group = self.systemd("show", "--property=ControlGroup", "--value", self.unit)
+        require(group and cgroup_path(group, self.unit), "The serving Center has no confirmed control group.")
+        self.phase("fencing", predecessor=before, contractionRequired=before["version"] < 17,
+                   serviceControlGroup=group)
         self.guard()
         require(self.inspect_database(binary) == before, "The database changed while fencing the old Center.")
         self.phase("capturing-backup")
@@ -625,21 +663,31 @@ class Upgrade:
             self.phase("confirming-runtime")
             native_command(binary, self.migration, "Confirm the verified runtime generation",
                            "admin", "confirm-runtime-credential", "--slot", slot)
-        self.phase("selecting", readinessVerified=True)
+        self.phase("selecting", readinessVerified=True, selectionIntent="candidate")
         if slot is not None:
             replace_file(self.configuration / "runtime.env", private_input(job / "candidate-runtime.env"))
             replace_file(self.configuration / "migration.env", private_input(job / "candidate-migration.env"))
+        self.activate_candidate(binary, target, target_identity)
+
+    def activate_candidate(self, binary, digest, identity):
         try:
-            self.activate(binary, target, target_identity)
+            self.activate(binary, digest, identity)
         except (OSError, ValueError):
-            self.guard()
-            self.select(previous)
-            self.phase("activation-failed")
+            self.fence_service()
+            self.phase("activation-fencing", observedSelection=self.selected())
+            self.stop_service()
+            if not self.journal["contractionRequired"]:
+                self.select(self.journal["previous"])
+            self.phase("activation-failed", observedSelection=self.selected())
             raise
 
     def activate(self, binary, digest, identity):
         self.select(digest)
-        self.phase("selected")
+        self.phase("selected", observedSelection=self.selected())
+        self.start_selected(binary, identity)
+        self.phase("completed")
+
+    def start_selected(self, binary, identity):
         self.fence.unlink()
         durable_directory(self.state)
         self.systemd("start", self.unit)
@@ -648,7 +696,6 @@ class Upgrade:
             self.center.get("ARCFORGES_CENTER_HTTP_ADDRESS", "127.0.0.1:8080"),
             self.center.get("ARCFORGES_CENTER_ADMIN_ADDRESS", "127.0.0.1:8082"),
         )
-        self.phase("completed")
 
     def recover(self):
         self.verify_unit()
@@ -671,8 +718,7 @@ class Upgrade:
         if probe_unit:
             require(re.fullmatch(rf"arcforges-center-probe-{self.journal['operation']}-[a-f0-9]{{8}}\.service",
                                  probe_unit), "Invalid recorded readiness probe identity.")
-            if self.systemd("show", "--property=LoadState", "--value", probe_unit) == "loaded":
-                self.systemd("stop", probe_unit)
+            self.stop_probe(probe_unit)
         if self.options.operation == "resume":
             self.resume_selection()
         else:
@@ -681,7 +727,10 @@ class Upgrade:
     def resume_selection(self):
         require(
             self.journal.get("readinessVerified") is True
-            and self.journal["phase"] in ("selecting", "selected", "rechecking-selection", "activation-failed"),
+            and self.journal.get("selectionIntent") == "candidate"
+            and self.journal["phase"] in (
+                "selecting", "selected", "rechecking-selection", "activation-fencing", "activation-failed",
+            ),
             "The previous operation may have changed PostgreSQL. Inspect and recover before resuming.",
         )
         target = self.journal["candidate"]
@@ -716,25 +765,23 @@ class Upgrade:
         require(self.inspect_database(binary) == expected, "The candidate no longer accepts the admitted database history.")
         self.guard()
         self.probe(binary, runtime, identity, job, phase="rechecking-selection")
-        self.phase("selecting", readinessVerified=True)
+        self.phase("selecting", readinessVerified=True, selectionIntent="candidate")
         if saved is not None and saved_migration is not None:
             replace_file(current_env, saved)
             replace_file(current_migration, saved_migration)
-        try:
-            self.activate(binary, target, identity)
-        except (OSError, ValueError):
-            self.guard()
-            self.select(self.journal["previous"])
-            self.phase("activation-failed")
-            raise
+        self.activate_candidate(binary, target, identity)
 
     def recover_compatible(self):
         phase = self.journal["phase"]
+        rolling_back = (
+            self.journal.get("selectionIntent") == "previous"
+            and self.journal.get("rollbackChecked") is True
+        )
         require(
-            self.fence.is_file()
+            (self.fence.is_file() or rolling_back and self.selected() == self.journal["previous"])
             and (not self.journal.get("contractionRequired")
                  or phase in ("fencing", "capturing-backup", "verifying-backup", "backup-verified")
-                 or phase == "checking-previous" and self.journal.get("rollbackChecked") is True)
+                 or rolling_back)
             and digest_file(self.configuration / "runtime.env") == self.journal.get("previousRuntimeSha256"),
             "Previous compatibility is unconfirmed. Use the separately admitted restore or forward recovery.",
         )
@@ -752,15 +799,67 @@ class Upgrade:
                 "The previous binary cannot use the current database.")
         self.guard()
         identity = self.journal["previousIdentity"]
-        self.phase("checking-previous", rollbackChecked=True)
+        self.phase("checking-previous", rollbackChecked=True, selectionIntent="previous")
         self.probe(binary, self.live_runtime, identity, self.state / self.journal["operation"],
                    phase="checking-previous")
+        self.phase("rollback-selecting")
         try:
-            self.activate(binary, previous, identity)
+            self.select(previous)
+            self.phase("rollback-selected", observedSelection=self.selected())
+            self.start_selected(binary, identity)
         except (OSError, ValueError):
-            self.guard()
+            self.fence_service()
+            self.phase("rollback-fencing", observedSelection=self.selected())
+            self.stop_service()
+            self.phase("rollback-failed")
             raise
         self.phase("rolled-back")
+
+
+def cgroup_path(group, unit):
+    require(isinstance(group, str) and group.startswith("/") and group.split("/")[-1] == unit
+            and all(part not in ("", ".", "..") for part in group[1:].split("/")),
+            "Invalid Center control group identity.")
+    root = Path("/sys/fs/cgroup")
+    require((root / "cgroup.controllers").is_file(), "Center updates require native cgroup v2.")
+    path = root / group[1:]
+    require(path.resolve() == path, "Center control group resolves outside its exact path.")
+    return path
+
+
+def drained_group(group, unit):
+    path = cgroup_path(group, unit)
+    try:
+        events = (path / "cgroup.events").read_text(encoding="ascii").splitlines()
+    except FileNotFoundError:
+        require(not path.exists(), "Center control group state is unavailable.")
+        return "removed"
+    require("populated 0" in events, "Center control group still holds processes.")
+    return "empty"
+
+
+def listening_sockets(pid, addresses):
+    # Link exact TCP LISTEN inodes in the unit's namespace to its MainPID descriptors.
+    process = Path("/proc") / str(pid)
+    endpoints = [f"0100007F:{int(address.split(':')[1]):04X}" for address in addresses]
+    listeners = {endpoint: [] for endpoint in endpoints}
+    for line in (process / "net" / "tcp").read_text(encoding="ascii").splitlines()[1:]:
+        fields = line.split()
+        if len(fields) >= 10 and fields[3] == "0A" and fields[1] in listeners:
+            listeners[fields[1]].append(fields[9])
+    if any(len(inodes) != 1 or inodes[0] == "0" for inodes in listeners.values()):
+        return None
+    owned = set()
+    for descriptor in (process / "fd").iterdir():
+        try:
+            target = os.readlink(descriptor)
+        except FileNotFoundError:
+            continue
+        match = re.fullmatch(r"socket:\[(\d+)\]", target)
+        if match:
+            owned.add(match[1])
+    identities = tuple(listeners[endpoint][0] for endpoint in endpoints)
+    return identities if set(identities) <= owned else None
 
 
 def http_receipt(address, path):
