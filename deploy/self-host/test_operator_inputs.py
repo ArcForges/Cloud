@@ -5,6 +5,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import runpy
 import stat
 import subprocess
 import sys
@@ -86,6 +87,38 @@ class OperatorInputsTest(unittest.TestCase):
         unexpected = self.root / "rejected"
         self.command("bootstrap", unexpected, "--hours", 169, code=2)
         self.assertFalse(unexpected.exists())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "real Linux durable file and link operations")
+    def test_private_journal_inspection_and_immutable_release_tree(self):
+        operations = runpy.run_path(str(SCRIPT))
+        state = self.root / "state"
+        state.mkdir(mode=0o700)
+        journal = operations["Upgrade"].__new__(operations["Upgrade"])
+        journal.journal_path = state / "upgrade.json"
+        journal.journal = {"schema": 1, "operation": "0" * 16}
+        journal.phase("contracting", predecessor={"version": 16})
+        operations["replace_file"](state / "maintenance", b"0" * 16 + b"\n")
+        inspected = subprocess.run(
+            [sys.executable, "-B", SCRIPT, "upgrade", "inspect", "--state-root", state],
+            capture_output=True,
+            check=True,
+        )
+        observed = json.loads(inspected.stdout)
+        self.assertEqual(observed["phase"], "contracting")
+        self.assertTrue(observed["maintenance"])
+        self.assertEqual(observed["predecessor"], {"version": 16})
+        self.assertEqual(stat.S_IMODE(journal.journal_path.stat().st_mode), 0o600)
+
+        tree = self.root / "verified-release"
+        tree.mkdir(mode=0o755)
+        artifact = tree / "member"
+        artifact.write_bytes(b"original")
+        verified = operations["release_tree"](tree, synchronize=True)
+        artifact.write_bytes(b"changed")
+        self.assertNotEqual(operations["release_tree"](tree), verified)
+        (tree / "unexpected-link").symlink_to(artifact)
+        with self.assertRaises(operations["UpgradeRefused"]):
+            operations["release_tree"](tree)
 
 
 if __name__ == "__main__":
