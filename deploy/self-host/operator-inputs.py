@@ -333,7 +333,14 @@ class Upgrade:
     def binary(self, digest):
         require(is_digest(digest), "Invalid release identity.")
         release = owner_directory(self.releases / digest)
-        return owner_directory(release / "bin") / "arcforges-center"
+        binary = owner_directory(release / "bin") / "arcforges-center"
+        info = binary.lstat()
+        require(
+            stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
+            and info.st_mode & stat.S_IXUSR and not info.st_mode & 0o022,
+            "The exact Center executable must remain operator-owned and protected from other writers.",
+        )
+        return binary
 
     def select(self, digest):
         self.binary(digest)

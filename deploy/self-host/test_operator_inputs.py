@@ -121,6 +121,17 @@ class OperatorInputsTest(unittest.TestCase):
         with self.assertRaises(operations["UpgradeRefused"]):
             operations["release_tree"](tree)
 
+        journal.releases = self.root / "releases"
+        selected = journal.releases / ("1" * 64) / "bin"
+        selected.mkdir(parents=True)
+        executable = selected / "arcforges-center"
+        executable.write_bytes(b"candidate")
+        executable.chmod(0o755)
+        self.assertEqual(journal.binary("1" * 64), executable)
+        executable.chmod(0o775)
+        with self.assertRaises(operations["UpgradeRefused"]):
+            journal.binary("1" * 64)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "real Linux TCP listener ownership")
     def test_listener_receipt_changes_when_the_socket_is_replaced(self):
         operations = runpy.run_path(str(SCRIPT))
