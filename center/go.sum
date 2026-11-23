@@ -1,7 +1,7 @@
 connectrpc.com/connect/v2 v2.0.2 h1:PoPDmOlhc46elsuCdKCKTxjNBb3HJlKF+s/sP2oucPw=
 connectrpc.com/connect/v2 v2.0.2/go.mod h1:N32OLrstcPUzkykFynnefFro3+xzSdOrZlK2jHmS/xo=
-github.com/ArcForges/Contracts/go v1.0.0-ci.481.1 h1:9l8/BCEVm21RHGCYsdh30f6q5rW0EhQOOc+RFRqN1cc=
-github.com/ArcForges/Contracts/go v1.0.0-ci.481.1/go.mod h1:pY7xS3OdbebQbmutsRq6EgyxdQ4a2D1bmblX8xLDCss=
+github.com/ArcForges/Contracts/go v1.0.0-ci.486.1 h1:izn34FqDAi25zkYy7PxVgfdD/gpdV3DHoK/Z5xuzeEc=
+github.com/ArcForges/Contracts/go v1.0.0-ci.486.1/go.mod h1:pY7xS3OdbebQbmutsRq6EgyxdQ4a2D1bmblX8xLDCss=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
 github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	connectrpc.com/connect/v2 v2.0.2
-	github.com/ArcForges/Contracts/go v1.0.0-ci.481.1
+	github.com/ArcForges/Contracts/go v1.0.0-ci.486.1
 	github.com/coder/websocket v1.8.15
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/jackc/pgx/v5 v5.13.0
