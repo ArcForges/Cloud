@@ -10,16 +10,16 @@
       },
       "ArcForges.Contracts.Validation": {
         "type": "Direct",
-        "requested": "[1.0.0-ci.205.1, )",
-        "resolved": "1.0.0-ci.205.1",
-        "contentHash": "qgcp1h5V4uZc/LfEBRZ9876a1aZjUqWwV56UI9c0O0yDpu4mpbL4mA2c62YnTZf8XaxTHBPEttjU15geYycv5g==",
+        "requested": "[1.0.0-ci.493.1, )",
+        "resolved": "1.0.0-ci.493.1",
+        "contentHash": "5k3MsqEk/OOHjD+d9tYT013pft9MYPoNhTX0vRIUpBiyc3wEpDAugsZvwgppj1bp1116vzJ2l+lww5FAlqBNcQ==",
         "dependencies": {
-          "ArcForges.Contracts.Events": "1.0.0-ci.205.1",
-          "ArcForges.Contracts.Foundation": "1.0.0-ci.205.1",
-          "ArcForges.Contracts.PublicApi": "1.0.0-ci.205.1",
-          "ArcForges.Sdk.Contracts": "1.0.0-ci.205.1",
-          "Google.Protobuf": "3.36.1",
-          "Grpc.Core.Api": "2.84.0"
+          "ArcForges.Contracts.Events": "1.0.0-ci.493.1",
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.493.1",
+          "ArcForges.Contracts.PublicApi": "1.0.0-ci.493.1",
+          "ArcForges.Sdk.Contracts": "1.0.0-ci.493.1",
+          "Google.Protobuf": "3.36.2",
+          "Grpc.Core.Api": "2.85.0"
         }
       },
       "xunit.v3.mtp-v2": {
@@ -35,29 +35,32 @@
       },
       "ArcForges.Contracts.Events": {
         "type": "Transitive",
-        "resolved": "1.0.0-ci.205.1",
-        "contentHash": "8Vp9JbBlENBhLcFTiVNSQ1kBZFWpUCc3ws5imLW2Yx8pw1/ZZjGhfVmFbNWOChYt0sDfeWBM3+WJVFVzl46EWw==",
+        "resolved": "1.0.0-ci.493.1",
+        "contentHash": "XePNetdvSn8VVZ/tfdoLHDbcvCmy0tR/3jfbjQWlc0AUXoW0u8O6Pw+FNPYMkDWu7HcZXyscm+KwncZ7TkgkDw==",
         "dependencies": {
-          "ArcForges.Contracts.Foundation": "1.0.0-ci.205.1",
-          "Google.Protobuf": "3.36.1"
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.493.1",
+          "ArcForges.Contracts.PublicApi": "1.0.0-ci.493.1",
+          "Google.Protobuf": "3.36.2",
+          "Grpc.Core.Api": "2.85.0"
         }
       },
       "ArcForges.Contracts.Foundation": {
         "type": "Transitive",
-        "resolved": "1.0.0-ci.287.1",
-        "contentHash": "Jwe5Z6K57vDsKmcxQFbbwyQZQUQsOkzYH26ogQIRb/biRtaGxLCtOsNg4felCuNTJt9bwRmC6AGx3eJyCoCk/g==",
+        "resolved": "1.0.0-ci.493.1",
+        "contentHash": "H2OUC2HqvC3UPawrb0qCXVTf+i2i1GRzOm1ikz8FK8Qg6DG0ikdZwqVS4SuBOMbztp+EBtxFnAd7c3fHw4xPxw==",
         "dependencies": {
-          "Google.Protobuf": "3.36.1"
+          "Google.Protobuf": "3.36.2"
         }
       },
       "ArcForges.Sdk.Contracts": {
         "type": "Transitive",
-        "resolved": "1.0.0-ci.205.1",
-        "contentHash": "DE9NESb1QcitCMuUWgTXNzLKU7df+VY5aMIWpqmIM8xQgvu68R4Q/VbemN01UfBw10Q1N1qUs02MyMcpp8ki6g==",
+        "resolved": "1.0.0-ci.493.1",
+        "contentHash": "tK7+/JfRQoa5xF5W6G9WRR/qIeBQOy7/OdEjEoeoa/QC7LtIBoUGEEl9Amway/GhqlEFoPAGRTINkyk6qrZUuA==",
         "dependencies": {
-          "ArcForges.Contracts.Foundation": "1.0.0-ci.205.1",
-          "Google.Protobuf": "3.36.1",
-          "Grpc.Core.Api": "2.84.0"
+          "ArcForges.Contracts.Foundation": "1.0.0-ci.493.1",
+          "ArcForges.Contracts.PublicApi": "1.0.0-ci.493.1",
+          "Google.Protobuf": "3.36.2",
+          "Grpc.Core.Api": "2.85.0"
         }
       },
       "Azure.Monitor.OpenTelemetry.Exporter": {
