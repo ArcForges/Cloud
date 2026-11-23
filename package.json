@@ -54,7 +54,7 @@
     "check:legacy-cloud-history": "python eng/verification/check_legacy_cloud_history.py"
   },
   "dependencies": {
-    "@arcforges/ai-internal": "1.0.0-ci.287.1",
+    "@arcforges/ai-internal": "1.0.0-ci.486.1",
     "@cloudflare/containers": "0.3.7"
   },
   "devDependencies": {
