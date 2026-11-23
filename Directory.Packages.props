@@ -6,7 +6,7 @@
   <ItemGroup>
     <PackageVersion Include="ArcForges.Build.Policy" Version="1.0.0-ci.150.1" />
     <PackageVersion Include="ArcForges.Contracts.Validation" Version="1.0.0-ci.205.1" />
-    <PackageVersion Include="ArcForges.Contracts.PublicApi" Version="1.0.0-ci.287.1" />
+    <PackageVersion Include="ArcForges.Contracts.PublicApi" Version="1.0.0-ci.493.1" />
     <PackageVersion Include="Grpc.Net.Client" Version="2.85.0" />
     <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.3" />
     <PackageVersion Include="Google.Protobuf" Version="3.36.2" />
