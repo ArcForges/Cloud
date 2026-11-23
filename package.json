@@ -59,11 +59,11 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",
-    "@cloudflare/workers-types": "5.20261114.1",
+    "@cloudflare/workers-types": "5.20261120.1",
     "@types/node": "26.6.6",
     "prettier": "3.10.1",
     "typescript": "7.0.2",
-    "wrangler": "4.162.0",
+    "wrangler": "4.166.0",
     "blake3-wasm": "3.0.0",
     "unenv": "2.0.0-rc.24"
   },
