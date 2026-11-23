@@ -75,7 +75,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version-file: .python-version
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27.4"
           cache-dependency-path: |
@@ -191,7 +191,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           fail-on-severity: high
 
@@ -230,12 +230,12 @@ jobs:
         if: matrix.language == 'csharp'
         with:
           global-json-file: global.json
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         if: matrix.language == 'go'
         with:
           go-version: "1.27.4"
           cache-dependency-path: center/go.sum
-      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -256,7 +256,7 @@ jobs:
           python ../eng/native_toolchain.py install
           python ../eng/native_toolchain.py run -- go build ./...
           python ../eng/native_toolchain.py run -- go test -count=1 -run '^$' ./...
-      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           category: /language:${{ matrix.language }}
 
@@ -406,7 +406,7 @@ jobs:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27.4"
           cache: false
@@ -454,7 +454,7 @@ jobs:
           const cli=p.join(prefix,process.platform==='win32'?'node_modules':'lib/node_modules','npm/bin/npm-cli.js');
           cp.execFileSync(process.execPath,[cli,'install','--global','--prefix',prefix,'npm@12.2.2','--ignore-scripts','--no-fund'],{stdio:'inherit'});
           if(cp.execFileSync(process.execPath,[cli,'--version'],{encoding:'utf8'}).trim()!=='12.2.2')throw Error('Pinned npm version differs');"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27.4"
           cache: false
@@ -518,7 +518,7 @@ jobs:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27.4"
           cache: false
@@ -630,7 +630,7 @@ jobs:
           ref: 8e5f6e26aa97b123d9f60b91f780364a094e74cd
           path: bridge-source
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27.3"
           cache: false
@@ -678,7 +678,7 @@ jobs:
           ref: 8e5f6e26aa97b123d9f60b91f780364a094e74cd
           path: bridge-source
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27.3"
           cache-dependency-path: bridge-source/center/go.sum
